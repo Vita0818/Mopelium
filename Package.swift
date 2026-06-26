@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "MopeliumCore", targets: ["MopeliumCore"]),
         .library(name: "MopeliumProviders", targets: ["MopeliumProviders"]),
         .executable(name: "mopelium", targets: ["MopeliumCLI"]),
+        .executable(name: "MopeliumMac", targets: ["MopeliumMac"]),
     ],
     targets: [
         .target(
@@ -25,6 +26,10 @@ let package = Package(
             name: "MopeliumCLI",
             dependencies: ["MopeliumCore", "MopeliumProviders"],
             path: "Apps/mopelium-cli/Sources"
+        ),
+        .executableTarget(
+            name: "MopeliumMac",
+            path: "Apps/MopeliumMac/Sources"
         ),
         .testTarget(
             name: "MopeliumCoreTests",
