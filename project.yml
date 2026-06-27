@@ -1,0 +1,72 @@
+name: Mopelium
+
+options:
+  bundleIdPrefix: com.vita
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  MopeliumCore:
+    type: framework
+    platform: macOS
+    sources:
+      - Packages/MopeliumCore/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumCore
+
+  MopeliumProviders:
+    type: framework
+    platform: macOS
+    sources:
+      - Packages/MopeliumProviders/Sources
+    dependencies:
+      - target: MopeliumCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumProviders
+
+  mopelium:
+    type: tool
+    platform: macOS
+    sources:
+      - Apps/mopelium-cli/Sources
+    dependencies:
+      - target: MopeliumCore
+      - target: MopeliumProviders
+    settings:
+      base:
+        OTHER_SWIFT_FLAGS: "$(inherited) -parse-as-library"
+
+  MopeliumMac:
+    type: application
+    platform: macOS
+    sources:
+      - Apps/MopeliumMac/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumMac
+        INFOPLIST_FILE: Apps/MopeliumMac/Info.plist
+        ENABLE_HARDENED_RUNTIME: "YES"
+
+schemes:
+  MopeliumMac:
+    build:
+      targets:
+        MopeliumMac: all
+    run:
+      config: Debug
+
+  mopelium:
+    build:
+      targets:
+        mopelium: all
+    run:
+      config: Debug
