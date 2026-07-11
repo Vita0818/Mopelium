@@ -1,87 +1,101 @@
 # TESTING
 
-最近自查日期：2026-06-25
+最近自查日期：2026-07-08
 
 ## 环境
 
-- 操作系统 / 平台：macOS 13+（`Package.swift` `.macOS(.v13)`）。非 Apple 平台可编译但 stream/complete 运行时抛错。
-- 工具链版本：Swift 5.9（`Package.swift:1` `swift-tools-version:5.9`）
-- 依赖管理：SwiftPM。**零外部依赖**（仅 Foundation + 条件 `FoundationNetworking`/`Darwin`）。
-- 凭据 / 配置：
-  - API key：环境变量（默认 `MOPELIUM_API_KEY`，可经 `api_key_env` 配置改名）
-  - 配置文件：`~/.config/mopelium/config.json`（`chmod 0600`，atomic 写）
-  - 无 Keychain 集成
+- macOS 13+。
+- Swift tools version：5.9。
+- 依赖：零第三方 Swift package；使用 Foundation、SwiftUI/AppKit、可用时使用 PDFKit。
+- Browser profile 工具运行时需要宿主环境提供 Node.js，并优先使用 Playwright；Playwright 不可用时可 fallback 到已安装 Chrome/Edge/Chromium 的 CDP。
+- API key：默认从 `MOPELIUM_API_KEY` 读取，可通过 `api_key_env` 修改 env 名。
 
-## 构建
+## 常规命令
 
 ```sh
-swift build                 # Debug
-swift build -c release      # Release，产物 .build/release/mopelium
-```
-
-无 Xcode 工程、无 xcodegen、无 Makefile。纯 SwiftPM。
-
-## 测试
-
-```sh
-swift test                                      # 全部 7 个测试
-swift test --filter MopeliumCoreTests           # 4 个配置测试
-swift test --filter MopeliumProvidersTests      # 3 个 SSE 测试
-swift test --filter MopeliumCoreTests/ConfigTests/testRejectsAPIKeyConfigField
-```
-
-### 测试覆盖
-
-**`Tests/MopeliumCoreTests/ConfigTests.swift`（4 tests）：**
-- `testDefaultConfigCanResolveWithoutFileOrEnv` — 无文件/env 解析出全部默认；`apiKeyLoaded` false
-- `testEnvironmentOverridesFileConfig` — 写文件 config，env 覆盖文件值；`apiKeyLoaded` true
-- `testRejectsAPIKeyConfigField` — `writableField(named:"api_key")` 抛含 "Refusing to store API keys" 错误
-- `testSetWritesNonSecretConfig` — `set("base_url"|"model"|"api_key_env")` 往返读写
-- 用 `FileManager.default.temporaryDirectory` 下随机临时目录
-
-**`Tests/MopeliumProvidersTests/SSEParserTests.swift`（3 tests）：**
-- `testParsesOpenAIContentDeltasAndDone` — 单次 consume + flush → "Hello" + `.done`
-- `testReassemblesAcrossArbitraryChunks` — 同样本按 5 字节切分喂入 → 仍 "Hello" + `.done`（验证 buffer 重组）
-- `testIgnoresCommentsAndEmptyDeltas` — `: keep-alive` 注释与 `{"delta":{}}` 跳过 → 仅 `[.content("ok"), .done]`
-
-### 内置 selftest（非单测）
-
-```sh
+swift build
+swift test
 swift run mopelium selftest
-# 验证: 默认 config 解析、SSE 解析器对内联 "Hello" 样本、api_key 写入被拒
-# 打印: Mopelium selftest: OK
+xcodebuild -project Mopelium.xcodeproj -scheme MopeliumMac -configuration Debug -derivedDataPath .build/XcodeDerivedData build
 ```
 
-## Lint / Format
+Codex 沙盒内可能需要把 module cache 放进仓库，并禁用 SwiftPM 内层 sandbox：
 
-仓内无 lint/format 配置。`UNKNOWN` — 是否有 SwiftFormat/SwiftLint 需后续确认。建议至少 `swift build` 通过。
+```sh
+mkdir -p .build/module-cache
+CLANG_MODULE_CACHE_PATH=/Users/vita/Vitemis/Virgo/Mopelium/.build/module-cache swift build --disable-sandbox
+CLANG_MODULE_CACHE_PATH=/Users/vita/Vitemis/Virgo/Mopelium/.build/module-cache swift test --disable-sandbox
+CLANG_MODULE_CACHE_PATH=/Users/vita/Vitemis/Virgo/Mopelium/.build/module-cache swift run --disable-sandbox mopelium selftest
+```
 
-## 手动验证矩阵
+## 自动测试覆盖
 
-| 场景 | 步骤 | 预期 | 状态 |
-|---|---|---|---|
-| 构建 | `swift build` | 成功，产物 `.build/debug/mopelium` | UNKNOWN（本轮未跑） |
-| 全测 | `swift test` | 7 个测试全过 | UNKNOWN（本轮未跑） |
-| selftest | `swift run mopelium selftest` | `Mopelium selftest: OK` | UNKNOWN |
-| help | `swift run mopelium help` | 打印用法 | UNKNOWN |
-| 流式 chat | `MOPELIUM_API_KEY=sk-... swift run mopelium ask "你好"` | 流式输出回答 | UNKNOWN（需 key） |
-| 非流式 chat | `MOPELIUM_API_KEY=sk-... swift run mopelium ask --no-stream "你好"` | 完整输出回答 | UNKNOWN（需 key） |
-| config show | `swift run mopelium config show` | JSON 输出当前配置 | UNKNOWN |
-| config set | `swift run mopelium config set base_url https://...` | 写入 config.json（0600） | UNKNOWN |
-| 拒绝写 key | `swift run mopelium config set api_key sk-...` | 报错 "Refusing to store API keys" | UNKNOWN |
-| env 覆盖 | `MOPELIUM_MODEL=gpt-4o swift run mopelium config show` | model 显示 gpt-4o | UNKNOWN |
-| HTTP 错误 | 用错误 key 跑 ask | 抛 `.httpStatus(401, ...)`，stderr 输出 | UNKNOWN |
+`MopeliumCoreTests/ConfigTests.swift`：
 
-## 验证边界声明
+- 默认配置解析。
+- env 覆盖 config 文件。
+- API key config field 拒写入。
+- 非 secret config set/read round trip。
 
-- 文档任务：至少运行 `git diff --check` 与 `git status --short`；**未运行构建/测试**，须在最终报告中声明。
-- 代码任务：`swift test` 覆盖 `CLIConfig` 与 `SSEParser`；`OpenAICompatibleProvider` HTTP 路径无自动化测试（无网络 mock），须手动验证。
-- 本目录文档为只读分析产出，未运行 `swift build`/`swift test`。
+`MopeliumProvidersTests/SSEParserTests.swift`：
 
-## 常见问题
+- OpenAI content delta + `[DONE]`。
+- 任意 chunk 切分重组。
+- 注释与空 delta 跳过。
 
-- **无 multi-turn**：`runAsk` 每次只发单条 user message，无会话历史持久化。若需多轮对话须另行实现。
-- **非 Apple 平台**：stream/complete 用 `#if canImport(Darwin)` 守卫，Linux/Windows 编译通过但运行时 chat 抛错。
-- **HTTPS 未强制**：base URL 校验仅要求 scheme 非空，`http://` 端点会明文传 key。手动测试第三方端点注意。
-- **无请求超时配置**：依赖 `URLSession.shared` 默认超时。
-- **API key 在进程环境**：经 env 传 key 会出现在进程列表，标准 tradeoff。
+Core/Providers 子集当前共 7 个 XCTest 测试。
+
+`MopeliumToolsTests/MopeliumToolsTests.swift`：
+
+- file / patch / path confinement。
+- shell / git / staged patch / worktree 工具。
+- PDF 读取与页面抽取。
+- document image reconstruction / LaTeX / image generation 注入后端。
+- `web_fetch` schema、HTTP 限制与 opt-in 本地 HTTP smoke。
+- browser fake-shell/CDP wrapper 覆盖 profile state/history、metadata-only inventory、profile delete confirmation、navigate/search/snapshot/handoff/reload/back/forward/click/type/submit/select-option/press-key/scroll/wait/screenshot/upload/download/downloads、changedFiles 和敏感输入拒绝。
+- 真实浏览器、真实本地 HTTP、真实并发 profile smoke 通过环境变量显式开启，默认跳过。
+
+`MopeliumAgentTests/MopeliumAgentTests.swift`：
+
+- fake provider 驱动 agent loop 执行 `write_file` 并将 observation 回灌第二轮模型请求。
+- read-only policy 下拒绝 write 工具，且不创建文件。
+
+当前总计约 72 个 XCTest；默认环境下真实浏览器/本地 HTTP smoke 仍通过环境变量 opt-in。
+
+## v0.4 手动验证矩阵
+
+| 场景 | 步骤 | 预期 |
+|---|---|---|
+| Mac app 构建 | `swift build` 或沙盒命令 | `MopeliumMac` target 编译通过 |
+| CLI selftest | `swift run mopelium selftest` | `Mopelium selftest: OK` |
+| 文本文档读取 | Mac app `Sources` -> `Choose File` 选择 UTF-8 文本/Markdown | 预览正文，可复制 context |
+| 文件夹浏览 | `Sources` -> `Browse Folder` | 列出支持的文档，可点 `Read` |
+| PDF 读取 | 选择有可提取文字的 PDF | 显示页文本；扫描件可能显示无可提取文本 |
+| 敏感文件拒读 | 选择 `.env` / `.pem` / `secrets.json` | UI 报拒读 |
+| Web 搜索 | 输入 query -> `Search` | 返回 DuckDuckGo HTML 解析结果 |
+| Web 抓取 | 输入 `https://example.com` -> `Fetch` | 显示 HTTP status、title、正文和 links |
+| Full tool console | `Sources` -> `Choose Workspace` -> 选择工具 -> 编辑 JSON -> `Run Tool` | 显示 observation；写入类工具显示 changed files |
+| Browser profile 工具 | 选择 workspace 后运行 `browser_diagnostics` / `browser_search` / `browser_navigate` 等 | `.mopelium/browser` 中维护 profile/state/history/download metadata |
+| Browser handoff/登录态 | 设置 opt-in smoke 或人工运行 `browser_handoff` | 打开有界 headed profile，超时后回写 state/history |
+| Chat 回归 | 设置 API key 后在 `Chat` 发送消息 | 使用配置的 provider/model 返回结果 |
+| CLI AI 工具调用 | 设置 API key 后运行 `mopelium ask --tools <workspace> "..."` | 模型可通过 `ToolRegistry.standard()` 调用允许的 workspace 工具，工具事件输出到 stderr |
+| Mac Chat AI 工具调用 | `Chat` -> `Tools` -> `Workspace` -> 发送需要读取/网页访问/浏览器操作的问题 | assistant bubble 显示 tool call/result trace，并继续生成最终回答 |
+
+## 本轮验证记录
+
+2026-07-08 本轮已运行：
+
+```sh
+CLANG_MODULE_CACHE_PATH=/Users/vita/Vitemis/Virgo/Mopelium/.build/module-cache swift build --disable-sandbox
+CLANG_MODULE_CACHE_PATH=/Users/vita/Vitemis/Virgo/Mopelium/.build/module-cache swift build --disable-sandbox --build-tests
+CLANG_MODULE_CACHE_PATH=/Users/vita/Vitemis/Virgo/Mopelium/.build/module-cache swift run --disable-sandbox mopelium selftest
+.build/arm64-apple-macosx/debug/mopelium help
+xcodegen generate
+xcodebuild -project Mopelium.xcodeproj -scheme MopeliumMac -configuration Debug -derivedDataPath .build/XcodeDerivedData build
+```
+
+结果：SwiftPM 构建通过；测试 target 编译通过；增强后的 CLI selftest 输出 `Mopelium selftest: OK`，其中包含无网络 agent loop 工具调用回灌自测；CLI help 已显示 `ask --tools` 参数；XcodeGen 生成成功；`MopeliumMac` Xcode Debug build 通过。
+
+本轮 `swift test --disable-sandbox --filter SSEParserTests`、`swift test --disable-sandbox --filter MopeliumAgentTests` 和受控精简环境 `xcrun xctest` 都在 bundle 构建/载入后卡住；请求提权重跑 `swift test` 被策略拒绝。因此本轮未能声明完整 XCTest 通过，需要在用户本机正常测试环境复跑。
+
+未运行真实联网 Web 搜索/抓取、真实浏览器 smoke、Mac UI 点击、PDF 文件人工验证、真实 API key chat E2E、真实模型 tool-calling E2E。默认跳过的 opt-in smoke 包括 `MOPELIUM_LOCAL_HTTP_SMOKE=1`、`MOPELIUM_REAL_BROWSER_SMOKE=1`、`MOPELIUM_REAL_BROWSER_HANDOFF_SMOKE=1`、`MOPELIUM_REAL_BROWSER_CONCURRENCY_SMOKE=1`。

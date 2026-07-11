@@ -95,11 +95,13 @@ struct MopeliumStatusBadge: View {
 struct MopeliumComposer: View {
     @Binding var text: String
     var placeholder: String
+    var isBusy: Bool = false
+    var onSubmit: () -> Void = {}
     @FocusState private var focused: Bool
     @Environment(\.colorScheme) private var scheme
 
     private var canSubmit: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isBusy && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -111,15 +113,19 @@ struct MopeliumComposer: View {
                     .foregroundStyle(MopeliumTheme.primaryText(scheme))
                     .lineLimit(1...6)
                     .focused($focused)
-                    .disabled(false)
+                    .onSubmit {
+                        if canSubmit { onSubmit() }
+                    }
+                    .disabled(isBusy)
 
-                Button {} label: {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
+                Button(action: {}) {
+                    Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(canSubmit ? MopeliumTheme.accentDeep : MopeliumTheme.tertiaryText(scheme))
+                        .foregroundStyle(MopeliumTheme.tertiaryText(scheme))
                 }
                 .buttonStyle(.plain)
-                .help("Filter options placeholder")
+                .disabled(true)
+                .help("Provider options are loaded from Mopelium config")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
@@ -133,7 +139,9 @@ struct MopeliumComposer: View {
                     .stroke(MopeliumTheme.stroke(scheme).opacity(0.82), lineWidth: 1)
             }
 
-            Button {} label: {
+            Button(action: {
+                if canSubmit { onSubmit() }
+            }) {
                 ZStack {
                     Circle()
                         .fill(
@@ -141,9 +149,14 @@ struct MopeliumComposer: View {
                                 ? AnyShapeStyle(LinearGradient(colors: [MopeliumTheme.accentSoft, MopeliumTheme.accent], startPoint: .topLeading, endPoint: .bottomTrailing))
                                 : AnyShapeStyle(MopeliumTheme.surface(scheme).opacity(0.55))
                         )
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(canSubmit ? MopeliumTheme.textOnAccent : MopeliumTheme.tertiaryText(scheme))
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(canSubmit ? MopeliumTheme.textOnAccent : MopeliumTheme.tertiaryText(scheme))
+                    }
                 }
                 .frame(width: 40, height: 40)
                 .shadow(
@@ -261,7 +274,7 @@ struct MopeliumSettingRow: View {
     }
 
     private var displayValue: String {
-        isSensitive ? "Not stored in UI skeleton" : value
+        isSensitive ? "Not stored" : value
     }
 }
 

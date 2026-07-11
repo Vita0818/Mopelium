@@ -2,7 +2,7 @@
 import SwiftUI
 
 enum MopeliumSection: String, CaseIterable, Identifiable {
-    case research
+    case chat
     case tasks
     case sources
     case settings
@@ -11,7 +11,7 @@ enum MopeliumSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .research: return "Research"
+        case .chat: return "Chat"
         case .tasks: return "Tasks"
         case .sources: return "Sources"
         case .settings: return "Settings"
@@ -20,7 +20,7 @@ enum MopeliumSection: String, CaseIterable, Identifiable {
 
     var gloss: String {
         switch self {
-        case .research: return "探索"
+        case .chat: return "对话"
         case .tasks: return "任务"
         case .sources: return "来源"
         case .settings: return "设置"
@@ -29,7 +29,7 @@ enum MopeliumSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .research: return "magnifyingglass.circle"
+        case .chat: return "bubble.left.and.bubble.right"
         case .tasks: return "checklist"
         case .sources: return "square.stack.3d.up"
         case .settings: return "gearshape"
@@ -39,7 +39,7 @@ enum MopeliumSection: String, CaseIterable, Identifiable {
 
 struct MopeliumMacRootView: View {
     @Environment(\.colorScheme) private var scheme
-    @State private var selection: MopeliumSection = .research
+    @State private var selection: MopeliumSection = .chat
 
     var body: some View {
         NavigationSplitView {
@@ -57,8 +57,8 @@ struct MopeliumMacRootView: View {
 
     @ViewBuilder private var detail: some View {
         switch selection {
-        case .research:
-            MopeliumResearchScreen()
+        case .chat:
+            MopeliumChatScreen()
         case .tasks:
             MopeliumTasksScreen()
         case .sources:

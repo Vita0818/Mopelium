@@ -11,7 +11,7 @@ struct MopeliumSidebar: View {
                 Text("Mopelium")
                     .font(MopeliumType.brand(29))
                     .foregroundStyle(MopeliumTheme.primaryText(scheme))
-                Text("Search Console")
+                Text("Research Console")
                     .font(MopeliumType.caption(12, .semibold))
                     .foregroundStyle(MopeliumTheme.secondaryText(scheme))
             }
@@ -35,8 +35,8 @@ struct MopeliumSidebar: View {
             Spacer(minLength: 12)
 
             VStack(alignment: .leading, spacing: 6) {
-                MopeliumStatusBadge(status: .local, label: "Local v0.2")
-                Text("Static UI skeleton")
+                MopeliumStatusBadge(status: .local, label: "Local v0.4")
+                Text("OpenAI-compatible")
                     .font(MopeliumType.caption(11, .medium))
                     .foregroundStyle(MopeliumTheme.tertiaryText(scheme))
             }

@@ -10,6 +10,7 @@
 3. `docs/ARCHITECTURE.md`
 4. `docs/DO_NOT_BREAK.md`
 5. `docs/TESTING.md`
+6. `docs/NEXT_TARGET.md`（如果存在）
 
 如果文档与源码、工程配置、测试或脚本冲突，必须以当前源码和配置为准，并在最终报告中明确指出冲突位置和采用源码为准的原因。
 
@@ -31,7 +32,7 @@ git status --short
 
 ## 修改边界
 
-本仓库是精简 Swift 包（SwiftPM，macOS 13+，零第三方依赖），含 3 个 product（`MopeliumCore` lib / `MopeliumProviders` lib / `mopelium` CLI 可执行）+ 2 个测试 target，共 7 个源文件。
+本仓库当前是 SwiftPM + XcodeGen/macOS project 并存的 macOS 13+ Swift 项目，零第三方 package。主要 product/target 为 `MopeliumCore` lib、`MopeliumProviders` lib、`MopeliumTools` lib、`MopeliumAgent` lib、`mopelium` CLI、`MopeliumMac` SwiftUI app，以及 4 个测试 target。
 
 未来常规任务可以按用户要求修改业务源码；但在只要求项目自查或文档更新的任务中，只允许修改：
 
@@ -41,10 +42,15 @@ git status --short
 除非用户明确要求，不要修改：
 
 - `Apps/mopelium-cli/Sources/`（`main.swift`）
+- `Apps/MopeliumMac/Sources/`（Mac SwiftUI app）
 - `Packages/MopeliumCore/Sources/`（`CLIConfig.swift` / `MopeliumError.swift` / `Terminal.swift`）
-- `Packages/MopeliumProviders/Sources/`（`ChatTypes.swift` / `OpenAICompatibleProvider.swift` / `SSEParser.swift`）
-- `Tests/`（`MopeliumCoreTests/ConfigTests.swift` / `MopeliumProvidersTests/SSEParserTests.swift`）
+- `Packages/MopeliumProviders/Sources/`（`ChatTypes.swift` / `OpenAICompatibleProvider.swift` / `SSEParser.swift` / `ToolCallingTypes.swift`）
+- `Packages/MopeliumTools/Sources/`（Intatis 迁移工具面：file / patch / shell / git / document-media / browser）
+- `Packages/MopeliumAgent/Sources/`（AI tool-calling agent loop 与 OpenAI-compatible tool-call stream provider）
+- `Tests/`（`MopeliumCoreTests/ConfigTests.swift` / `MopeliumProvidersTests/SSEParserTests.swift` / `MopeliumToolsTests/MopeliumToolsTests.swift` / `MopeliumAgentTests/MopeliumAgentTests.swift`）
 - `Package.swift`
+- `project.yml`
+- `Mopelium.xcodeproj/`
 - `.gitignore`
 
 ## 禁止事项
@@ -64,8 +70,12 @@ git status --short
 修改前至少确认：
 
 - 入口：`Apps/mopelium-cli/Sources/main.swift`（`@main struct MopeliumCLI`，`static func main() async`；命令 `ask`/`config show`/`config set`/`selftest`/`help`）。
+- Mac 入口：`Apps/MopeliumMac/Sources/MopeliumMacApp.swift` → `MopeliumMacRootView`；主区域 `Chat`/`Tasks`/`Sources`/`Settings`。
 - 配置解析链路：`CLIConfigStore.resolve(fileURL:environment:overrides:)` — 优先级 **CLI overrides > env（`MOPELIUM_BASE_URL`/`MOPELIUM_API_KEY_ENV`/`MOPELIUM_MODEL`/`MOPELIUM_STREAM`）> `~/.config/mopelium/config.json` > 默认**。默认：base `https://api.openai.com/v1`、env 名 `MOPELIUM_API_KEY`、model `gpt-4o-mini`、stream `true`。
 - Chat 主链路：`main.swift` `runAsk` → `CLIConfigStore.resolve` → `config.requireAPIKey()` → `OpenAICompatibleProvider(baseURL:apiKey:)` → `ChatRequest(model, messages:[ChatMessage("user", prompt)], stream)` → stream 路径 `provider.stream`（`URLSession.shared.bytes` → 按行喂 `SSEParser.consume` → `emit` yield `ChatChunk`）或 complete 路径 `provider.complete`（`URLSession.shared.data` → 解码 `OpenAICompleteResponse`）→ `out(...)` 输出。
+- AI 工具调用链路：CLI `ask --tools PATH` / Mac Chat `Tools` toggle → `OpenAICompatibleToolCallingProvider` → `MopeliumAgentLoop` → OpenAI-compatible `tools` request/stream tool_calls → `ToolRegistry.standard()` → `ToolContext(workspaceRoot:)` → tool observation 作为 `role=tool` 消息回灌模型；默认只允许 readOnly/network/exec，`run_shell`、write、destructive 需要显式开关。
+- Mac Chat 主链路：`MopeliumChatViewModel.send` → `CLIConfigStore.resolve` → 普通聊天走 `OpenAICompatibleProvider` stream/complete；启用 Tools 后走 `OpenAICompatibleToolCallingProvider` + `MopeliumAgentLoop` → SwiftUI message bubble。
+- Sources v0.4 链路：`MopeliumSourcesScreen.swift` 内 `MopeliumDocumentReader` 负责用户选择文件/文件夹后的文档浏览/读取；`MopeliumWebLookup` 负责 DuckDuckGo HTML 搜索与 HTTP(S) 页面抓取；`SourceToolConsoleCard` 通过 `ToolRegistry.standard()` 暴露从 Intatis 全量迁移的 53 个工具，包括 file / PDF / document-media / `web_fetch` / `browser_*` / shell / git / patch。
 - API key 处理：从 `ProcessInfo.environment[apiKeyEnv]` 读取；`CLIConfigStore.writableField` 显式拒绝 `api_key`/`apiKey`/`api-key` 写入配置（抛 `.config("Refusing to store API keys...")`）；config 文件 `chmod 0600` + atomic 写。
 - SSE 解析：`SSEParser`（行导向，buffer + dataLines）—— `:` 注释跳过、`data:` 累积、空行 dispatch、`[DONE]` 终止、多 `data:` 行用 `\n` join、CRLF 容忍。
 - 错误模型：`MopeliumError`（config/provider/network/httpStatus/decoding/io/usage），`LocalizedError`；`mapError` 把 `URLError`→`.network`、`DecodingError`→`.decoding`。
@@ -80,6 +90,7 @@ git status --short
 - `docs/CURRENT_STATE.md`：当前真实状态、已有能力、风险、工作区改动。
 - `docs/TESTING.md`：环境、构建、测试、lint/format 与手动验证方式。
 - `docs/DO_NOT_BREAK.md`：工程禁区、数据格式、协议、路径和回归要求。
+- `docs/NEXT_TARGET.md`：临时下一目标记录；目标完成或不再有效后删除。
 
 ## 完成标准
 
@@ -89,6 +100,7 @@ git status --short
 - 只修改任务范围内文件。
 - 保留用户已有改动。
 - 运行与任务相称的检查；文档任务至少运行 `git diff --check` 与 `git status --short`。
+- 将本轮已完成的持久性改动及时回写到相关项目文档；若无需更新文档，最终报告说明原因。
 - 如未运行构建或测试，最终报告必须明确写"未运行构建/测试"。
 
 ## 最终报告格式

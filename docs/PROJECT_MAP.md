@@ -1,70 +1,102 @@
 # PROJECT_MAP
 
-最近自查日期：2026-06-25
+最近自查日期：2026-07-08
 
-本文描述当前仓库结构。判断依据来自 `Package.swift`、源码、测试文件和 `.gitignore`。
+本文描述当前仓库结构。判断依据来自 `Package.swift`、`project.yml`、当前源码、测试文件和工作区状态。
 
 ## 目录结构总览
 
 ```text
-Mopelium/                       (/Users/vita/Vitemis/Virgo/Mopelium/)
-├── .git/                       Git 仓库（main，单 commit v0.1，remote github.com/Vita0818/Mopelium）
-├── .gitignore                  忽略 .build/.swiftpm/Package.resolved/DerivedData/.DS_Store/.env/*.env/secrets.json
+Mopelium/                                      (/Users/vita/Vitemis/Virgo/Mopelium/)
 ├── Apps/
+│   ├── MopeliumMac/
+│   │   ├── Info.plist
+│   │   └── Sources/
+│   │       ├── MopeliumMacApp.swift          SwiftUI app 入口
+│   │       ├── MopeliumMacRootView.swift     NavigationSplitView + section routing
+│   │       ├── MopeliumResearchScreen.swift  Chat UI + API 接入
+│   │       ├── MopeliumSourcesScreen.swift   v0.4 文档阅读 + Web 搜索/抓取
+│   │       ├── MopeliumTasksScreen.swift     任务 surface
+│   │       ├── MopeliumSettingsScreen.swift  配置展示
+│   │       ├── MopeliumSidebar.swift         侧边栏
+│   │       ├── MopeliumComponents.swift      可复用 UI 组件
+│   │       ├── MopeliumDesign.swift          theme/type tokens
+│   │       └── MopeliumMockData.swift        静态示例数据
 │   └── mopelium-cli/Sources/
-│       └── main.swift          CLI 入口（@main struct MopeliumCLI）
+│       └── main.swift                        CLI 入口
 ├── Packages/
 │   ├── MopeliumCore/Sources/
-│   │   ├── CLIConfig.swift     配置模型 + 解析
-│   │   ├── MopeliumError.swift 错误枚举
-│   │   └── Terminal.swift      stdout/stderr/truncated 工具
-│   └── MopeliumProviders/Sources/
-│       ├── ChatTypes.swift     ChatMessage/ChatRequest/ChatChunk/ChatResponse/ChatProvider 协议
-│       ├── OpenAICompatibleProvider.swift  OpenAI 兼容 provider 实现
-│       └── SSEParser.swift     SSE 事件解析器
+│   │   ├── CLIConfig.swift                   配置模型 + 解析
+│   │   ├── MopeliumError.swift               错误枚举
+│   │   └── Terminal.swift                    stdout/stderr/truncated
+│   ├── MopeliumProviders/Sources/
+│   │   ├── ChatTypes.swift                   Chat 数据模型与协议
+│   │   ├── OpenAICompatibleProvider.swift    OpenAI-compatible provider
+│   │   ├── ToolCallingTypes.swift            tool-calling 数据模型与协议
+│   │   └── SSEParser.swift                   SSE 解析器
+│   ├── MopeliumAgent/Sources/
+│   │   ├── MopeliumAgentLoop.swift           AI 工具调用循环、policy、observation 回灌
+│   │   └── OpenAICompatibleToolCallingProvider.swift
+│   │                                           OpenAI-compatible tools stream provider
+│   └── MopeliumTools/Sources/
+│       ├── ToolProtocol.swift                工具协议、schema、registry
+│       ├── ToolSupport.swift                 工具错误、JSONValue、side effect
+│       ├── PathConfinement.swift             workspace 路径围栏
+│       ├── FileTools.swift                   read/list/search/write file
+│       ├── PatchTool.swift                   unified diff apply
+│       ├── ShellGit.swift                    shell + git/worktree/patch tools
+│       ├── DocumentMediaTools.swift          PDF/文档媒体/LaTeX/生图工具
+│       └── BrowserTools.swift                web_fetch + browser profile/interaction
 ├── Tests/
-│   ├── MopeliumCoreTests/
-│   │   └── ConfigTests.swift   4 个配置测试
-│   └── MopeliumProvidersTests/
-│       └── SSEParserTests.swift  3 个 SSE 解析测试
-└── Package.swift               SwiftPM manifest（swift-tools 5.9，macOS 13）
+│   ├── MopeliumCoreTests/ConfigTests.swift
+│   ├── MopeliumProvidersTests/SSEParserTests.swift
+│   ├── MopeliumToolsTests/MopeliumToolsTests.swift
+│   └── MopeliumAgentTests/MopeliumAgentTests.swift
+├── Mopelium.xcodeproj/                       Xcode 工程（当前工作区已有）
+├── Package.swift                             SwiftPM manifest
+├── project.yml                               XcodeGen 配置
+└── docs/
 ```
 
-## Target / 模块
+## Products / Targets
 
-| Target | 类型 | 依赖 | 入口/源 | 职责 |
-|---|---|---|---|---|
-| `MopeliumCore` | library | — | `Packages/MopeliumCore/Sources/` | 配置模型/解析、错误类型、终端 I/O 工具 |
-| `MopeliumProviders` | library | `MopeliumCore` | `Packages/MopeliumProviders/Sources/` | Chat 协议类型 + OpenAI 兼容 provider + SSE 解析 |
-| `MopeliumCLI` | executable | `MopeliumCore`, `MopeliumProviders` | `Apps/mopelium-cli/Sources/main.swift` | CLI 入口（product 名 `mopelium`） |
-| `MopeliumCoreTests` | test | `MopeliumCore` | `Tests/MopeliumCoreTests/` | 配置测试 |
-| `MopeliumProvidersTests` | test | `MopeliumProviders` | `Tests/MopeliumProvidersTests/` | SSE 解析测试 |
+| Product / Target | 类型 | 依赖 | 职责 |
+|---|---|---|---|
+| `MopeliumCore` | library | - | 配置、错误、终端工具 |
+| `MopeliumProviders` | library | `MopeliumCore` | Chat 协议、OpenAI-compatible HTTP、SSE |
+| `MopeliumTools` | library | - | Intatis 迁移工具面：file/patch/shell/git/PDF/browser |
+| `MopeliumAgent` | library | Core, Providers, Tools | AI tool-calling loop、OpenAI-compatible tool-call stream parser/provider |
+| `mopelium` / `MopeliumCLI` | executable | Core, Providers, Tools, Agent | CLI chat/config/selftest，`ask --tools` AI 工具模式 |
+| `MopeliumMac` | executable / app | Core, Providers, Tools, Agent | macOS SwiftUI UI，Chat 可启用 AI 工具调用 |
+| `MopeliumCoreTests` | test | Core | config tests |
+| `MopeliumProvidersTests` | test | Providers | SSE parser tests |
+| `MopeliumToolsTests` | test | Tools | 迁移工具面 tests |
+| `MopeliumAgentTests` | test | Agent, Providers | agent loop fake-provider tests |
 
-- 平台：macOS 13（`.macOS(.v13)`）
-- Swift tools：5.9
-- **零外部依赖**（无 `.package(url:...)`；仅 Foundation + 条件 `FoundationNetworking`/`Darwin`）
+平台：macOS 13+。Swift tools：5.9。外部依赖：无第三方 package。
 
-## 关键文件
+## v0.4 关键文件
 
-- 入口：`Apps/mopelium-cli/Sources/main.swift`（`@main struct MopeliumCLI`，`static func main() async`）
-- 配置：`Packages/MopeliumCore/Sources/CLIConfig.swift`（`CLIConfig`/`CLIConfigOverrides`/`ResolvedCLIConfig`/`CLIConfigField`/`CLIConfigStore`）
-- 错误：`Packages/MopeliumCore/Sources/MopeliumError.swift`（`MopeliumError` enum）
-- 终端：`Packages/MopeliumCore/Sources/Terminal.swift`（`out`/`errOut`/`truncated`）
-- Chat 模型：`Packages/MopeliumProviders/Sources/ChatTypes.swift`（`ChatMessage`/`ChatRequest`/`ChatChunk`/`ChatResponse`/`ChatProvider` 协议）
-- Provider：`Packages/MopeliumProviders/Sources/OpenAICompatibleProvider.swift`（`OpenAICompatibleProvider: ChatProvider`）
-- SSE：`Packages/MopeliumProviders/Sources/SSEParser.swift`（`SSEParserEvent`/`SSEParser`）
-- 测试：`Tests/MopeliumCoreTests/ConfigTests.swift`（4 tests）、`Tests/MopeliumProvidersTests/SSEParserTests.swift`（3 tests）
+- `Apps/MopeliumMac/Sources/MopeliumSourcesScreen.swift`：本地文档读取、文件夹浏览、Web 搜索、HTTP(S) 页面抓取、正文/链接抽取、copy context，以及 full Intatis tool console。
+- `Packages/MopeliumAgent/Sources/MopeliumAgentLoop.swift`：将模型 `tool_calls` 转为 `MopeliumTools` 执行，执行结果作为 tool observation 回灌模型；按 side effect policy 控制工具暴露和执行。
+- `Packages/MopeliumAgent/Sources/OpenAICompatibleToolCallingProvider.swift`：OpenAI-compatible Chat Completions `tools` 请求体编码、SSE tool-call delta 拼接、finish_reason 处理和工具参数 JSON 校验。
+- `Packages/MopeliumProviders/Sources/ToolCallingTypes.swift`：provider 与 agent 共享的 `ToolSpec` / `ToolCall` / `ToolChatMessage` / `ToolChatRequest` / `ToolChatChunk`。
+- `Packages/MopeliumTools/Sources/ToolProtocol.swift`：`Tool` / `ToolRegistry` / `ToolContext` / schema 描述；`ToolRegistry.standard()` 当前暴露 53 个工具。
+- `Packages/MopeliumTools/Sources/BrowserTools.swift`：`web_fetch` 与 `browser_*` profile、导航、快照、handoff、点击、输入、提交、选择、按键、滚动、等待、截图、上传、下载、搜索。
+- `Packages/MopeliumTools/Sources/DocumentMediaTools.swift`：`read_pdf`、`edit_pdf_pages`、`reconstruct_document_image`、`compile_latex`、`generate_image`。
+- `Packages/MopeliumTools/Sources/ShellGit.swift` / `PatchTool.swift` / `FileTools.swift`：shell、git、worktree、patch 与 file tools。
+- `Apps/MopeliumMac/Sources/MopeliumResearchScreen.swift`：Mac chat 主链路，使用 `CLIConfigStore` 和 `OpenAICompatibleProvider`；启用 Tools 后使用 `MopeliumAgentLoop`。
+- `Apps/MopeliumMac/Sources/MopeliumComponents.swift` / `MopeliumDesign.swift`：当前 Mac app 视觉系统。
+- `Apps/mopelium-cli/Sources/main.swift`：CLI 入口、`ask --tools`、增强 selftest。
+- `Packages/MopeliumCore/Sources/CLIConfig.swift`：配置优先级与 API key env 读取。
+- `Packages/MopeliumProviders/Sources/OpenAICompatibleProvider.swift`：HTTP 请求、状态校验、stream 取消。
+- `Packages/MopeliumProviders/Sources/SSEParser.swift`：SSE 行导向解析。
 
-## 生成物 / 产物
+## 生成物 / 外部状态
 
-- 构建产物：`.build/`（含可执行 `mopelium`）
-- 用户配置：`~/.config/mopelium/config.json`（JSON，`chmod 0600`，atomic 写）
-
-## 脚本与工具
-
-无辅助脚本。仅 SwiftPM 标准命令。
-
-## 不确定项
-
-- **无 README/LICENSE**：项目身份（"Mopelium" 名字来源/含义）未文档化，全从代码推断。
-- **`selftest` 字符串**：`main.swift` 打印 `Mopelium selftest: OK`，与产品名一致（区别于 Councis 的 `Mopelium selftest` 残留）。
+- SwiftPM 构建产物：`.build/`。
+- Codex 沙盒内构建使用仓库内 `.build/module-cache` 避免写用户级 clang cache。
+- Xcode 构建产物：本轮验证使用 `.build/XcodeDerivedData`。
+- 用户配置文件：`~/.config/mopelium/config.json`，由 Core 逻辑管理，权限仍为 `0600`。
+- Mac app 的用户选择文件/文件夹权限来自运行时 `NSOpenPanel`，不在仓库内持久化。
+- Browser 工具运行时数据：所选 workspace 内 `.mopelium/browser/`，包含 profile/state/history/download metadata/downloads；不得写入仓库文档。

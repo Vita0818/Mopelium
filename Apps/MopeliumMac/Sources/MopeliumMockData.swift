@@ -116,9 +116,9 @@ enum MopeliumMockData {
         MopeliumSourceConnector(
             icon: "globe",
             title: "Web",
-            description: "Search public web pages and summarize source clusters.",
+            description: "Search DuckDuckGo HTML results and fetch HTTP(S) pages into readable research context.",
             enabled: true,
-            statusText: "Planned connector"
+            statusText: "Live in v0.4"
         ),
         MopeliumSourceConnector(
             icon: "dot.radiowaves.left.and.right",
@@ -144,9 +144,9 @@ enum MopeliumMockData {
         MopeliumSourceConnector(
             icon: "folder",
             title: "PDF folder",
-            description: "Summarize local documents without sending raw paths anywhere in v0.2.",
-            enabled: false,
-            statusText: "Local skeleton"
+            description: "Browse selected folders and read local text, Markdown, code, HTML, JSON, CSV, and PDF text.",
+            enabled: true,
+            statusText: "Local reader"
         ),
         MopeliumSourceConnector(
             icon: "note.text",

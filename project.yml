@@ -20,6 +20,7 @@ targets:
       - Packages/MopeliumCore/Sources
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumCore
 
   MopeliumProviders:
@@ -31,7 +32,32 @@ targets:
       - target: MopeliumCore
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumProviders
+
+  MopeliumTools:
+    type: framework
+    platform: macOS
+    sources:
+      - Packages/MopeliumTools/Sources
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumTools
+
+  MopeliumAgent:
+    type: framework
+    platform: macOS
+    sources:
+      - Packages/MopeliumAgent/Sources
+    dependencies:
+      - target: MopeliumCore
+      - target: MopeliumProviders
+      - target: MopeliumTools
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+        PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumAgent
 
   mopelium:
     type: tool
@@ -41,6 +67,8 @@ targets:
     dependencies:
       - target: MopeliumCore
       - target: MopeliumProviders
+      - target: MopeliumTools
+      - target: MopeliumAgent
     settings:
       base:
         OTHER_SWIFT_FLAGS: "$(inherited) -parse-as-library"
@@ -50,6 +78,11 @@ targets:
     platform: macOS
     sources:
       - Apps/MopeliumMac/Sources
+    dependencies:
+      - target: MopeliumCore
+      - target: MopeliumProviders
+      - target: MopeliumTools
+      - target: MopeliumAgent
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vita.MopeliumMac

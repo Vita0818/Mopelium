@@ -1,43 +1,83 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import MopeliumCore
 
 struct MopeliumSettingsScreen: View {
+    @Environment(\.colorScheme) private var scheme
+    @State private var config = MopeliumConfigSnapshot.unavailable
+    @State private var loadError: String?
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 MopeliumPageHeader(
                     title: "Settings",
-                    subtitle: "Local UI only. No provider calls or config writes in v0.2."
-                )
+                    subtitle: "Provider configuration is read from Mopelium CLI config and environment."
+                ) {
+                    Button(action: reload) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(MopeliumTheme.accentDeep)
+                            .frame(width: 32, height: 32)
+                            .background {
+                                Circle()
+                                    .fill(MopeliumTheme.surface(scheme).opacity(scheme == .dark ? 0.30 : 0.72))
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reload config")
+                }
+
+                if let loadError {
+                    SettingsSection(title: "Status") {
+                        Text(loadError)
+                            .font(MopeliumType.body(13))
+                            .foregroundStyle(MopeliumTheme.statusFailed)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
 
                 SettingsSection(title: "Provider") {
                     MopeliumSettingRow(
                         title: "Base URL",
-                        detail: "placeholder",
-                        value: "https://api.openai.com/v1"
+                        detail: config.providerHost,
+                        value: config.baseURLString
                     )
                     MopeliumSettingRow(
                         title: "Model",
-                        detail: "placeholder",
-                        value: "gpt-4o-mini"
+                        detail: "active",
+                        value: config.model
                     )
                     MopeliumSettingRow(
-                        title: "API Key Env",
-                        detail: "not read",
-                        value: "MOPELIUM_API_KEY"
+                        title: "Response Mode",
+                        detail: "config",
+                        value: config.responseModeLabel
                     )
                 }
 
-                SettingsSection(title: "Appearance") {
+                SettingsSection(title: "Credentials") {
                     MopeliumSettingRow(
-                        title: "Accent",
-                        detail: "static",
-                        value: "Mist"
+                        title: "API Key Env",
+                        detail: "environment",
+                        value: config.apiKeyEnv
                     )
                     MopeliumSettingRow(
-                        title: "Material",
-                        detail: "static",
-                        value: "Glass"
+                        title: "API Key Status",
+                        detail: config.apiKeyLoaded ? "loaded" : "missing",
+                        value: config.apiKeyLoaded ? "Available from \(config.apiKeyEnv)" : "Not loaded"
+                    )
+                }
+
+                SettingsSection(title: "Config File") {
+                    MopeliumSettingRow(
+                        title: "Path",
+                        detail: "read/write",
+                        value: CLIConfigStore.defaultURL().path
+                    )
+                    MopeliumSettingRow(
+                        title: "API Key Storage",
+                        detail: "blocked",
+                        value: "API keys are never written to config.json"
                     )
                 }
 
@@ -45,7 +85,7 @@ struct MopeliumSettingsScreen: View {
                     MopeliumSettingRow(
                         title: "Version",
                         detail: "local",
-                        value: "v0.2 UI skeleton"
+                        value: "v0.4 document and web sources"
                     )
                 }
 
@@ -58,6 +98,18 @@ struct MopeliumSettingsScreen: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .scrollContentBackground(.hidden)
+        .task {
+            reload()
+        }
+    }
+
+    private func reload() {
+        do {
+            config = try MopeliumConfigSnapshot.load()
+            loadError = nil
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 }
 

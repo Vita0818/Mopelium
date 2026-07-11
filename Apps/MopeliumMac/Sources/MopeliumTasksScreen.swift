@@ -26,8 +26,8 @@ struct MopeliumTasksScreen: View {
                     }
 
                     MopeliumEmptyState(
-                        title: "No background workers in v0.2",
-                        message: "This screen models the task surface only. Scheduling and trigger execution stay outside the UI skeleton.",
+                        title: "No background workers in v0.4",
+                        message: "This screen models the task surface only. Scheduling and trigger execution stay outside the chat workflow.",
                         systemName: "clock.badge"
                     )
                     .frame(height: 220)

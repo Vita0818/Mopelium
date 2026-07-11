@@ -1,59 +1,54 @@
 # CURRENT_STATE
 
-最近一次自查日期：2026-06-25
+最近一次自查日期：2026-07-08
 
 ## 当前真实状态总览
 
-- Mopelium 是精简 macOS CLI 聊天客户端（OpenAI 兼容 Chat Completions），v0.1（单 commit）。
-- Swift 包，3 product（Core lib / Providers lib / mopelium CLI），7 源文件，7 个单测，零外部依赖。
-- 流式（SSE）与非流式 chat、config 解析（CLI/env/file/默认 4 级优先级）、API key 拒写入配置——均代码就绪并有部分测试。
-- **无 README、无 LICENSE**。项目身份从代码推断。
-- 真机 + 真实 key 的端到端验证状态 `UNKNOWN`（本轮未运行构建/测试）。
+- Mopelium 当前处于 v0.4：SwiftPM + XcodeGen/macOS project 并存，零第三方依赖。
+- Product：`MopeliumCore` lib / `MopeliumProviders` lib / `MopeliumTools` lib / `MopeliumAgent` lib / `mopelium` CLI / `MopeliumMac` macOS SwiftUI app。
+- CLI 仍保留 OpenAI-compatible Chat Completions 的 `ask` / `config` / `selftest` 能力。
+- Mac app 已有 `Chat` / `Tasks` / `Sources` / `Settings` 四个主区域；`Chat` 复用 Core/Providers 真实 API 配置与流式/非流式调用，并可在用户选择 workspace 后让 AI 调用 `MopeliumTools`。
+- v0.4 新增 `Sources` 真实能力：本地文档选择、文件夹文档浏览、文本/Markdown/HTML/JSON/CSV/code/PDF 文本读取、DuckDuckGo HTML 搜索、HTTP(S) 页面抓取、正文/链接抽取、复制 source context，并接入从 `/Users/vita/Vitemis/Intatis` 迁移的完整 `MopeliumTools` 工具面。
+- `MopeliumTools` 当前标准注册表暴露 53 个工具，覆盖 file / patch / shell / git / PDF / document-media / `web_fetch` / browser profile / browser interaction / screenshot / upload / download / search。
+- `MopeliumAgent` 当前提供 AI tool-calling agent loop：OpenAI-compatible `tools` request/stream parser、工具调用执行、observation 回灌、side-effect policy 和 shell/write/destructive 显式开关。
 
 ## 已有能力
 
-| 能力 | 入口 / 关键类型 | 测试覆盖 | 手动验证 | 真机验证 |
-|---|---|---|---|---|
-| 流式 chat | `main.swift` `runAsk` / `OpenAICompatibleProvider.stream` | 无（HTTP 路径无测试） | UNKNOWN | UNKNOWN |
-| 非流式 chat | `main.swift` `runAsk` / `OpenAICompatibleProvider.complete` | 无 | UNKNOWN | UNKNOWN |
-| 配置解析（4 级优先级） | `CLIConfigStore.resolve` | ✅ 4 tests | UNKNOWN | UNKNOWN |
-| 配置文件读写 | `CLIConfigStore.read/write` | ✅ `testSetWritesNonSecretConfig` | UNKNOWN | UNKNOWN |
-| API key 拒写入 | `CLIConfigStore.writableField` | ✅ `testRejectsAPIKeyConfigField` | UNKNOWN | UNKNOWN |
-| SSE 解析 | `SSEParser` | ✅ 3 tests | UNKNOWN | UNKNOWN |
-| config show/set | `main.swift` | 间接（经 CLIConfigStore 测试） | UNKNOWN | UNKNOWN |
-| selftest | `main.swift` `runSelfTest` | 无（非单测） | UNKNOWN | UNKNOWN |
-| 错误处理 | `MopeliumError` / `mapError` | 间接 | UNKNOWN | UNKNOWN |
-| 终端 I/O | `Terminal.out/errOut/truncated` | 间接 | UNKNOWN | UNKNOWN |
+| 能力 | 入口 / 关键位置 | 自动验证 | 状态 |
+|---|---|---:|---|
+| CLI streaming / non-streaming chat | `Apps/mopelium-cli/Sources/main.swift` + `OpenAICompatibleProvider` | 间接 | 保留 |
+| Mac chat UI | `MopeliumChatScreen` / `MopeliumChatViewModel` | `swift build` | v0.3 起已有 |
+| 配置解析与 API key 环境变量读取 | `CLIConfigStore.resolve` / `ResolvedCLIConfig.requireAPIKey` | 4 tests | 通过 |
+| API key 拒写入配置 | `CLIConfigStore.writableField` | 1 test + selftest | 通过 |
+| SSE 解析 | `SSEParser` | 3 tests + selftest | 通过 |
+| 文档阅读 | `MopeliumSourcesScreen.swift` `MopeliumDocumentReader` | `swift build` | v0.4 新增 |
+| 文件夹文档浏览 | `MopeliumSourcesViewModel.browseFolder` | `swift build` | v0.4 新增 |
+| Web 搜索 | `MopeliumWebLookup.search` | `swift build` | v0.4 新增 |
+| Web 页面访问 | `MopeliumWebLookup.fetch` | `swift build` | v0.4 新增 |
+| Intatis 工具面迁移 | `Packages/MopeliumTools/Sources/` | 63 tests | v0.4 新增 |
+| Browser profile / interaction 工具 | `BrowserTools.swift` + `SourceToolConsoleCard` | fake-shell tests + Xcode build | v0.4 新增 |
+| AI 工具调用 | `MopeliumAgentLoop` + `OpenAICompatibleToolCallingProvider` | `swift build` + CLI selftest | v0.4 新增 |
+| CLI 工具模式 | `mopelium ask --tools PATH` | help + build | v0.4 新增 |
+| Mac Chat 工具模式 | `ChatToolControls` + `MopeliumChatViewModel.send` | SwiftPM/Xcode build | v0.4 新增 |
 
-## 未完成 / 进行中
+## v0.4 设计边界
 
-- **无 multi-turn 会话**：`runAsk` 仅单条 user message，无历史持久化。`UNKNOWN` — 是否计划加。
-- **无 README/LICENSE**：项目身份未文档化。
-- **HTTP 路径无自动化测试**：`OpenAICompatibleProvider` 的 stream/complete 无网络 mock，仅 `CLIConfig` 与 `SSEParser` 有单测。
-- **HTTPS 未强制**：`CLIConfig.swift:125` 仅校验 `scheme != nil`，`http://` 端点会明文传 key。`UNKNOWN` — 是否应加固。
-- **无请求超时配置**：依赖 `URLSession.shared` 默认。
-- **非 Apple 平台 stream/complete 运行时抛错**：`#if canImport(Darwin)` 守卫，Linux/Windows 不可用 chat。
+- 顶部 document reader 仍只通过用户选择文件/文件夹触发，不做后台全盘索引。
+- 明确拒绝读取 `.env`、`secrets.json`、证书/key 文件，以及文件名看起来像 `private_key` / `api_key` / `access_token` / `password` 的路径。
+- PDF 读取依赖 Apple 平台 `PDFKit` 的可提取文本；扫描件 OCR 不在 v0.4 范围。
+- 顶部 `Web Lookup` 是无状态 HTTP(S) 搜索/抓取，不读取浏览器 cookies、登录态或 profile 数据。
+- `Full Intatis Tool Surface` 必须先选择 workspace，再在该 workspace 内运行工具；文件路径、截图、上传、下载、browser state/history/profile/downloads 均受 `PathConfinement` 限定。
+- AI 工具调用运行前必须有用户选择的 workspace；CLI 通过 `--tools PATH` 启用，Mac Chat 通过 `Tools` toggle + `Workspace` 选择启用。默认暴露 readOnly/network/exec 工具但不允许 `run_shell`，write/destructive/shell 需要显式开关。
+- Browser 工具把持久 profile/state/history/downloads 放在 workspace 的 `.mopelium/browser/` 下；优先使用 Node.js + Playwright，Playwright 不可用时使用 Node.js `WebSocket` + Chrome DevTools Protocol fallback 到已安装 Chrome/Edge/Chromium。
+- `browser_profiles` / `browser_history` / `browser_downloads` 只返回受控 metadata，不读取 cookies、localStorage、profile 数据库或下载内容；`browser_profile_delete` 需要 confirmProfile 精确匹配；`browser_type` 遮蔽输入并拒绝疑似密码/2FA/token/API key 目标。
 
-## 风险
+## 风险 / 未完成
 
-- **零文档**：无 README，项目意图全靠代码推断，新接手者易误判。
-- **HTTP 路径无测试**：核心 chat 功能回归全靠手动。
-- **HTTPS 未强制**：用户配置 `http://` 端点会泄露 key。
-- **API key 经 env**：出现在进程列表，泄露面不同于 Keychain。
-- **单 commit v0.1**：无变更史，无 CHANGELOG，难追踪演进。
+- `MopeliumSourcesScreen.swift` 目前承载 UI、轻量 document/web service 和工具 console；工具核心已拆在 `MopeliumTools`，但 UI 文件后续可再拆分。
+- `swift test` runner 在本轮 Codex sandbox 内构建完成后卡住，提权重跑被策略拒绝；本轮以 `swift build`、`swift build --build-tests`、增强后的 CLI selftest、Xcode build 作为自动验证。完整 XCTest 仍需在用户本机正常测试环境复跑。
+- 真实模型 tool-calling E2E、真实浏览器 smoke、真实联网搜索/抓取、真实上传/下载、Mac UI 点击、NSOpenPanel 文件选择和第三方网站登录态仍需人工或脱离 sandbox 验证。
+- 浏览器工具依赖宿主环境 Node.js 和已安装浏览器；Playwright module / Chrome / Edge 可用性属于运行时环境，不由 SwiftPM 依赖管理。
 
-## 工作区状态
+## 工作区状态说明
 
-本轮自查（2026-06-25）为只读分析，未产生仓库改动。Git 状态应为 clean（单 commit `13a9ef6 v0.1`）。
-
-## 文档与源码冲突
-
-无现有 `docs/` 文档，故无文档-源码冲突。本目录文档为首次创建，均据源码推断。
-
-值得注意的源码内设计点（非冲突，供后续参考）：
-
-| 位置 | 内容 | 说明 |
-|---|---|---|
-| `CLIConfig.swift:125` | base URL 校验仅 `scheme != nil` | 不强制 https，`http://` 会明文传 key |
-| `main.swift` `runAsk` | 仅发单条 user message | 无 multi-turn 会话支持 |
-| `OpenAICompatibleProvider` | `#if canImport(Darwin)` 守卫 | 非 Apple 平台 chat 抛错 |
+本轮开始时工作区已有多处未提交改动，包括 `Apps/MopeliumMac/`、`Package.swift`、`project.yml`、`Mopelium.xcodeproj`、`AGENTS.md`、`docs/AGENTS.md` 等。这些视为用户既有改动，本轮只在其基础上增量修改，没有回退或清理。`Intatis` 仓库仅做只读对照，没有写入。

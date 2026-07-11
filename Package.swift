@@ -9,6 +9,8 @@ let package = Package(
     products: [
         .library(name: "MopeliumCore", targets: ["MopeliumCore"]),
         .library(name: "MopeliumProviders", targets: ["MopeliumProviders"]),
+        .library(name: "MopeliumTools", targets: ["MopeliumTools"]),
+        .library(name: "MopeliumAgent", targets: ["MopeliumAgent"]),
         .executable(name: "mopelium", targets: ["MopeliumCLI"]),
         .executable(name: "MopeliumMac", targets: ["MopeliumMac"]),
     ],
@@ -22,13 +24,23 @@ let package = Package(
             dependencies: ["MopeliumCore"],
             path: "Packages/MopeliumProviders/Sources"
         ),
+        .target(
+            name: "MopeliumTools",
+            path: "Packages/MopeliumTools/Sources"
+        ),
+        .target(
+            name: "MopeliumAgent",
+            dependencies: ["MopeliumCore", "MopeliumProviders", "MopeliumTools"],
+            path: "Packages/MopeliumAgent/Sources"
+        ),
         .executableTarget(
             name: "MopeliumCLI",
-            dependencies: ["MopeliumCore", "MopeliumProviders"],
+            dependencies: ["MopeliumCore", "MopeliumProviders", "MopeliumTools", "MopeliumAgent"],
             path: "Apps/mopelium-cli/Sources"
         ),
         .executableTarget(
             name: "MopeliumMac",
+            dependencies: ["MopeliumCore", "MopeliumProviders", "MopeliumTools", "MopeliumAgent"],
             path: "Apps/MopeliumMac/Sources"
         ),
         .testTarget(
@@ -40,6 +52,16 @@ let package = Package(
             name: "MopeliumProvidersTests",
             dependencies: ["MopeliumProviders"],
             path: "Tests/MopeliumProvidersTests"
+        ),
+        .testTarget(
+            name: "MopeliumToolsTests",
+            dependencies: ["MopeliumTools"],
+            path: "Tests/MopeliumToolsTests"
+        ),
+        .testTarget(
+            name: "MopeliumAgentTests",
+            dependencies: ["MopeliumAgent", "MopeliumProviders"],
+            path: "Tests/MopeliumAgentTests"
         ),
     ]
 )
