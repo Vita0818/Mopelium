@@ -1,0 +1,513 @@
+import XCTest
+import Foundation
+import IntatisCore
+import IntatisProtocol
+import IntatisProviders
+import IntatisPermission
+import IntatisConversation
+import IntatisAgentKernel
+@testable import IntatisCowork
+
+private final class SplitProvider: ToolCallingProvider, @unchecked Sendable {
+    private let chunks: [AgentChunk]
+    private let lock = NSLock()
+    private var capturedRequests: [AgentRequest] = []
+
+    init(_ chunks: [AgentChunk] = [.textDelta("done"), .done(finishReason: "stop")]) {
+        self.chunks = chunks
+    }
+
+    var requests: [AgentRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests
+    }
+
+    func stream(_ request: AgentRequest) -> AsyncThrowingStream<AgentChunk, Error> {
+        lock.lock()
+        capturedRequests.append(request)
+        lock.unlock()
+        return AsyncThrowingStream { continuation in
+            for chunk in chunks { continuation.yield(chunk) }
+            continuation.finish()
+        }
+    }
+}
+
+private enum SplitProviderFailure: Error {
+    case forcedFailure
+}
+
+private final class SplitFirstSuccessThenFailureProvider: ToolCallingProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturedRequests: [AgentRequest] = []
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests.count
+    }
+
+    func stream(_ request: AgentRequest) -> AsyncThrowingStream<AgentChunk, Error> {
+        lock.lock()
+        capturedRequests.append(request)
+        let requestCount = capturedRequests.count
+        lock.unlock()
+        return AsyncThrowingStream { continuation in
+            if requestCount == 1 {
+                continuation.yield(.textDelta("done"))
+                continuation.yield(.done(finishReason: "stop"))
+                continuation.finish()
+            } else {
+                continuation.finish(throwing: SplitProviderFailure.forcedFailure)
+            }
+        }
+    }
+}
+
+private func splitLog() throws -> EventLog {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("intatis-split-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("events.jsonl")
+    return try EventLog(session: SessionID(rawValue: "split"), fileURL: url)
+}
+
+private func splitWorkspace() throws -> URL {
+    let ws = FileManager.default.temporaryDirectory.appendingPathComponent("split-ws-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: ws, withIntermediateDirectories: true)
+    return ws
+}
+
+private func splitTaskContracts(_ events: [Envelope]) -> [TaskContract] {
+    events.compactMap {
+        if case .taskCreated(let payload) = $0.event { return payload.contract }
+        return nil
+    }
+}
+
+final class MessageDelegationSplitTests: XCTestCase {
+    private let main = AgentID(rawValue: "main")
+    private let worker = AgentID(rawValue: "worker")
+
+    private func makeOrchestrator(log: EventLog,
+                                  mainProvider: SplitProvider = SplitProvider(),
+                                  workerProvider: SplitProvider = SplitProvider()) async throws -> (Orchestrator, URL, URL) {
+        let wsMain = try splitWorkspace()
+        let wsWorker = try splitWorkspace()
+        let worker = self.worker
+        let orch = Orchestrator(log: log, allowsShell: true, responder: FixedResponder(.allow)) { agent in
+            agent.name == worker ? workerProvider : mainProvider
+        }
+        let mainAttached = await orch.attach(Agent(name: main, workspaceRoot: wsMain, model: ModelID(rawValue: "m"),
+                                                   profile: .reviewed,
+                                                   coordinationDepth: Agent.defaultCoordinationDepth))
+        let workerAttached = await orch.attach(Agent(name: worker, workspaceRoot: wsWorker, model: ModelID(rawValue: "m"),
+                                                     profile: .reviewed))
+        XCTAssertTrue(mainAttached)
+        XCTAssertTrue(workerAttached)
+        return (orch, wsMain, wsWorker)
+    }
+
+    func testSendMessageCreatesDurableMailboxWakeTaskAndConsumesMessage() async throws {
+        let log = try splitLog()
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+
+        let result = await orch.sendMessage(from: main, to: worker.rawValue, content: "status ping")
+
+        XCTAssertEqual(result, "sent message to @worker")
+        await orch.runSchedulerUntilIdle()
+        let events = await log.replay()
+        let message = try XCTUnwrap(events.compactMap { envelope -> AgentMessagePayload? in
+            if case .agentMessage(let payload) = envelope.event,
+               payload.from == main, payload.to == worker, payload.kind == .sendMessage {
+                return payload
+            }
+            return nil
+        }.first)
+        let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
+            $0.kind == .mailboxDelivery && $0.assignee == worker
+        })
+        XCTAssertEqual(wakeTask.issuer, main)
+        XCTAssertTrue(events.contains {
+            if case .taskQueued(let payload) = $0.event {
+                return payload.contract.id == wakeTask.id && payload.reason == "mailbox delivery"
+            }
+            return false
+        })
+        XCTAssertTrue(events.contains {
+            if case .agentMessageConsumed(let payload) = $0.event {
+                return payload.messageID == message.messageId
+                    && payload.agent == worker
+                    && payload.taskID == wakeTask.id
+            }
+            return false
+        })
+        let workerMailbox = await orch.mailbox(for: worker)
+        XCTAssertTrue(workerMailbox.pendingMessages.isEmpty)
+        XCTAssertFalse(events.contains { if case .taskDelegated = $0.event { return true } else { return false } })
+    }
+
+    func testMessageRemainsPendingWhenConsumptionEventCannotPersist() async throws {
+        let log = try splitLog()
+        let wsMain = try splitWorkspace()
+        let wsWorker = try splitWorkspace()
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+        let workerProvider = SplitFirstSuccessThenFailureProvider()
+        let worker = self.worker
+        let orch = Orchestrator(
+            log: log,
+            allowsShell: true,
+            responder: FixedResponder(.allow)
+        ) { agent in
+            if agent.name == worker { return workerProvider }
+            return SplitProvider()
+        }
+        let mainAttached = await orch.attach(Agent(
+            name: main,
+            workspaceRoot: wsMain,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed,
+            coordinationDepth: Agent.defaultCoordinationDepth))
+        let workerAttached = await orch.attach(Agent(
+            name: worker,
+            workspaceRoot: wsWorker,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed))
+        XCTAssertTrue(mainAttached)
+        XCTAssertTrue(workerAttached)
+        await orch.setMessageConsumptionAppender { _ in
+            throw SplitProviderFailure.forcedFailure
+        }
+
+        let sendResult = await orch.sendMessage(
+            from: main,
+            to: worker.rawValue,
+            content: "persist before ack")
+        XCTAssertEqual(sendResult, "sent message to @worker")
+        await orch.runSchedulerUntilIdle()
+
+        let events = await log.replay()
+        let message = try XCTUnwrap(events.compactMap { envelope -> AgentMessagePayload? in
+            guard case .agentMessage(let payload) = envelope.event else { return nil }
+            return payload.content == "persist before ack" ? payload : nil
+        }.first)
+        let mailbox = await orch.mailbox(for: worker)
+        XCTAssertEqual(
+            workerProvider.requestCount,
+            4,
+            "the unacknowledged message is redelivered, then the failed delivery task uses its bounded three attempts")
+        XCTAssertEqual(mailbox.pendingMessages, [message.messageId])
+        XCTAssertFalse(events.contains {
+            guard case .agentMessageConsumed(let payload) = $0.event else { return false }
+            return payload.messageID == message.messageId
+        })
+    }
+
+    func testRequestInformationCreatesDurableMailboxWakeTaskAndConsumesRequest() async throws {
+        let log = try splitLog()
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+
+        let result = await orch.requestInformation(from: main, to: worker.rawValue, question: "Which folder is active?")
+
+        XCTAssertEqual(result, "requested information from @worker")
+        await orch.runSchedulerUntilIdle()
+        let events = await log.replay()
+        let request = try XCTUnwrap(events.compactMap { envelope -> InformationRequestedPayload? in
+            if case .informationRequested(let payload) = envelope.event,
+               payload.from == main, payload.to == worker, payload.question.contains("folder") {
+                return payload
+            }
+            return nil
+        }.first)
+        let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
+            $0.kind == .mailboxDelivery && $0.assignee == worker
+        })
+        XCTAssertTrue(events.contains {
+            if case .agentMessageConsumed(let payload) = $0.event {
+                return payload.messageID == request.requestID
+                    && payload.agent == worker
+                    && payload.taskID == wakeTask.id
+            }
+            return false
+        })
+        let workerMailbox = await orch.mailbox(for: worker)
+        XCTAssertTrue(workerMailbox.pendingMessages.isEmpty)
+        XCTAssertFalse(events.contains { if case .taskDelegated = $0.event { return true } else { return false } })
+    }
+
+    func testReplyMessageCreatesDurableMailboxWakeTaskAndConsumesReply() async throws {
+        let log = try splitLog()
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+        let current = await orch.enqueueDelegatedTask(
+            from: main,
+            to: worker.rawValue,
+            objective: "Prepare the requested status reply.",
+            replyMode: .none)
+        let currentTaskID = try XCTUnwrap(current.taskID)
+
+        let result = await orch.replyMessage(
+            from: worker,
+            to: main.rawValue,
+            content: "macOS count is ready",
+            inReplyTo: "msg_info",
+            taskID: currentTaskID)
+
+        XCTAssertEqual(result, "replied to @main")
+        await orch.runSchedulerUntilIdle()
+        let events = await log.replay()
+        let reply = try XCTUnwrap(events.compactMap { envelope -> InformationRepliedPayload? in
+            if case .informationReplied(let payload) = envelope.event,
+               payload.from == worker
+                    && payload.to == main
+                    && payload.inReplyTo == MessageID(rawValue: "msg_info")
+                    && payload.content.contains("ready")
+                    && payload.taskID == currentTaskID {
+                return payload
+            }
+            return nil
+        }.first)
+        let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
+            $0.kind == .mailboxDelivery && $0.assignee == main
+        })
+        XCTAssertEqual(wakeTask.relatedTasks, [currentTaskID])
+        XCTAssertTrue(events.contains {
+            if case .agentMessageConsumed(let payload) = $0.event {
+                return payload.messageID == reply.replyID
+                    && payload.agent == main
+                    && payload.taskID == wakeTask.id
+            }
+            return false
+        })
+        let mainMailbox = await orch.mailbox(for: main)
+        XCTAssertTrue(mainMailbox.pendingMessages.isEmpty)
+    }
+
+    func testDelegateTaskCreatesTaskContractAndTaskDelegatedEvent() async throws {
+        let log = try splitLog()
+        let workerProvider = SplitProvider([.textDelta("worker result"), .done(finishReason: "stop")])
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log, workerProvider: workerProvider)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+
+        let result = await orch.delegateTask(from: main,
+                                             to: worker.rawValue,
+                                             objective: "Count macOS Swift files only.",
+                                             roleHint: "macOS Swift counter",
+                                             expectedDeliverable: "count and path list")
+
+        XCTAssertTrue(result.contains("Task Report"))
+        XCTAssertTrue(result.contains("status: completed"))
+        XCTAssertTrue(result.contains("agent: @worker"))
+        XCTAssertTrue(result.contains("summary: worker result"))
+        let events = await log.replay()
+        let contract = try XCTUnwrap(splitTaskContracts(events).first)
+        XCTAssertEqual(contract.issuer, main)
+        XCTAssertEqual(contract.assignee, worker)
+        XCTAssertEqual(contract.roleHint, "macOS Swift counter")
+        XCTAssertEqual(contract.expectedDeliverable, "count and path list")
+        XCTAssertTrue(events.contains {
+            if case .taskDelegated(let payload) = $0.event {
+                return payload.contract == contract
+            }
+            return false
+        })
+    }
+
+    func testRequestDelegationUsesCurrentTaskAndWakesAssigningAgentWithoutSpawnOrAttach() async throws {
+        let log = try splitLog()
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+        let current = await orch.enqueueDelegatedTask(
+            from: main,
+            to: worker.rawValue,
+            objective: "Inspect the assigned source scope.",
+            replyMode: .none)
+        let currentTaskID = try XCTUnwrap(current.taskID)
+        let before = await log.replay().filter { if case .agentAttached = $0.event { return true } else { return false } }.count
+
+        let result = await orch.requestDelegation(from: worker,
+                                                  objective: "Need docs counter",
+                                                  reason: "Assigned workspace excludes docs",
+                                                  parentTaskID: currentTaskID)
+
+        XCTAssertEqual(result, "delegation request delivered to @main")
+        await orch.runSchedulerUntilIdle()
+        let events = await log.replay()
+        let request = try XCTUnwrap(events.compactMap { envelope -> DelegationRequestedPayload? in
+            if case .delegationRequested(let payload) = envelope.event,
+               payload.requester == worker, payload.objective == "Need docs counter" {
+                return payload
+            }
+            return nil
+        }.first)
+        XCTAssertEqual(request.recipient, main)
+        XCTAssertEqual(request.parentTaskID, currentTaskID)
+        let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
+            $0.kind == .mailboxDelivery && $0.assignee == main
+        })
+        XCTAssertEqual(wakeTask.relatedTasks, [currentTaskID])
+        XCTAssertTrue(events.contains {
+            if case .agentMessageConsumed(let payload) = $0.event {
+                return payload.messageID == MessageID(rawValue: request.requestID.rawValue)
+                    && payload.agent == main
+                    && payload.taskID == wakeTask.id
+            }
+            return false
+        })
+        let mainMailbox = await orch.mailbox(for: main)
+        XCTAssertTrue(mainMailbox.pendingMessages.isEmpty)
+        let after = events.filter { if case .agentAttached = $0.event { return true } else { return false } }.count
+        XCTAssertEqual(after, before)
+        XCTAssertFalse(events.contains { if case .agentSpawned = $0.event { return true } else { return false } })
+    }
+
+    func testCapabilityLeaseControlsMessageAndDelegationTools() {
+        let workerTools = Set(Orchestrator.toolRegistry(for: .worker()).descriptors().map(\.name))
+        XCTAssertTrue(workerTools.contains("reply_message"))
+        XCTAssertTrue(workerTools.contains("request_delegation"))
+        XCTAssertTrue(workerTools.contains("read_pdf"))
+        XCTAssertFalse(workerTools.contains("delegate_task"))
+        XCTAssertFalse(workerTools.contains("ask_agent"))
+        XCTAssertFalse(workerTools.contains("generate_image"))
+        XCTAssertFalse(workerTools.contains("browser_diagnostics"))
+        XCTAssertFalse(workerTools.contains("browser_profiles"))
+        XCTAssertFalse(workerTools.contains("browser_profile_delete"))
+        XCTAssertFalse(workerTools.contains("browser_history"))
+        XCTAssertFalse(workerTools.contains("browser_navigate"))
+        XCTAssertFalse(workerTools.contains("browser_snapshot"))
+        XCTAssertFalse(workerTools.contains("browser_handoff"))
+        XCTAssertFalse(workerTools.contains("browser_reload"))
+        XCTAssertFalse(workerTools.contains("browser_back"))
+        XCTAssertFalse(workerTools.contains("browser_forward"))
+        XCTAssertFalse(workerTools.contains("browser_click"))
+        XCTAssertFalse(workerTools.contains("browser_type"))
+        XCTAssertFalse(workerTools.contains("browser_submit"))
+        XCTAssertFalse(workerTools.contains("browser_select_option"))
+        XCTAssertFalse(workerTools.contains("browser_press_key"))
+        XCTAssertFalse(workerTools.contains("browser_scroll"))
+        XCTAssertFalse(workerTools.contains("browser_wait"))
+        XCTAssertFalse(workerTools.contains("browser_screenshot"))
+        XCTAssertFalse(workerTools.contains("browser_upload_file"))
+        XCTAssertFalse(workerTools.contains("browser_download"))
+        XCTAssertFalse(workerTools.contains("browser_downloads"))
+        XCTAssertFalse(workerTools.contains("browser_search"))
+
+        let coordinatorTools = Set(Orchestrator.toolRegistry(for: .coordinator()).descriptors().map(\.name))
+        XCTAssertTrue(coordinatorTools.contains("send_message"))
+        XCTAssertTrue(coordinatorTools.contains("request_information"))
+        XCTAssertTrue(coordinatorTools.contains("reply_message"))
+        XCTAssertTrue(coordinatorTools.contains("delegate_task"))
+        XCTAssertTrue(coordinatorTools.contains("ask_agent"))
+        XCTAssertTrue(coordinatorTools.contains("edit_pdf_pages"))
+        XCTAssertTrue(coordinatorTools.contains("compile_latex"))
+        XCTAssertTrue(coordinatorTools.contains("generate_image"))
+        XCTAssertTrue(coordinatorTools.contains("web_fetch"))
+        XCTAssertTrue(coordinatorTools.contains("browser_diagnostics"))
+        XCTAssertTrue(coordinatorTools.contains("browser_profiles"))
+        XCTAssertTrue(coordinatorTools.contains("browser_profile_delete"))
+        XCTAssertTrue(coordinatorTools.contains("browser_history"))
+        XCTAssertTrue(coordinatorTools.contains("browser_navigate"))
+        XCTAssertTrue(coordinatorTools.contains("browser_snapshot"))
+        XCTAssertTrue(coordinatorTools.contains("browser_handoff"))
+        XCTAssertTrue(coordinatorTools.contains("browser_reload"))
+        XCTAssertTrue(coordinatorTools.contains("browser_back"))
+        XCTAssertTrue(coordinatorTools.contains("browser_forward"))
+        XCTAssertTrue(coordinatorTools.contains("browser_click"))
+        XCTAssertTrue(coordinatorTools.contains("browser_type"))
+        XCTAssertTrue(coordinatorTools.contains("browser_submit"))
+        XCTAssertTrue(coordinatorTools.contains("browser_select_option"))
+        XCTAssertTrue(coordinatorTools.contains("browser_press_key"))
+        XCTAssertTrue(coordinatorTools.contains("browser_scroll"))
+        XCTAssertTrue(coordinatorTools.contains("browser_wait"))
+        XCTAssertTrue(coordinatorTools.contains("browser_screenshot"))
+        XCTAssertTrue(coordinatorTools.contains("browser_upload_file"))
+        XCTAssertTrue(coordinatorTools.contains("browser_download"))
+        XCTAssertTrue(coordinatorTools.contains("browser_downloads"))
+        XCTAssertTrue(coordinatorTools.contains("browser_search"))
+    }
+
+    func testAskAgentCompatibilityWrapperRejectsSelfCallAndWorkerDoesNotSeeAskAgent() async throws {
+        let log = try splitLog()
+        let workerProvider = SplitProvider()
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log, workerProvider: workerProvider)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+
+        let selfCall = await orch.ask(from: worker, to: "@worker", question: "call yourself")
+        XCTAssertEqual(selfCall, "error: agent cannot ask itself")
+
+        await orch.send("capture worker request", to: worker)
+        let request = try XCTUnwrap(workerProvider.requests.first)
+        let toolNames = Set(request.tools.map(\.name))
+        XCTAssertFalse(toolNames.contains("ask_agent"))
+        XCTAssertFalse(toolNames.contains("delegate_task"))
+    }
+
+    func testMessageBusEventsDistinguishMailboxCommunicationFromMediatedDelegation() async throws {
+        let log = try splitLog()
+        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
+        defer {
+            try? FileManager.default.removeItem(at: wsMain)
+            try? FileManager.default.removeItem(at: wsWorker)
+        }
+
+        let current = await orch.enqueueDelegatedTask(
+            from: main,
+            to: worker.rawValue,
+            objective: "Prepare a reply for the current task.",
+            replyMode: .none)
+        let currentTaskID = try XCTUnwrap(current.taskID)
+        _ = await orch.replyMessage(
+            from: worker,
+            to: main.rawValue,
+            content: "answer",
+            inReplyTo: nil,
+            taskID: currentTaskID)
+        _ = await orch.sendMessage(from: main, to: worker.rawValue, content: "hello")
+        _ = await orch.requestInformation(from: main, to: worker.rawValue, question: "question")
+        _ = await orch.delegateTask(from: main, to: worker.rawValue, objective: "Do one task.")
+
+        await orch.runSchedulerUntilIdle()
+        let events = await log.replay()
+        let types = events.map { $0.event.type }
+        XCTAssertTrue(types.contains(.agentMessage))
+        XCTAssertTrue(types.contains(.informationRequested))
+        XCTAssertTrue(types.contains(.informationReplied))
+        XCTAssertTrue(types.contains(.agentToAgentMessage))
+        XCTAssertTrue(types.contains(.taskDelegated))
+        XCTAssertTrue(types.contains(.taskCreated))
+        let explicitMessages = events.compactMap { envelope -> AgentMessagePayload? in
+            if case .agentMessage(let payload) = envelope.event { return payload }
+            return nil
+        }
+        XCTAssertEqual(explicitMessages.filter { $0.kind == .sendMessage && $0.content == "hello" }.count, 1)
+        let mediatedDelegations = events.compactMap { envelope -> AgentToAgentMessagePayload? in
+            if case .agentToAgentMessage(let payload) = envelope.event { return payload }
+            return nil
+        }
+        XCTAssertTrue(mediatedDelegations.contains { $0.content == "Do one task." })
+        XCTAssertFalse(explicitMessages.contains { $0.content == "Do one task." })
+    }
+}

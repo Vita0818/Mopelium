@@ -1,4 +1,6 @@
 import Foundation
+import MopeliumCore
+import MopeliumProtocol
 
 /// A minimal unified-diff parser + applier. It applies each hunk by locating the
 /// hunk's old block (context + removed lines) verbatim in the file and replacing
@@ -73,7 +75,7 @@ public enum UnifiedDiff {
                 continue
             }
             guard let range = firstRange(of: hunk.oldLines, in: lines) else {
-                throw MopeliumToolError.io("patch hunk did not match file content")
+                throw MopeliumError.io("patch hunk did not match file content")
             }
             lines.replaceSubrange(range, with: hunk.newLines)
         }
@@ -95,6 +97,7 @@ public enum UnifiedDiff {
 
 public struct ApplyPatchTool: Tool {
     public init() {}
+    public static let canonicalPermission: String? = "filesystem.edit"
     public static let descriptor = ToolDescriptor(
         name: "apply_patch",
         description: "Apply a unified diff to files within the workspace.",
@@ -108,10 +111,26 @@ public struct ApplyPatchTool: Tool {
         return UnifiedDiff.parse(a.diff).map { $0.path }
     }
 
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
+        let value = try? args.decode(Args.self)
+        return PermissionIntent(
+            action: "filesystem.patch",
+            resources: touchedPaths(args).map {
+                PermissionResource(kind: .workspacePath, value: $0, access: .readWrite)
+            },
+            metadata: [
+                "operation": .string("apply_unified_diff"),
+                "diffCharacterCount": .number(Double(value?.diff.count ?? 0)),
+            ],
+            dataEffects: [.mutate],
+            risks: [.workspaceMutation],
+            replayPolicy: .requiresManualReconciliation)
+    }
+
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         let patches = UnifiedDiff.parse(a.diff)
-        guard !patches.isEmpty else { throw MopeliumToolError.io("no file sections found in diff") }
+        guard !patches.isEmpty else { throw MopeliumError.io("no file sections found in diff") }
 
         var changed: [String] = []
         for patch in patches {

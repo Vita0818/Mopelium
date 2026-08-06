@@ -1,4 +1,6 @@
 import Foundation
+import MopeliumCore
+import MopeliumProtocol
 
 // MARK: - read_file
 
@@ -104,6 +106,7 @@ public struct SearchTextTool: Tool {
 
 public struct WriteFileTool: Tool {
     public init() {}
+    public static let canonicalPermission: String? = "filesystem.edit"
     public static let descriptor = ToolDescriptor(
         name: "write_file",
         description: "Write (create or overwrite) a UTF-8 text file within the workspace.",
@@ -114,6 +117,22 @@ public struct WriteFileTool: Tool {
 
     public func touchedPaths(_ args: ToolArgs) -> [String] {
         (try? args.decode(Args.self).path).map { [$0] } ?? []
+    }
+
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
+        let value = try? args.decode(Args.self)
+        return PermissionIntent(
+            action: "filesystem.write",
+            resources: touchedPaths(args).map {
+                PermissionResource(kind: .workspacePath, value: $0, access: .readWrite)
+            },
+            metadata: [
+                "operation": .string("create_or_overwrite"),
+                "byteCount": .number(Double(value?.content.utf8.count ?? 0)),
+            ],
+            dataEffects: [.mutate],
+            risks: [.workspaceMutation],
+            replayPolicy: .requiresManualReconciliation)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {

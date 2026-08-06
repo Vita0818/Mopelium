@@ -1,33 +1,47 @@
 import Foundation
 
-public enum MopeliumError: Error, Equatable, LocalizedError {
+/// Unified error type across all Mopelium modules.
+public enum MopeliumError: Error, Sendable, Equatable, LocalizedError {
     case config(String)
     case provider(String)
-    case network(String)
-    case httpStatus(Int, String?)
     case decoding(String)
     case io(String)
-    case usage(String)
+    case notFound(String)
+    case permissionDenied(String)
+    case cancelled
 
     public var errorDescription: String? {
         switch self {
-        case .config(let message):
-            return message
-        case .provider(let message):
-            return "Provider error: \(message)"
-        case .network(let message):
-            return "Network error: \(message)"
-        case .httpStatus(let status, let message):
-            if let message, !message.isEmpty {
-                return "HTTP \(status): \(message)"
-            }
-            return "HTTP \(status)"
-        case .decoding(let message):
-            return "Decoding error: \(message)"
-        case .io(let message):
-            return "I/O error: \(message)"
-        case .usage(let message):
-            return message
+        case .config(let m):           return "Configuration error: \(m)"
+        case .provider(let m):         return "Provider error: \(m)"
+        case .decoding(let m):         return "Decoding error: \(m)"
+        case .io(let m):               return "I/O error: \(m)"
+        case .notFound(let m):         return "Not found: \(m)"
+        case .permissionDenied(let m): return "Permission denied: \(m)"
+        case .cancelled:               return "Cancelled."
         }
+    }
+}
+
+/// Distinguishes cancellation of the current structured task from a provider
+/// that independently reports a cancellation-shaped failure.
+///
+/// Provider adapters may normalize `CancellationError` to
+/// `MopeliumError.cancelled`; callers must therefore check both the error shape
+/// and the current task's cancellation bit before treating a turn as
+/// user-interrupted.
+public enum MopeliumCancellation {
+    public static func isCancellationSignal(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        guard let mopeliumError = error as? MopeliumError else {
+            return false
+        }
+        return mopeliumError == .cancelled
+    }
+
+    public static func isCurrentTaskCancellation(_ error: Error) -> Bool {
+        Task.isCancelled && isCancellationSignal(error)
     }
 }

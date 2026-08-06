@@ -1,4 +1,5 @@
 import Foundation
+import MopeliumCore
 
 #if canImport(PDFKit)
 import PDFKit
@@ -23,14 +24,14 @@ private enum PageSelection {
                 let left = token[..<dash].trimmingCharacters(in: .whitespacesAndNewlines)
                 let right = token[token.index(after: dash)...].trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let start = Int(left), let end = Int(right), start > 0, end > 0, start <= end else {
-                    throw MopeliumToolError.decoding("invalid page range: \(token)")
+                    throw MopeliumError.decoding("invalid page range: \(token)")
                 }
                 for page in start...end {
                     try append(page, pageCount: pageCount, to: &pages, seen: &seen)
                 }
             } else {
                 guard let page = Int(token), page > 0 else {
-                    throw MopeliumToolError.decoding("invalid page number: \(token)")
+                    throw MopeliumError.decoding("invalid page number: \(token)")
                 }
                 try append(page, pageCount: pageCount, to: &pages, seen: &seen)
             }
@@ -43,7 +44,7 @@ private enum PageSelection {
                                to pages: inout [Int],
                                seen: inout Set<Int>) throws {
         guard oneBased <= pageCount else {
-            throw MopeliumToolError.decoding("page \(oneBased) exceeds document page count \(pageCount)")
+            throw MopeliumError.decoding("page \(oneBased) exceeds document page count \(pageCount)")
         }
         let zeroBased = oneBased - 1
         if seen.insert(zeroBased).inserted {
@@ -103,7 +104,7 @@ public struct ReadPDFTool: Tool {
 
         #if canImport(PDFKit)
         guard let document = PDFDocument(url: url) else {
-            throw MopeliumToolError.decoding("could not open PDF: \(a.path)")
+            throw MopeliumError.decoding("could not open PDF: \(a.path)")
         }
         let selectedPages = try PageSelection.parse(a.pages, pageCount: document.pageCount)
         let limit = min(a.maxCharacters ?? 200_000, 500_000)
@@ -139,7 +140,7 @@ public struct ReadPDFTool: Tool {
         }
         return ToolObservation(text: text, truncated: truncated)
         #else
-        throw MopeliumToolError.config("read_pdf requires PDFKit on Apple platforms; install and call mature CLI tools such as Poppler pdftotext through run_shell on this platform.")
+        throw MopeliumError.config("read_pdf requires PDFKit on Apple platforms; use an explicitly integrated, workspace-confined PDF backend on this platform.")
         #endif
     }
 }
@@ -183,30 +184,30 @@ public struct EditPDFPagesTool: Tool {
 
         #if canImport(PDFKit)
         guard let source = PDFDocument(url: inputURL) else {
-            throw MopeliumToolError.decoding("could not open PDF: \(a.inputPath)")
+            throw MopeliumError.decoding("could not open PDF: \(a.inputPath)")
         }
         let selectedPages = try PageSelection.parse(a.pages, pageCount: source.pageCount)
         guard !selectedPages.isEmpty else {
-            throw MopeliumToolError.decoding("no pages selected")
+            throw MopeliumError.decoding("no pages selected")
         }
 
         switch mode {
         case "extract":
             guard let outputPath = a.outputPath?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !outputPath.isEmpty else {
-                throw MopeliumToolError.decoding("edit_pdf_pages mode 'extract' requires outputPath")
+                throw MopeliumError.decoding("edit_pdf_pages mode 'extract' requires outputPath")
             }
             let outputURL = try PathConfinement.resolve(outputPath, within: context.workspaceRoot)
             try ensureParentDirectory(for: outputURL)
             let output = PDFDocument()
             for (position, pageIndex) in selectedPages.enumerated() {
                 guard let page = source.page(at: pageIndex)?.copy() as? PDFPage else {
-                    throw MopeliumToolError.decoding("could not copy page \(pageIndex + 1)")
+                    throw MopeliumError.decoding("could not copy page \(pageIndex + 1)")
                 }
                 output.insert(page, at: position)
             }
             guard output.write(to: outputURL) else {
-                throw MopeliumToolError.io("failed to write PDF: \(outputPath)")
+                throw MopeliumError.io("failed to write PDF: \(outputPath)")
             }
             let changed = PathConfinement.relativePath(of: outputURL, root: context.workspaceRoot)
             return ToolObservation(
@@ -216,7 +217,7 @@ public struct EditPDFPagesTool: Tool {
         case "split":
             guard let outputDir = a.outputDir?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !outputDir.isEmpty else {
-                throw MopeliumToolError.decoding("edit_pdf_pages mode 'split' requires outputDir")
+                throw MopeliumError.decoding("edit_pdf_pages mode 'split' requires outputDir")
             }
             let dirURL = try PathConfinement.resolve(outputDir, within: context.workspaceRoot)
             try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
@@ -227,13 +228,13 @@ public struct EditPDFPagesTool: Tool {
             for pageIndex in selectedPages {
                 let output = PDFDocument()
                 guard let page = source.page(at: pageIndex)?.copy() as? PDFPage else {
-                    throw MopeliumToolError.decoding("could not copy page \(pageIndex + 1)")
+                    throw MopeliumError.decoding("could not copy page \(pageIndex + 1)")
                 }
                 output.insert(page, at: 0)
                 let filename = "\(prefix)-page-\(String(format: "%0\(digits)d", pageIndex + 1)).pdf"
                 let pageURL = dirURL.appendingPathComponent(filename)
                 guard output.write(to: pageURL) else {
-                    throw MopeliumToolError.io("failed to write PDF: \(filename)")
+                    throw MopeliumError.io("failed to write PDF: \(filename)")
                 }
                 changed.append(PathConfinement.relativePath(of: pageURL, root: context.workspaceRoot))
             }
@@ -242,10 +243,10 @@ public struct EditPDFPagesTool: Tool {
                 changedFiles: changed)
 
         default:
-            throw MopeliumToolError.decoding("unsupported edit_pdf_pages mode '\(a.mode)'; use 'extract' or 'split'")
+            throw MopeliumError.decoding("unsupported edit_pdf_pages mode '\(a.mode)'; use 'extract' or 'split'")
         }
         #else
-        throw MopeliumToolError.config("edit_pdf_pages requires PDFKit on Apple platforms; use mature CLI tools such as qpdf/pdfseparate through run_shell on this platform.")
+        throw MopeliumError.config("edit_pdf_pages requires PDFKit on Apple platforms; use an explicitly integrated, workspace-confined PDF backend on this platform.")
         #endif
     }
 }
@@ -368,13 +369,13 @@ public struct ReconstructDocumentImageTool: Tool {
         esac
         """
 
-        let result = try await context.shell.run(command, cwd: context.workspaceRoot)
+        let result = try await context.structuredShell.run(command, cwd: context.workspaceRoot)
         let transcript = outputText(stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode)
         guard result.exitCode == 0 else {
-            throw MopeliumToolError.io("document reconstruction failed. \(transcript)")
+            throw MopeliumError.io("document reconstruction failed. \(transcript)")
         }
         guard FileManager.default.fileExists(atPath: outputURL.path) else {
-            throw MopeliumToolError.io("document reconstruction finished but did not create \(a.outputPath)")
+            throw MopeliumError.io("document reconstruction finished but did not create \(a.outputPath)")
         }
         let changed = PathConfinement.relativePath(of: outputURL, root: context.workspaceRoot)
         return ToolObservation(
@@ -432,7 +433,7 @@ public struct CompileLaTeXTool: Tool {
         let a = try args.decode(Args.self)
         let inputURL = try PathConfinement.resolve(a.inputPath, within: context.workspaceRoot)
         guard inputURL.pathExtension.lowercased() == "tex" else {
-            throw MopeliumToolError.decoding("compile_latex inputPath must point to a .tex file")
+            throw MopeliumError.decoding("compile_latex inputPath must point to a .tex file")
         }
         let outputDir = a.outputDir?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? PathConfinement.relativePath(of: inputURL.deletingLastPathComponent(), root: context.workspaceRoot)
@@ -443,18 +444,23 @@ public struct CompileLaTeXTool: Tool {
         let outputPDF = outputDirURL.appendingPathComponent(inputURL.deletingPathExtension().lastPathComponent + ".pdf")
         let command = """
         set -e
+        # Keep TeX's own path policy restrictive in addition to the OS-level
+        # workspace sandbox, and never permit shell escape from document input.
+        export openin_any=p
+        export openout_any=p
         INPUT=\(shellQuote(inputURL.path))
         OUTDIR=\(shellQuote(outputDirURL.path))
         ENGINE=\(shellQuote(engine))
         run_auto() {
           if command -v tectonic >/dev/null 2>&1; then
-            tectonic --keep-logs --keep-intermediates --outdir "$OUTDIR" "$INPUT"
+            tectonic --untrusted --keep-logs --keep-intermediates --outdir "$OUTDIR" "$INPUT"
           elif command -v latexmk >/dev/null 2>&1; then
-            latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir="$OUTDIR" "$INPUT"
+            latexmk -norc -pdf -interaction=nonstopmode -halt-on-error \
+              -pdflatex="pdflatex -no-shell-escape %O %S" -outdir="$OUTDIR" "$INPUT"
           elif command -v xelatex >/dev/null 2>&1; then
-            xelatex -interaction=nonstopmode -halt-on-error -output-directory="$OUTDIR" "$INPUT"
+            xelatex -no-shell-escape -interaction=nonstopmode -halt-on-error -output-directory="$OUTDIR" "$INPUT"
           elif command -v pdflatex >/dev/null 2>&1; then
-            pdflatex -interaction=nonstopmode -halt-on-error -output-directory="$OUTDIR" "$INPUT"
+            pdflatex -no-shell-escape -interaction=nonstopmode -halt-on-error -output-directory="$OUTDIR" "$INPUT"
           else
             echo "No LaTeX engine found. Install tectonic, TeX Live latexmk, xelatex, or pdflatex." >&2
             exit 127
@@ -464,15 +470,16 @@ public struct CompileLaTeXTool: Tool {
           auto) run_auto ;;
           tectonic)
             command -v tectonic >/dev/null 2>&1 || { echo "tectonic is not installed" >&2; exit 127; }
-            tectonic --keep-logs --keep-intermediates --outdir "$OUTDIR" "$INPUT"
+            tectonic --untrusted --keep-logs --keep-intermediates --outdir "$OUTDIR" "$INPUT"
             ;;
           latexmk)
             command -v latexmk >/dev/null 2>&1 || { echo "latexmk is not installed" >&2; exit 127; }
-            latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir="$OUTDIR" "$INPUT"
+            latexmk -norc -pdf -interaction=nonstopmode -halt-on-error \
+              -pdflatex="pdflatex -no-shell-escape %O %S" -outdir="$OUTDIR" "$INPUT"
             ;;
           xelatex|pdflatex)
             command -v "$ENGINE" >/dev/null 2>&1 || { echo "$ENGINE is not installed" >&2; exit 127; }
-            "$ENGINE" -interaction=nonstopmode -halt-on-error -output-directory="$OUTDIR" "$INPUT"
+            "$ENGINE" -no-shell-escape -interaction=nonstopmode -halt-on-error -output-directory="$OUTDIR" "$INPUT"
             ;;
           *)
             echo "unsupported LaTeX engine: $ENGINE" >&2
@@ -480,13 +487,13 @@ public struct CompileLaTeXTool: Tool {
             ;;
         esac
         """
-        let result = try await context.shell.run(command, cwd: context.workspaceRoot)
+        let result = try await context.structuredShell.run(command, cwd: context.workspaceRoot)
         let transcript = outputText(stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode)
         guard result.exitCode == 0 else {
-            throw MopeliumToolError.io("LaTeX compile failed. \(transcript)")
+            throw MopeliumError.io("LaTeX compile failed. \(transcript)")
         }
         guard FileManager.default.fileExists(atPath: outputPDF.path) else {
-            throw MopeliumToolError.io("LaTeX compile finished but did not create \(outputPDF.lastPathComponent). \(transcript)")
+            throw MopeliumError.io("LaTeX compile finished but did not create \(outputPDF.lastPathComponent). \(transcript)")
         }
         let changed = PathConfinement.relativePath(of: outputPDF, root: context.workspaceRoot)
         return ToolObservation(text: "compiled \(a.inputPath) to \(changed)\n\(transcript)",
@@ -527,7 +534,7 @@ public struct GenerateImageTool: Tool {
         let a = try args.decode(Args.self)
         _ = try PathConfinement.resolve(a.outputPath, within: context.workspaceRoot)
         guard let generator = context.imageGenerator else {
-            throw MopeliumToolError.config("generate_image is not configured; attach an image provider or local image backend before using this tool")
+            throw MopeliumError.config("generate_image is not configured; attach an image provider or local image backend before using this tool")
         }
         return try await generator.generateImage(
             prompt: a.prompt,

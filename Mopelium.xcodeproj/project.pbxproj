@@ -7,288 +7,154 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0DF114694BA3D04F9BEB7424 /* MopeliumTasksScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB01C66B3863B0E6EE5936A /* MopeliumTasksScreen.swift */; };
-		10AF139F6852F84227C31C76 /* MopeliumMockData.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2752B85511BA9D8EA419687 /* MopeliumMockData.swift */; };
-		12E9C25722E4A89901FE3980 /* MopeliumCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		1B1E53A21E8236290B58486D /* CLIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FBC4A8D882D7905F941A693 /* CLIConfig.swift */; };
-		1B2BF6D95C6CA97538D74353 /* ToolCallingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF8DCC7064DFE664D0EC991 /* ToolCallingTypes.swift */; };
-		1D0F81C2AC02664C88977350 /* ShellGit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D8E9BB3672E82BC90DB538D /* ShellGit.swift */; };
-		22B238E92F3D7D7EB519E356 /* BrowserTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8745C86D5FFB48A2802E9DBE /* BrowserTools.swift */; };
-		2604731B40E97A32A87196A2 /* MopeliumComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85110A016FD2D7833E7F0CE1 /* MopeliumComponents.swift */; };
-		2AA45CE297D64CEC1C380BBB /* ChatTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D9209C1813CE60805E6DCC3 /* ChatTypes.swift */; };
-		2CE57888D92ADFEE88B8944E /* MopeliumSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80E8781C163E3C041252489 /* MopeliumSettingsScreen.swift */; };
+		04F80D40AF6BCDED47715F0D /* RendererFixtureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39FD6738A52809A2381B5782 /* RendererFixtureView.swift */; };
+		0B4F0465C5504F7CDF85D08D /* MopeliumMultimodal in Frameworks */ = {isa = PBXBuildFile; productRef = 7671BC9609B3A0339B3DA830 /* MopeliumMultimodal */; };
+		25128F1D1C739084765EDA4B /* MopeliumProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 46D28E6C1B62478039B0BE2B /* MopeliumProtocol */; };
+		298E9B16F5E3F9FC2867A880 /* MopeliumArtifacts in Frameworks */ = {isa = PBXBuildFile; productRef = C12BA0CC7547DB7648E741B4 /* MopeliumArtifacts */; };
+		2DA779940F69FD35F52F0ED2 /* MopeliumSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 4A28F7B2814740F8E664E07A /* MopeliumSharedUI */; };
 		37BCC77CBD9A29A5C99647F5 /* MopeliumMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4159E4A294DB4E31DC88B5E9 /* MopeliumMacApp.swift */; };
-		4C2E514ED69912A5875E8F9E /* MopeliumTools.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */; };
-		510BF7853557A9D108DC0136 /* MopeliumTools.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */; };
-		57A3703876733D4D77BF59A2 /* MopeliumCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */; };
-		63E2CA9AB85BFE87D05E96F1 /* MopeliumCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */; };
-		7190CA1BD9222ADA1895606E /* MopeliumTools.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		747C77DAAB3B4F592E591BE7 /* MopeliumAgent.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = BFDD8AD7CC13B010C0CDBB1B /* MopeliumAgent.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		7C05C9DE3B65538BC8735B57 /* MopeliumProviders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */; };
-		8895F332F09D3A5BB5973804 /* MopeliumAgent.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BFDD8AD7CC13B010C0CDBB1B /* MopeliumAgent.framework */; };
-		8E3D10DBD644E83E787C1C15 /* DocumentMediaTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE65DD24CA0C737D88CECB0 /* DocumentMediaTools.swift */; };
-		9362316740575BF4373AABAA /* PatchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF2B56CAC8F51F1C2E0E51A /* PatchTool.swift */; };
-		97705AF85983ED464F25BC36 /* MopeliumCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */; };
-		A27DE93D42BCA55D57A40E67 /* MopeliumSourcesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D21DA3C8B65080142D6664E6 /* MopeliumSourcesScreen.swift */; };
-		A36A8A5BA5AE4ED40A69B52D /* MopeliumProviders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */; };
-		A462E8C75A896E1C2FF14A43 /* SSEParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C07DFA757D0769400FD520EA /* SSEParser.swift */; };
-		ADF3CCCE5DEEE048A9E083A3 /* MopeliumAgentLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573BE601CC6ABC34B6D402B2 /* MopeliumAgentLoop.swift */; };
+		3EB902E2652B35AAFEB50B5B /* MopeliumiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ED26444A7D6E0D8CF22D2A4 /* MopeliumiOSApp.swift */; };
+		498D0E8D04B401F8F44D6B8B /* MopeliumCowork in Frameworks */ = {isa = PBXBuildFile; productRef = F77C31409CA21575B5B2431B /* MopeliumCowork */; };
+		53B2A8FE5A4B63539982E8AD /* ThirdPartyNotices in Resources */ = {isa = PBXBuildFile; fileRef = AA2E4701FAB0E684C1046863 /* ThirdPartyNotices */; };
+		541886C070F27E49E9AA09B3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = D58223A9E9997F6C21C6309A /* Localizable.xcstrings */; };
+		593EEDEC98EE12CE09E41E2F /* PhaseLSessionLifecycleFixtureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491B968F58689B472918E210 /* PhaseLSessionLifecycleFixtureView.swift */; };
+		5A6197C5A7B24970FF4E33DE /* MopeliumCore in Frameworks */ = {isa = PBXBuildFile; productRef = E93600A5543EF9CE814B024C /* MopeliumCore */; };
+		5E3745DC2D33CF9F6032154B /* MopeliumPermission in Frameworks */ = {isa = PBXBuildFile; productRef = DD92F26B302B4C4E97B2D295 /* MopeliumPermission */; };
+		5F4405504D59D1831448ED8A /* MopeliumTools in Frameworks */ = {isa = PBXBuildFile; productRef = C2DAF596DAB876CF435370C9 /* MopeliumTools */; };
+		614CB0F2CEE3AFDC6A5A44FE /* MopeliumConversation in Frameworks */ = {isa = PBXBuildFile; productRef = 8A7A61A39CC2703718080561 /* MopeliumConversation */; };
+		6E0955FBE876D015539CA9BD /* CoworkViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83496C9439C59C717C001C40 /* CoworkViewModel.swift */; };
+		7297D707B2BE1B5E98D63828 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09BA30B2F73E8C9C3CBEA49E /* Keychain.swift */; };
+		7E80C9B9B39881669B9ACD00 /* CodeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C49CFFCB543EB530987B95BE /* CodeViewModel.swift */; };
+		8270E3EDED7FF1171668DD64 /* ThirdPartyNotices in Resources */ = {isa = PBXBuildFile; fileRef = AA2E4701FAB0E684C1046863 /* ThirdPartyNotices */; };
+		833383B8CD8B3D7D8605E89D /* NOTICE.md in Resources */ = {isa = PBXBuildFile; fileRef = 603E5A9442F360CEC7B42022 /* NOTICE.md */; };
+		87423254AEF555AF243CD607 /* NOTICE.md in Resources */ = {isa = PBXBuildFile; fileRef = 603E5A9442F360CEC7B42022 /* NOTICE.md */; };
+		88E4B6FAA84C82FAAEA863E5 /* MopeliumConversation in Frameworks */ = {isa = PBXBuildFile; productRef = D40715313A2698AE8A0CC931 /* MopeliumConversation */; };
+		9BEDD921C00464D38BF2B04D /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21E217A1CCCB4D4CBCE901CA /* AppConfig.swift */; };
+		9E8B4A37BAE38C1546985498 /* PhaseCPermissionFixtureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C2391A46AE1DDC390018370 /* PhaseCPermissionFixtureView.swift */; };
+		A3AACFA2F4CFB43E89F156B6 /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = D376C323DF08941EE7250C3B /* Settings.bundle */; };
+		A9B5F036100B87D8876D6A4A /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = D58223A9E9997F6C21C6309A /* Localizable.xcstrings */; };
+		AA6DBE0219CC59B4A99CC3F6 /* MopeliumMultimodal in Frameworks */ = {isa = PBXBuildFile; productRef = A941CD5FFBB736770F9ED3D4 /* MopeliumMultimodal */; };
+		B25DF3EF2F5CBBA542C94D7A /* MopeliumProviders in Frameworks */ = {isa = PBXBuildFile; productRef = 13A6FDC6E7E37C60BE2AD518 /* MopeliumProviders */; };
+		B4A104872773281EF29A2380 /* IOSConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE21324E3C36ABE785F267B5 /* IOSConfig.swift */; };
+		B7980F6731E122FBA10629DC /* MopeliumChatScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3FB340774B3C60336433749 /* MopeliumChatScreen.swift */; };
+		BA16170866029DABA0E720DB /* SessionRuntimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B87922FFC069C08F9DB62F4 /* SessionRuntimeManager.swift */; };
 		BAA4FD7B4AAFB7CDE418FE75 /* MopeliumMacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6860F6E827A38A42A962B5 /* MopeliumMacRootView.swift */; };
-		C18BECB068D245B345E30F49 /* OpenAICompatibleToolCallingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F4C8F0DB4081AD17E094849 /* OpenAICompatibleToolCallingProvider.swift */; };
-		CFDC43C9A8B72EB1EDFC045E /* OpenAICompatibleProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A929EF64C883B855732B91EC /* OpenAICompatibleProvider.swift */; };
-		CFF4D6349FE0103D7CF59A4F /* ToolSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC64D32978D44926944D446E /* ToolSupport.swift */; };
-		D9886F93B1AFC88AB01F76A3 /* FileTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7670F65C535B29233F1F6C35 /* FileTools.swift */; };
-		DE67C91EF524AC22B5148501 /* MopeliumProviders.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		BD224E7A2A4F8487EC1DF107 /* MopeliumProviders in Frameworks */ = {isa = PBXBuildFile; productRef = 5087FDB1CD6C6569B39F1723 /* MopeliumProviders */; };
+		BEA4B3DE22C8D3AF9FD42F5A /* MopeliumArtifacts in Frameworks */ = {isa = PBXBuildFile; productRef = 2CED2D9B18DB0763B83FB96C /* MopeliumArtifacts */; };
+		CB27DB9FAC92A832313C93C0 /* MopeliumAgentKernel in Frameworks */ = {isa = PBXBuildFile; productRef = 1254D3C4DF3E10040DE777B2 /* MopeliumAgentKernel */; };
+		D84B84C8212C7F6ABCB01614 /* CoworkProjectSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC70A873814CE3AA783C22CC /* CoworkProjectSettings.swift */; };
+		DA0A096CE8E034527814C9D7 /* MopeliumSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = C80EF403258D4BF6002D9883 /* MopeliumSharedUI */; };
 		DEACC40311C3310165BE8E04 /* MopeliumDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC9B53F03FED2B3C1621532 /* MopeliumDesign.swift */; };
-		DF5267F2F3790C6EE3D13D84 /* MopeliumSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748F606F4AAD19638E823FE2 /* MopeliumSidebar.swift */; };
-		E1E30A97FEE47585647FA14B /* MopeliumResearchScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41554A9E4DC3715C3818B136 /* MopeliumResearchScreen.swift */; };
-		E27AB308D0510B6655CD2D4F /* MopeliumProviders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */; };
-		E9AD861CC311FBD90315DCD0 /* MopeliumTools.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */; };
-		F356AC6E67117BF83C4433AB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 827AADC3EB77DD86C6FC4392 /* main.swift */; };
-		F4ECE8410F8AAD1F7BCA7010 /* MopeliumError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F8E258CE44FF3FAA8B82D9D /* MopeliumError.swift */; };
-		F62874ADB2A88D585DC5A9C2 /* Terminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5067463EE0D69628C25A9151 /* Terminal.swift */; };
-		F8179CAC5ED98B8FEDE40B64 /* MopeliumAgent.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BFDD8AD7CC13B010C0CDBB1B /* MopeliumAgent.framework */; };
-		F8EB360869333C8E8E3AA26F /* PathConfinement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5020521E7E6EF09E6E928D9A /* PathConfinement.swift */; };
-		FBD9B51224E1C9FB4C29A4B9 /* MopeliumCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */; };
-		FC713365C2D8E141BA4CE8DA /* ToolProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF0ECFD41FEFD541ACA6EBFE /* ToolProtocol.swift */; };
+		DF21D47EC83F9DDC2A7D034E /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60413D391715E7F8EDD65F3 /* Keychain.swift */; };
+		E1B2255B941029DDF056ED88 /* Workspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26BDFA232EF925FDE2D6559C /* Workspace.swift */; };
+		E67DD315D770CB4064EFB5B2 /* MopeliumCore in Frameworks */ = {isa = PBXBuildFile; productRef = 95811639273B2BC9D1395FB2 /* MopeliumCore */; };
+		E97E176E97CBBC5762464E67 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = E2BDE1D771F31D2D97BE2BF4 /* InfoPlist.strings */; };
+		F258CAB6AE138DB99627089E /* MopeliumProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = 00CC44DD55E6240529B0BA4E /* MopeliumProtocol */; };
+		F435022430E79F385C7DC98C /* AppInferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFBB448A6A653518BB733D3E /* AppInferenceCatalog.swift */; };
 /* End PBXBuildFile section */
 
-/* Begin PBXContainerItemProxy section */
-		12A50D6B52422C92C12A8F10 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E0777C7D1C82C321A91585DD;
-			remoteInfo = MopeliumProviders;
-		};
-		27EDCD8C281F020A09DFE16C /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7D5ECAEE1585541713003A07;
-			remoteInfo = MopeliumCore;
-		};
-		36E8D0F494034F92D8F14EA6 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7D5ECAEE1585541713003A07;
-			remoteInfo = MopeliumCore;
-		};
-		5007E06E2450F67A3FEAB32D /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E0777C7D1C82C321A91585DD;
-			remoteInfo = MopeliumProviders;
-		};
-		6F940BCC5CFB277F463C63DE /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 03B386974DEEEC084EA4E298;
-			remoteInfo = MopeliumAgent;
-		};
-		728E96DD416EE6959E71DC46 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = FD4FAE7D109FBB59281FF4B4;
-			remoteInfo = MopeliumTools;
-		};
-		7929EB3580DE7D973F2DEBE9 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = FD4FAE7D109FBB59281FF4B4;
-			remoteInfo = MopeliumTools;
-		};
-		97AA64CABF70FDC3CE2368D8 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = E0777C7D1C82C321A91585DD;
-			remoteInfo = MopeliumProviders;
-		};
-		98F0202991694E075D15B711 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = FD4FAE7D109FBB59281FF4B4;
-			remoteInfo = MopeliumTools;
-		};
-		B6D03BAE01E6CE0835E23466 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 03B386974DEEEC084EA4E298;
-			remoteInfo = MopeliumAgent;
-		};
-		C3E3009D6A10F18BD42855E7 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7D5ECAEE1585541713003A07;
-			remoteInfo = MopeliumCore;
-		};
-		D61C545CC99A640FF1D81B64 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 9B25C0FD0AB46E6132DC036B /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 7D5ECAEE1585541713003A07;
-			remoteInfo = MopeliumCore;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		4FB81565449D1CC42E25285C /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				12E9C25722E4A89901FE3980 /* MopeliumCore.framework in Embed Frameworks */,
-				DE67C91EF524AC22B5148501 /* MopeliumProviders.framework in Embed Frameworks */,
-				7190CA1BD9222ADA1895606E /* MopeliumTools.framework in Embed Frameworks */,
-				747C77DAAB3B4F592E591BE7 /* MopeliumAgent.framework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
-
 /* Begin PBXFileReference section */
-		41554A9E4DC3715C3818B136 /* MopeliumResearchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumResearchScreen.swift; sourceTree = "<group>"; };
+		09BA30B2F73E8C9C3CBEA49E /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		1C2391A46AE1DDC390018370 /* PhaseCPermissionFixtureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhaseCPermissionFixtureView.swift; sourceTree = "<group>"; };
+		21E217A1CCCB4D4CBCE901CA /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		26BDFA232EF925FDE2D6559C /* Workspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Workspace.swift; sourceTree = "<group>"; };
+		39FD6738A52809A2381B5782 /* RendererFixtureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererFixtureView.swift; sourceTree = "<group>"; };
+		3B87922FFC069C08F9DB62F4 /* SessionRuntimeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRuntimeManager.swift; sourceTree = "<group>"; };
+		402152713FADB46F85757D54 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		4159E4A294DB4E31DC88B5E9 /* MopeliumMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumMacApp.swift; sourceTree = "<group>"; };
-		4CF8DCC7064DFE664D0EC991 /* ToolCallingTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCallingTypes.swift; sourceTree = "<group>"; };
-		4FBC4A8D882D7905F941A693 /* CLIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIConfig.swift; sourceTree = "<group>"; };
-		5020521E7E6EF09E6E928D9A /* PathConfinement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathConfinement.swift; sourceTree = "<group>"; };
-		5067463EE0D69628C25A9151 /* Terminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Terminal.swift; sourceTree = "<group>"; };
-		573BE601CC6ABC34B6D402B2 /* MopeliumAgentLoop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumAgentLoop.swift; sourceTree = "<group>"; };
+		491B968F58689B472918E210 /* PhaseLSessionLifecycleFixtureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhaseLSessionLifecycleFixtureView.swift; sourceTree = "<group>"; };
+		603E5A9442F360CEC7B42022 /* NOTICE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = NOTICE.md; sourceTree = "<group>"; };
 		6AC9B53F03FED2B3C1621532 /* MopeliumDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumDesign.swift; sourceTree = "<group>"; };
-		748F606F4AAD19638E823FE2 /* MopeliumSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumSidebar.swift; sourceTree = "<group>"; };
-		7670F65C535B29233F1F6C35 /* FileTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTools.swift; sourceTree = "<group>"; };
-		7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MopeliumCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		7D8E9BB3672E82BC90DB538D /* ShellGit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellGit.swift; sourceTree = "<group>"; };
-		7D9209C1813CE60805E6DCC3 /* ChatTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTypes.swift; sourceTree = "<group>"; };
-		7F8E258CE44FF3FAA8B82D9D /* MopeliumError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumError.swift; sourceTree = "<group>"; };
-		827AADC3EB77DD86C6FC4392 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		85110A016FD2D7833E7F0CE1 /* MopeliumComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumComponents.swift; sourceTree = "<group>"; };
-		8745C86D5FFB48A2802E9DBE /* BrowserTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTools.swift; sourceTree = "<group>"; };
-		8F4C8F0DB4081AD17E094849 /* OpenAICompatibleToolCallingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleToolCallingProvider.swift; sourceTree = "<group>"; };
-		94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MopeliumProviders.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		A929EF64C883B855732B91EC /* OpenAICompatibleProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICompatibleProvider.swift; sourceTree = "<group>"; };
+		6ED26444A7D6E0D8CF22D2A4 /* MopeliumiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumiOSApp.swift; sourceTree = "<group>"; };
+		83496C9439C59C717C001C40 /* CoworkViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkViewModel.swift; sourceTree = "<group>"; };
+		AA2E4701FAB0E684C1046863 /* ThirdPartyNotices */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ThirdPartyNotices; sourceTree = SOURCE_ROOT; };
+		AC70A873814CE3AA783C22CC /* CoworkProjectSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkProjectSettings.swift; sourceTree = "<group>"; };
 		AD6860F6E827A38A42A962B5 /* MopeliumMacRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumMacRootView.swift; sourceTree = "<group>"; };
-		BBB01C66B3863B0E6EE5936A /* MopeliumTasksScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumTasksScreen.swift; sourceTree = "<group>"; };
-		BFDD8AD7CC13B010C0CDBB1B /* MopeliumAgent.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MopeliumAgent.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		C07DFA757D0769400FD520EA /* SSEParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEParser.swift; sourceTree = "<group>"; };
-		CC64D32978D44926944D446E /* ToolSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSupport.swift; sourceTree = "<group>"; };
-		CC8F23381E14E48FC55135A0 /* mopelium */ = {isa = PBXFileReference; includeInIndex = 0; path = mopelium; sourceTree = BUILT_PRODUCTS_DIR; };
-		CCF2B56CAC8F51F1C2E0E51A /* PatchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatchTool.swift; sourceTree = "<group>"; };
-		D21DA3C8B65080142D6664E6 /* MopeliumSourcesScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumSourcesScreen.swift; sourceTree = "<group>"; };
+		B38FCB82B8A31D9982A4C9F0 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		B3FB340774B3C60336433749 /* MopeliumChatScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumChatScreen.swift; sourceTree = "<group>"; };
+		B60413D391715E7F8EDD65F3 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		C49CFFCB543EB530987B95BE /* CodeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeViewModel.swift; sourceTree = "<group>"; };
+		D376C323DF08941EE7250C3B /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = wrapper.cfbundle; path = Settings.bundle; sourceTree = "<group>"; };
 		D39BB9AF75966BBB7DB91F2F /* MopeliumMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MopeliumMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MopeliumTools.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		E2752B85511BA9D8EA419687 /* MopeliumMockData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumMockData.swift; sourceTree = "<group>"; };
-		E80E8781C163E3C041252489 /* MopeliumSettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MopeliumSettingsScreen.swift; sourceTree = "<group>"; };
-		EF0ECFD41FEFD541ACA6EBFE /* ToolProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolProtocol.swift; sourceTree = "<group>"; };
-		FDE65DD24CA0C737D88CECB0 /* DocumentMediaTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentMediaTools.swift; sourceTree = "<group>"; };
+		D58223A9E9997F6C21C6309A /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		DFBB448A6A653518BB733D3E /* AppInferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppInferenceCatalog.swift; sourceTree = "<group>"; };
+		EE54DEC57C8F85ED5C525FB9 /* Mopelium */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Mopelium; path = .; sourceTree = SOURCE_ROOT; };
+		F68EB985090B39D51090CB33 /* MopeliumiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MopeliumiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE21324E3C36ABE785F267B5 /* IOSConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSConfig.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		081372B032DBCC1113B37F83 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E67DD315D770CB4064EFB5B2 /* MopeliumCore in Frameworks */,
+				25128F1D1C739084765EDA4B /* MopeliumProtocol in Frameworks */,
+				B25DF3EF2F5CBBA542C94D7A /* MopeliumProviders in Frameworks */,
+				88E4B6FAA84C82FAAEA863E5 /* MopeliumConversation in Frameworks */,
+				BEA4B3DE22C8D3AF9FD42F5A /* MopeliumArtifacts in Frameworks */,
+				AA6DBE0219CC59B4A99CC3F6 /* MopeliumMultimodal in Frameworks */,
+				2DA779940F69FD35F52F0ED2 /* MopeliumSharedUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		339A1C7FD98083028E2567D5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				97705AF85983ED464F25BC36 /* MopeliumCore.framework in Frameworks */,
-				7C05C9DE3B65538BC8735B57 /* MopeliumProviders.framework in Frameworks */,
-				E9AD861CC311FBD90315DCD0 /* MopeliumTools.framework in Frameworks */,
-				8895F332F09D3A5BB5973804 /* MopeliumAgent.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		B55951962FE80F57D6C7C64F /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				FBD9B51224E1C9FB4C29A4B9 /* MopeliumCore.framework in Frameworks */,
-				E27AB308D0510B6655CD2D4F /* MopeliumProviders.framework in Frameworks */,
-				4C2E514ED69912A5875E8F9E /* MopeliumTools.framework in Frameworks */,
-				F8179CAC5ED98B8FEDE40B64 /* MopeliumAgent.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C8F24D77A3AEBDC1FB8C1CF1 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				57A3703876733D4D77BF59A2 /* MopeliumCore.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F57D083EC1A5509C715D1837 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				63E2CA9AB85BFE87D05E96F1 /* MopeliumCore.framework in Frameworks */,
-				A36A8A5BA5AE4ED40A69B52D /* MopeliumProviders.framework in Frameworks */,
-				510BF7853557A9D108DC0136 /* MopeliumTools.framework in Frameworks */,
+				5A6197C5A7B24970FF4E33DE /* MopeliumCore in Frameworks */,
+				F258CAB6AE138DB99627089E /* MopeliumProtocol in Frameworks */,
+				BD224E7A2A4F8487EC1DF107 /* MopeliumProviders in Frameworks */,
+				614CB0F2CEE3AFDC6A5A44FE /* MopeliumConversation in Frameworks */,
+				298E9B16F5E3F9FC2867A880 /* MopeliumArtifacts in Frameworks */,
+				0B4F0465C5504F7CDF85D08D /* MopeliumMultimodal in Frameworks */,
+				DA0A096CE8E034527814C9D7 /* MopeliumSharedUI in Frameworks */,
+				5F4405504D59D1831448ED8A /* MopeliumTools in Frameworks */,
+				5E3745DC2D33CF9F6032154B /* MopeliumPermission in Frameworks */,
+				CB27DB9FAC92A832313C93C0 /* MopeliumAgentKernel in Frameworks */,
+				498D0E8D04B401F8F44D6B8B /* MopeliumCowork in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		1E061B8331A70CA287ADC81B /* Sources */ = {
+		19708B2F2FF62874B12FFA3B /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				4FBC4A8D882D7905F941A693 /* CLIConfig.swift */,
-				7F8E258CE44FF3FAA8B82D9D /* MopeliumError.swift */,
-				5067463EE0D69628C25A9151 /* Terminal.swift */,
+				FE21324E3C36ABE785F267B5 /* IOSConfig.swift */,
+				B60413D391715E7F8EDD65F3 /* Keychain.swift */,
+				6ED26444A7D6E0D8CF22D2A4 /* MopeliumiOSApp.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		227B4C7EF14E47D2A88E32B8 /* MopeliumCore */ = {
+		1E09FB8692F66B3574135A93 /* MopeliumiOS */ = {
 			isa = PBXGroup;
 			children = (
-				1E061B8331A70CA287ADC81B /* Sources */,
+				FD67F0D83B4F2A57289CAC28 /* Resources */,
+				19708B2F2FF62874B12FFA3B /* Sources */,
 			);
-			path = MopeliumCore;
-			sourceTree = "<group>";
-		};
-		257FF2BA60AD93C0FD5693E9 /* Packages */ = {
-			isa = PBXGroup;
-			children = (
-				69FCEAAF24B6A6468987DE43 /* MopeliumAgent */,
-				227B4C7EF14E47D2A88E32B8 /* MopeliumCore */,
-				471F70114919F33837D189DA /* MopeliumProviders */,
-				A2AC8B82FC370EDDBE3C0E2B /* MopeliumTools */,
-			);
-			path = Packages;
+			path = MopeliumiOS;
 			sourceTree = "<group>";
 		};
 		330FA36CFA35F678F42BD6B7 = {
 			isa = PBXGroup;
 			children = (
+				603E5A9442F360CEC7B42022 /* NOTICE.md */,
+				AA2E4701FAB0E684C1046863 /* ThirdPartyNotices */,
 				484262032AE6228DDEB597F9 /* Apps */,
-				257FF2BA60AD93C0FD5693E9 /* Packages */,
+				C7FE594A72E7F9E4110CAEC1 /* Internal Modules */,
 				4A6F0D9E584293A2ACC1C229 /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		471F70114919F33837D189DA /* MopeliumProviders */ = {
-			isa = PBXGroup;
-			children = (
-				F4CB85DC571DCCE3ECAA7B93 /* Sources */,
-			);
-			path = MopeliumProviders;
 			sourceTree = "<group>";
 		};
 		484262032AE6228DDEB597F9 /* Apps */ = {
 			isa = PBXGroup;
 			children = (
-				EE7F49109A529211B8150396 /* mopelium-cli */,
+				1E09FB8692F66B3574135A93 /* MopeliumiOS */,
 				560D9714B0562E88F4B2881A /* MopeliumMac */,
+				B4BB79E2B4617FD1EB7EDC25 /* SharedResources */,
 			);
 			path = Apps;
 			sourceTree = "<group>";
@@ -296,12 +162,8 @@
 		4A6F0D9E584293A2ACC1C229 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CC8F23381E14E48FC55135A0 /* mopelium */,
-				BFDD8AD7CC13B010C0CDBB1B /* MopeliumAgent.framework */,
-				7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */,
+				F68EB985090B39D51090CB33 /* MopeliumiOS.app */,
 				D39BB9AF75966BBB7DB91F2F /* MopeliumMac.app */,
-				94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */,
-				DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -314,211 +176,111 @@
 			path = MopeliumMac;
 			sourceTree = "<group>";
 		};
-		69FCEAAF24B6A6468987DE43 /* MopeliumAgent */ = {
+		B4BB79E2B4617FD1EB7EDC25 /* SharedResources */ = {
 			isa = PBXGroup;
 			children = (
-				C6BD5DBBD39E5647652D15CB /* Sources */,
+				D58223A9E9997F6C21C6309A /* Localizable.xcstrings */,
 			);
-			path = MopeliumAgent;
+			path = SharedResources;
 			sourceTree = "<group>";
 		};
-		A2AC8B82FC370EDDBE3C0E2B /* MopeliumTools */ = {
+		C7FE594A72E7F9E4110CAEC1 /* Internal Modules */ = {
 			isa = PBXGroup;
 			children = (
-				D9DAA7F58ECB03F308858CD1 /* Sources */,
+				EE54DEC57C8F85ED5C525FB9 /* Mopelium */,
 			);
-			path = MopeliumTools;
-			sourceTree = "<group>";
-		};
-		C6BD5DBBD39E5647652D15CB /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				573BE601CC6ABC34B6D402B2 /* MopeliumAgentLoop.swift */,
-				8F4C8F0DB4081AD17E094849 /* OpenAICompatibleToolCallingProvider.swift */,
-			);
-			path = Sources;
-			sourceTree = "<group>";
-		};
-		D9DAA7F58ECB03F308858CD1 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				8745C86D5FFB48A2802E9DBE /* BrowserTools.swift */,
-				FDE65DD24CA0C737D88CECB0 /* DocumentMediaTools.swift */,
-				7670F65C535B29233F1F6C35 /* FileTools.swift */,
-				CCF2B56CAC8F51F1C2E0E51A /* PatchTool.swift */,
-				5020521E7E6EF09E6E928D9A /* PathConfinement.swift */,
-				7D8E9BB3672E82BC90DB538D /* ShellGit.swift */,
-				EF0ECFD41FEFD541ACA6EBFE /* ToolProtocol.swift */,
-				CC64D32978D44926944D446E /* ToolSupport.swift */,
-			);
-			path = Sources;
-			sourceTree = "<group>";
-		};
-		E44B5421EE74EAD1201838A3 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				827AADC3EB77DD86C6FC4392 /* main.swift */,
-			);
-			path = Sources;
-			sourceTree = "<group>";
-		};
-		EE7F49109A529211B8150396 /* mopelium-cli */ = {
-			isa = PBXGroup;
-			children = (
-				E44B5421EE74EAD1201838A3 /* Sources */,
-			);
-			path = "mopelium-cli";
-			sourceTree = "<group>";
-		};
-		F4CB85DC571DCCE3ECAA7B93 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				7D9209C1813CE60805E6DCC3 /* ChatTypes.swift */,
-				A929EF64C883B855732B91EC /* OpenAICompatibleProvider.swift */,
-				C07DFA757D0769400FD520EA /* SSEParser.swift */,
-				4CF8DCC7064DFE664D0EC991 /* ToolCallingTypes.swift */,
-			);
-			path = Sources;
+			name = "Internal Modules";
 			sourceTree = "<group>";
 		};
 		FB5F1986A7EB579C3920FB4D /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				85110A016FD2D7833E7F0CE1 /* MopeliumComponents.swift */,
+				21E217A1CCCB4D4CBCE901CA /* AppConfig.swift */,
+				DFBB448A6A653518BB733D3E /* AppInferenceCatalog.swift */,
+				C49CFFCB543EB530987B95BE /* CodeViewModel.swift */,
+				AC70A873814CE3AA783C22CC /* CoworkProjectSettings.swift */,
+				83496C9439C59C717C001C40 /* CoworkViewModel.swift */,
+				09BA30B2F73E8C9C3CBEA49E /* Keychain.swift */,
+				B3FB340774B3C60336433749 /* MopeliumChatScreen.swift */,
 				6AC9B53F03FED2B3C1621532 /* MopeliumDesign.swift */,
 				4159E4A294DB4E31DC88B5E9 /* MopeliumMacApp.swift */,
 				AD6860F6E827A38A42A962B5 /* MopeliumMacRootView.swift */,
-				E2752B85511BA9D8EA419687 /* MopeliumMockData.swift */,
-				41554A9E4DC3715C3818B136 /* MopeliumResearchScreen.swift */,
-				E80E8781C163E3C041252489 /* MopeliumSettingsScreen.swift */,
-				748F606F4AAD19638E823FE2 /* MopeliumSidebar.swift */,
-				D21DA3C8B65080142D6664E6 /* MopeliumSourcesScreen.swift */,
-				BBB01C66B3863B0E6EE5936A /* MopeliumTasksScreen.swift */,
+				1C2391A46AE1DDC390018370 /* PhaseCPermissionFixtureView.swift */,
+				491B968F58689B472918E210 /* PhaseLSessionLifecycleFixtureView.swift */,
+				39FD6738A52809A2381B5782 /* RendererFixtureView.swift */,
+				3B87922FFC069C08F9DB62F4 /* SessionRuntimeManager.swift */,
+				26BDFA232EF925FDE2D6559C /* Workspace.swift */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		FD67F0D83B4F2A57289CAC28 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D376C323DF08941EE7250C3B /* Settings.bundle */,
+				E2BDE1D771F31D2D97BE2BF4 /* InfoPlist.strings */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		03B386974DEEEC084EA4E298 /* MopeliumAgent */ = {
+		561A3994A8C56A28BC69B929 /* MopeliumiOS */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 419F8B54A775AF912FF03DCA /* Build configuration list for PBXNativeTarget "MopeliumAgent" */;
+			buildConfigurationList = 743C03E7EF8978F6963E2602 /* Build configuration list for PBXNativeTarget "MopeliumiOS" */;
 			buildPhases = (
-				F0309852FFF15B802F0AE6F7 /* Sources */,
-				F57D083EC1A5509C715D1837 /* Frameworks */,
+				52C0592B3E1CCFD8C7D719F8 /* Sources */,
+				894415D247CBD3C16DBF7CA3 /* Resources */,
+				081372B032DBCC1113B37F83 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				6C8B0F71C75E71BB293D0BFA /* PBXTargetDependency */,
-				CE72FF81B2D91A1F37B59DCC /* PBXTargetDependency */,
-				535C15BADC2785D3626EF3D8 /* PBXTargetDependency */,
 			);
-			name = MopeliumAgent;
+			name = MopeliumiOS;
 			packageProductDependencies = (
+				95811639273B2BC9D1395FB2 /* MopeliumCore */,
+				46D28E6C1B62478039B0BE2B /* MopeliumProtocol */,
+				13A6FDC6E7E37C60BE2AD518 /* MopeliumProviders */,
+				D40715313A2698AE8A0CC931 /* MopeliumConversation */,
+				2CED2D9B18DB0763B83FB96C /* MopeliumArtifacts */,
+				A941CD5FFBB736770F9ED3D4 /* MopeliumMultimodal */,
+				4A28F7B2814740F8E664E07A /* MopeliumSharedUI */,
 			);
-			productName = MopeliumAgent;
-			productReference = BFDD8AD7CC13B010C0CDBB1B /* MopeliumAgent.framework */;
-			productType = "com.apple.product-type.framework";
-		};
-		392527716FDBB1EF234D918D /* mopelium */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 89BE80E64CE7EFC8B69DF3CD /* Build configuration list for PBXNativeTarget "mopelium" */;
-			buildPhases = (
-				4C548B726E5E16351D56013A /* Sources */,
-				B55951962FE80F57D6C7C64F /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				ADC5C953E4B534C9D9D989AD /* PBXTargetDependency */,
-				3FED56A764B7ECA2E59D1534 /* PBXTargetDependency */,
-				676CD47FCED6C2FE9F5579F8 /* PBXTargetDependency */,
-				FC267821CA79E677CDDBE5FB /* PBXTargetDependency */,
-			);
-			name = mopelium;
-			packageProductDependencies = (
-			);
-			productName = mopelium;
-			productReference = CC8F23381E14E48FC55135A0 /* mopelium */;
-			productType = "com.apple.product-type.tool";
+			productName = MopeliumiOS;
+			productReference = F68EB985090B39D51090CB33 /* MopeliumiOS.app */;
+			productType = "com.apple.product-type.application";
 		};
 		5C630EF813592A5124C78013 /* MopeliumMac */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2C5FDFBFB17522754A052C51 /* Build configuration list for PBXNativeTarget "MopeliumMac" */;
 			buildPhases = (
 				3E948B70EA160A703E0F5F36 /* Sources */,
+				8DEC54643FAB0C3C3703C1FB /* Resources */,
 				339A1C7FD98083028E2567D5 /* Frameworks */,
-				4FB81565449D1CC42E25285C /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				A137E12F049BA80EB728D29B /* PBXTargetDependency */,
-				21781B342315F0E148D547ED /* PBXTargetDependency */,
-				5C12A4820C8285F4FE1BE58D /* PBXTargetDependency */,
-				FDD042CDD0A7494AD2D3B5DB /* PBXTargetDependency */,
 			);
 			name = MopeliumMac;
 			packageProductDependencies = (
+				E93600A5543EF9CE814B024C /* MopeliumCore */,
+				00CC44DD55E6240529B0BA4E /* MopeliumProtocol */,
+				5087FDB1CD6C6569B39F1723 /* MopeliumProviders */,
+				8A7A61A39CC2703718080561 /* MopeliumConversation */,
+				C12BA0CC7547DB7648E741B4 /* MopeliumArtifacts */,
+				7671BC9609B3A0339B3DA830 /* MopeliumMultimodal */,
+				C80EF403258D4BF6002D9883 /* MopeliumSharedUI */,
+				C2DAF596DAB876CF435370C9 /* MopeliumTools */,
+				DD92F26B302B4C4E97B2D295 /* MopeliumPermission */,
+				1254D3C4DF3E10040DE777B2 /* MopeliumAgentKernel */,
+				F77C31409CA21575B5B2431B /* MopeliumCowork */,
 			);
 			productName = MopeliumMac;
 			productReference = D39BB9AF75966BBB7DB91F2F /* MopeliumMac.app */;
 			productType = "com.apple.product-type.application";
-		};
-		7D5ECAEE1585541713003A07 /* MopeliumCore */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = C73FF6B9F60746E068135616 /* Build configuration list for PBXNativeTarget "MopeliumCore" */;
-			buildPhases = (
-				7EAE4A1B3C5F789D3DA612B1 /* Sources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = MopeliumCore;
-			packageProductDependencies = (
-			);
-			productName = MopeliumCore;
-			productReference = 7BD0CE6853DE880D1014A17D /* MopeliumCore.framework */;
-			productType = "com.apple.product-type.framework";
-		};
-		E0777C7D1C82C321A91585DD /* MopeliumProviders */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 23519CDA3B90D660C2EA3448 /* Build configuration list for PBXNativeTarget "MopeliumProviders" */;
-			buildPhases = (
-				3B4E5C59C1F53EE4C00B0D32 /* Sources */,
-				C8F24D77A3AEBDC1FB8C1CF1 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				2B62AD021E52B49287492696 /* PBXTargetDependency */,
-			);
-			name = MopeliumProviders;
-			packageProductDependencies = (
-			);
-			productName = MopeliumProviders;
-			productReference = 94377892A0BEB5EB8FEE7695 /* MopeliumProviders.framework */;
-			productType = "com.apple.product-type.framework";
-		};
-		FD4FAE7D109FBB59281FF4B4 /* MopeliumTools */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = B9D8D76698BDF49B073AFD3B /* Build configuration list for PBXNativeTarget "MopeliumTools" */;
-			buildPhases = (
-				ED2519432DCCCDAB6FC43A6C /* Sources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = MopeliumTools;
-			packageProductDependencies = (
-			);
-			productName = MopeliumTools;
-			productReference = DA9530C18FE99A00C60E8FD9 /* MopeliumTools.framework */;
-			productType = "com.apple.product-type.framework";
 		};
 /* End PBXNativeTarget section */
 
@@ -529,28 +291,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
-					03B386974DEEEC084EA4E298 = {
-						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
-					};
-					392527716FDBB1EF234D918D = {
-						DevelopmentTeam = "";
+					561A3994A8C56A28BC69B929 = {
 						ProvisioningStyle = Automatic;
 					};
 					5C630EF813592A5124C78013 = {
-						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
-					};
-					7D5ECAEE1585541713003A07 = {
-						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
-					};
-					E0777C7D1C82C321A91585DD = {
-						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
-					};
-					FD4FAE7D109FBB59281FF4B4 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -561,159 +305,95 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 330FA36CFA35F678F42BD6B7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B852B815446C431020EB02EE /* XCLocalSwiftPackageReference "." */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4A6F0D9E584293A2ACC1C229 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				03B386974DEEEC084EA4E298 /* MopeliumAgent */,
-				7D5ECAEE1585541713003A07 /* MopeliumCore */,
 				5C630EF813592A5124C78013 /* MopeliumMac */,
-				E0777C7D1C82C321A91585DD /* MopeliumProviders */,
-				FD4FAE7D109FBB59281FF4B4 /* MopeliumTools */,
-				392527716FDBB1EF234D918D /* mopelium */,
+				561A3994A8C56A28BC69B929 /* MopeliumiOS */,
 			);
 		};
 /* End PBXProject section */
 
-/* Begin PBXSourcesBuildPhase section */
-		3B4E5C59C1F53EE4C00B0D32 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
+/* Begin PBXResourcesBuildPhase section */
+		894415D247CBD3C16DBF7CA3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2AA45CE297D64CEC1C380BBB /* ChatTypes.swift in Sources */,
-				CFDC43C9A8B72EB1EDFC045E /* OpenAICompatibleProvider.swift in Sources */,
-				A462E8C75A896E1C2FF14A43 /* SSEParser.swift in Sources */,
-				1B2BF6D95C6CA97538D74353 /* ToolCallingTypes.swift in Sources */,
+				E97E176E97CBBC5762464E67 /* InfoPlist.strings in Resources */,
+				541886C070F27E49E9AA09B3 /* Localizable.xcstrings in Resources */,
+				833383B8CD8B3D7D8605E89D /* NOTICE.md in Resources */,
+				A3AACFA2F4CFB43E89F156B6 /* Settings.bundle in Resources */,
+				8270E3EDED7FF1171668DD64 /* ThirdPartyNotices in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8DEC54643FAB0C3C3703C1FB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A9B5F036100B87D8876D6A4A /* Localizable.xcstrings in Resources */,
+				87423254AEF555AF243CD607 /* NOTICE.md in Resources */,
+				53B2A8FE5A4B63539982E8AD /* ThirdPartyNotices in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
 		3E948B70EA160A703E0F5F36 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2604731B40E97A32A87196A2 /* MopeliumComponents.swift in Sources */,
+				9BEDD921C00464D38BF2B04D /* AppConfig.swift in Sources */,
+				F435022430E79F385C7DC98C /* AppInferenceCatalog.swift in Sources */,
+				7E80C9B9B39881669B9ACD00 /* CodeViewModel.swift in Sources */,
+				D84B84C8212C7F6ABCB01614 /* CoworkProjectSettings.swift in Sources */,
+				6E0955FBE876D015539CA9BD /* CoworkViewModel.swift in Sources */,
+				7297D707B2BE1B5E98D63828 /* Keychain.swift in Sources */,
+				B7980F6731E122FBA10629DC /* MopeliumChatScreen.swift in Sources */,
 				DEACC40311C3310165BE8E04 /* MopeliumDesign.swift in Sources */,
 				37BCC77CBD9A29A5C99647F5 /* MopeliumMacApp.swift in Sources */,
 				BAA4FD7B4AAFB7CDE418FE75 /* MopeliumMacRootView.swift in Sources */,
-				10AF139F6852F84227C31C76 /* MopeliumMockData.swift in Sources */,
-				E1E30A97FEE47585647FA14B /* MopeliumResearchScreen.swift in Sources */,
-				2CE57888D92ADFEE88B8944E /* MopeliumSettingsScreen.swift in Sources */,
-				DF5267F2F3790C6EE3D13D84 /* MopeliumSidebar.swift in Sources */,
-				A27DE93D42BCA55D57A40E67 /* MopeliumSourcesScreen.swift in Sources */,
-				0DF114694BA3D04F9BEB7424 /* MopeliumTasksScreen.swift in Sources */,
+				9E8B4A37BAE38C1546985498 /* PhaseCPermissionFixtureView.swift in Sources */,
+				593EEDEC98EE12CE09E41E2F /* PhaseLSessionLifecycleFixtureView.swift in Sources */,
+				04F80D40AF6BCDED47715F0D /* RendererFixtureView.swift in Sources */,
+				BA16170866029DABA0E720DB /* SessionRuntimeManager.swift in Sources */,
+				E1B2255B941029DDF056ED88 /* Workspace.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		4C548B726E5E16351D56013A /* Sources */ = {
+		52C0592B3E1CCFD8C7D719F8 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F356AC6E67117BF83C4433AB /* main.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		7EAE4A1B3C5F789D3DA612B1 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				1B1E53A21E8236290B58486D /* CLIConfig.swift in Sources */,
-				F4ECE8410F8AAD1F7BCA7010 /* MopeliumError.swift in Sources */,
-				F62874ADB2A88D585DC5A9C2 /* Terminal.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		ED2519432DCCCDAB6FC43A6C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				22B238E92F3D7D7EB519E356 /* BrowserTools.swift in Sources */,
-				8E3D10DBD644E83E787C1C15 /* DocumentMediaTools.swift in Sources */,
-				D9886F93B1AFC88AB01F76A3 /* FileTools.swift in Sources */,
-				9362316740575BF4373AABAA /* PatchTool.swift in Sources */,
-				F8EB360869333C8E8E3AA26F /* PathConfinement.swift in Sources */,
-				1D0F81C2AC02664C88977350 /* ShellGit.swift in Sources */,
-				FC713365C2D8E141BA4CE8DA /* ToolProtocol.swift in Sources */,
-				CFF4D6349FE0103D7CF59A4F /* ToolSupport.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F0309852FFF15B802F0AE6F7 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				ADF3CCCE5DEEE048A9E083A3 /* MopeliumAgentLoop.swift in Sources */,
-				C18BECB068D245B345E30F49 /* OpenAICompatibleToolCallingProvider.swift in Sources */,
+				B4A104872773281EF29A2380 /* IOSConfig.swift in Sources */,
+				DF21D47EC83F9DDC2A7D034E /* Keychain.swift in Sources */,
+				3EB902E2652B35AAFEB50B5B /* MopeliumiOSApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
-/* Begin PBXTargetDependency section */
-		21781B342315F0E148D547ED /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E0777C7D1C82C321A91585DD /* MopeliumProviders */;
-			targetProxy = 5007E06E2450F67A3FEAB32D /* PBXContainerItemProxy */;
+/* Begin PBXVariantGroup section */
+		E2BDE1D771F31D2D97BE2BF4 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				B38FCB82B8A31D9982A4C9F0 /* en */,
+				402152713FADB46F85757D54 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
 		};
-		2B62AD021E52B49287492696 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7D5ECAEE1585541713003A07 /* MopeliumCore */;
-			targetProxy = C3E3009D6A10F18BD42855E7 /* PBXContainerItemProxy */;
-		};
-		3FED56A764B7ECA2E59D1534 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E0777C7D1C82C321A91585DD /* MopeliumProviders */;
-			targetProxy = 97AA64CABF70FDC3CE2368D8 /* PBXContainerItemProxy */;
-		};
-		535C15BADC2785D3626EF3D8 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = FD4FAE7D109FBB59281FF4B4 /* MopeliumTools */;
-			targetProxy = 728E96DD416EE6959E71DC46 /* PBXContainerItemProxy */;
-		};
-		5C12A4820C8285F4FE1BE58D /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = FD4FAE7D109FBB59281FF4B4 /* MopeliumTools */;
-			targetProxy = 7929EB3580DE7D973F2DEBE9 /* PBXContainerItemProxy */;
-		};
-		676CD47FCED6C2FE9F5579F8 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = FD4FAE7D109FBB59281FF4B4 /* MopeliumTools */;
-			targetProxy = 98F0202991694E075D15B711 /* PBXContainerItemProxy */;
-		};
-		6C8B0F71C75E71BB293D0BFA /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7D5ECAEE1585541713003A07 /* MopeliumCore */;
-			targetProxy = D61C545CC99A640FF1D81B64 /* PBXContainerItemProxy */;
-		};
-		A137E12F049BA80EB728D29B /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7D5ECAEE1585541713003A07 /* MopeliumCore */;
-			targetProxy = 27EDCD8C281F020A09DFE16C /* PBXContainerItemProxy */;
-		};
-		ADC5C953E4B534C9D9D989AD /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 7D5ECAEE1585541713003A07 /* MopeliumCore */;
-			targetProxy = 36E8D0F494034F92D8F14EA6 /* PBXContainerItemProxy */;
-		};
-		CE72FF81B2D91A1F37B59DCC /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = E0777C7D1C82C321A91585DD /* MopeliumProviders */;
-			targetProxy = 12A50D6B52422C92C12A8F10 /* PBXContainerItemProxy */;
-		};
-		FC267821CA79E677CDDBE5FB /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 03B386974DEEEC084EA4E298 /* MopeliumAgent */;
-			targetProxy = 6F940BCC5CFB277F463C63DE /* PBXContainerItemProxy */;
-		};
-		FDD042CDD0A7494AD2D3B5DB /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 03B386974DEEEC084EA4E298 /* MopeliumAgent */;
-			targetProxy = B6D03BAE01E6CE0835E23466 /* PBXContainerItemProxy */;
-		};
-/* End PBXTargetDependency section */
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		07BCD9C792C9EC5C8D89FD5B /* Release */ = {
@@ -751,8 +431,9 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -763,11 +444,13 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.12;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -778,158 +461,56 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Apps/MopeliumMac/MopeliumMac.DeveloperID.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_FILE = Apps/MopeliumMac/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumMac;
-				SDKROOT = macosx;
-			};
-			name = Debug;
-		};
-		52C87C98AFAE0F452BA404BB /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				INFOPLIST_KEY_CFBundleDisplayName = Mopelium;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Mopelium contributors. See NOTICE.md.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumProviders;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.MopeliumMac;
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;
 		};
-		5B54CE1BF0B4E1894AAF95E1 /* Debug */ = {
+		6F620BEBD7B93D59660AF169 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				INFOPLIST_KEY_CFBundleDisplayName = Mopelium;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Mopelium uses the microphone for voice input transcription.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
-					"@executable_path/../Frameworks",
+					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumCore;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
-			};
-			name = Debug;
-		};
-		7F128EC121D95538AE1CB3F2 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COMBINE_HIDPI_IMAGES = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				OTHER_SWIFT_FLAGS = "$(inherited) -parse-as-library";
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.mopelium;
-				SDKROOT = macosx;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.Mopelium;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
-		A9497703BA8DF7B2DA1EBA54 /* Release */ = {
+		85BEFC5DEC4311D124C02674 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				INFOPLIST_KEY_CFBundleDisplayName = Mopelium;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Mopelium uses the microphone for voice input transcription.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
-					"@executable_path/../Frameworks",
+					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumTools;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
-			};
-			name = Release;
-		};
-		A9DFA6D0037CADFD5B5A4621 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumAgent;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
-			};
-			name = Debug;
-		};
-		B0E91F965C4EF750A96D5B88 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				COMBINE_HIDPI_IMAGES = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				OTHER_SWIFT_FLAGS = "$(inherited) -parse-as-library";
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.mopelium;
-				SDKROOT = macosx;
-			};
-			name = Debug;
-		};
-		B7535E7CE76BBBEABE3BF923 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumTools;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.Mopelium;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -968,8 +549,9 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -986,129 +568,47 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.12;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;
 			};
 			name = Debug;
 		};
-		C3AD893F00C558D8F737FD5D /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumProviders;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
-			};
-			name = Release;
-		};
 		CBA7BDA8F76FA1EBF9EE974E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Apps/MopeliumMac/MopeliumMac.DeveloperID.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_FILE = Apps/MopeliumMac/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumMac;
-				SDKROOT = macosx;
-			};
-			name = Release;
-		};
-		E00327ADBFC22999B78DA979 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
 				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				INFOPLIST_KEY_CFBundleDisplayName = Mopelium;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Mopelium contributors. See NOTICE.md.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumAgent;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Vita0818.MopeliumMac;
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
-			};
-			name = Release;
-		};
-		F2A10C4D5DC0190F5B9ED5BB /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEFINES_MODULE = YES;
-				DYLIB_COMPATIBILITY_VERSION = 1;
-				DYLIB_CURRENT_VERSION = 1;
-				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				GENERATE_INFOPLIST_FILE = YES;
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.vita.MopeliumCore;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		23519CDA3B90D660C2EA3448 /* Build configuration list for PBXNativeTarget "MopeliumProviders" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				52C87C98AFAE0F452BA404BB /* Debug */,
-				C3AD893F00C558D8F737FD5D /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
 		2C5FDFBFB17522754A052C51 /* Build configuration list for PBXNativeTarget "MopeliumMac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				2AEB1B2F559794208B004E2F /* Debug */,
 				CBA7BDA8F76FA1EBF9EE974E /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
-		419F8B54A775AF912FF03DCA /* Build configuration list for PBXNativeTarget "MopeliumAgent" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A9DFA6D0037CADFD5B5A4621 /* Debug */,
-				E00327ADBFC22999B78DA979 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -1122,34 +622,98 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		89BE80E64CE7EFC8B69DF3CD /* Build configuration list for PBXNativeTarget "mopelium" */ = {
+		743C03E7EF8978F6963E2602 /* Build configuration list for PBXNativeTarget "MopeliumiOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				B0E91F965C4EF750A96D5B88 /* Debug */,
-				7F128EC121D95538AE1CB3F2 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
-		B9D8D76698BDF49B073AFD3B /* Build configuration list for PBXNativeTarget "MopeliumTools" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				B7535E7CE76BBBEABE3BF923 /* Debug */,
-				A9497703BA8DF7B2DA1EBA54 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
-		C73FF6B9F60746E068135616 /* Build configuration list for PBXNativeTarget "MopeliumCore" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				5B54CE1BF0B4E1894AAF95E1 /* Debug */,
-				F2A10C4D5DC0190F5B9ED5BB /* Release */,
+				85BEFC5DEC4311D124C02674 /* Debug */,
+				6F620BEBD7B93D59660AF169 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B852B815446C431020EB02EE /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		00CC44DD55E6240529B0BA4E /* MopeliumProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumProtocol;
+		};
+		1254D3C4DF3E10040DE777B2 /* MopeliumAgentKernel */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumAgentKernel;
+		};
+		13A6FDC6E7E37C60BE2AD518 /* MopeliumProviders */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumProviders;
+		};
+		2CED2D9B18DB0763B83FB96C /* MopeliumArtifacts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumArtifacts;
+		};
+		46D28E6C1B62478039B0BE2B /* MopeliumProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumProtocol;
+		};
+		4A28F7B2814740F8E664E07A /* MopeliumSharedUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumSharedUI;
+		};
+		5087FDB1CD6C6569B39F1723 /* MopeliumProviders */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumProviders;
+		};
+		7671BC9609B3A0339B3DA830 /* MopeliumMultimodal */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumMultimodal;
+		};
+		8A7A61A39CC2703718080561 /* MopeliumConversation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumConversation;
+		};
+		95811639273B2BC9D1395FB2 /* MopeliumCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumCore;
+		};
+		A941CD5FFBB736770F9ED3D4 /* MopeliumMultimodal */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumMultimodal;
+		};
+		C12BA0CC7547DB7648E741B4 /* MopeliumArtifacts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumArtifacts;
+		};
+		C2DAF596DAB876CF435370C9 /* MopeliumTools */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumTools;
+		};
+		C80EF403258D4BF6002D9883 /* MopeliumSharedUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumSharedUI;
+		};
+		D40715313A2698AE8A0CC931 /* MopeliumConversation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumConversation;
+		};
+		DD92F26B302B4C4E97B2D295 /* MopeliumPermission */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumPermission;
+		};
+		E93600A5543EF9CE814B024C /* MopeliumCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumCore;
+		};
+		F77C31409CA21575B5B2431B /* MopeliumCowork */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MopeliumCowork;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9B25C0FD0AB46E6132DC036B /* Project object */;
 }

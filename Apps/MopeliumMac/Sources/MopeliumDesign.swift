@@ -1,152 +1,148 @@
+//
+//  MopeliumDesign.swift
+//  MopeliumMac
+//
+//  Mopelium delegates its palette to macOS. The window canvas, content material,
+//  separators, accent, and Liquid Glass all remain dynamic system resources;
+//  no sampled or fixed light/dark background values live here.
+//
+
 #if canImport(SwiftUI)
 import SwiftUI
+import MopeliumSharedUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
-enum MopeliumStatus: String, CaseIterable, Identifiable {
-    case queued
-    case running
-    case done
-    case failed
-    case local
-    case enabled
-    case disabled
-
-    var id: String { rawValue }
-}
+// MARK: - Color tokens
 
 enum MopeliumTheme {
-    static let accent = Color(red: 0.365, green: 0.663, blue: 0.741)
-    static let accentSoft = Color(red: 0.741, green: 0.894, blue: 0.929)
-    static let accentDeep = Color(red: 0.153, green: 0.420, blue: 0.510)
+    static func deepText(_: ColorScheme) -> Color { .primary }
+    static func softText(_: ColorScheme) -> Color { .secondary }
+    static func tertiaryText(_: ColorScheme) -> Color { .secondary.opacity(0.72) }
+    static func accent(_: ColorScheme) -> Color { .accentColor }
 
-    static let backgroundTop = Color(red: 0.976, green: 0.972, blue: 0.953)
-    static let backgroundBottom = Color(red: 0.929, green: 0.953, blue: 0.957)
-    static let backgroundTopDark = Color(red: 0.066, green: 0.071, blue: 0.073)
-    static let backgroundBottomDark = Color(red: 0.086, green: 0.098, blue: 0.102)
-
-    static let statusQueued = Color(red: 0.494, green: 0.553, blue: 0.604)
-    static let statusRunning = Color(red: 0.317, green: 0.604, blue: 0.749)
-    static let statusDone = Color(red: 0.251, green: 0.565, blue: 0.420)
-    static let statusFailed = Color(red: 0.760, green: 0.314, blue: 0.302)
-
-    static let textOnAccent = Color.white
-
-    static func pageGradient(_ scheme: ColorScheme) -> LinearGradient {
-        LinearGradient(
-            colors: [
-                scheme == .dark ? backgroundTopDark : backgroundTop,
-                scheme == .dark ? backgroundBottomDark : backgroundBottom,
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+    static func separator(_: ColorScheme) -> Color {
+        #if canImport(AppKit)
+        return Color(nsColor: .separatorColor)
+        #else
+        return .secondary.opacity(0.28)
+        #endif
     }
 
-    static func surface(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.120, green: 0.128, blue: 0.126)
-            : Color(red: 1.000, green: 0.996, blue: 0.980)
-    }
-
-    static func stroke(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.255, green: 0.314, blue: 0.318)
-            : Color(red: 0.810, green: 0.843, blue: 0.835)
-    }
-
-    static func primaryText(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.905, green: 0.914, blue: 0.898)
-            : Color(red: 0.090, green: 0.102, blue: 0.098)
-    }
-
-    static func secondaryText(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.680, green: 0.706, blue: 0.690)
-            : Color(red: 0.365, green: 0.400, blue: 0.392)
-    }
-
-    static func tertiaryText(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 0.475, green: 0.506, blue: 0.500)
-            : Color(red: 0.573, green: 0.604, blue: 0.596)
-    }
-
-    static func shadow(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color.black : Color(red: 0.416, green: 0.537, blue: 0.545)
-    }
-
-    static func statusColor(_ status: MopeliumStatus) -> Color {
-        switch status {
-        case .queued:
-            return statusQueued
-        case .running, .local:
-            return statusRunning
-        case .done, .enabled:
-            return statusDone
-        case .failed:
-            return statusFailed
-        case .disabled:
-            return statusQueued
-        }
-    }
-
-    static func statusFill(_ status: MopeliumStatus, _ scheme: ColorScheme) -> Color {
-        statusColor(status).opacity(scheme == .dark ? 0.18 : 0.12)
-    }
-
-    static func statusStroke(_ status: MopeliumStatus, _ scheme: ColorScheme) -> Color {
-        statusColor(status).opacity(scheme == .dark ? 0.38 : 0.30)
-    }
-
-    static func sidebarFill(selected: Bool, hovering: Bool, _ scheme: ColorScheme) -> AnyShapeStyle {
-        if selected {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [
-                        accentSoft.opacity(scheme == .dark ? 0.20 : 0.58),
-                        accent.opacity(scheme == .dark ? 0.14 : 0.20),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-        }
-
-        return AnyShapeStyle(surface(scheme).opacity(hovering ? (scheme == .dark ? 0.24 : 0.52) : 0))
+    static func selectedStroke(_: ColorScheme) -> Color {
+        .accentColor.opacity(0.72)
     }
 }
 
+/// The native window surface. On current systems SwiftUI resolves
+/// `windowBackground` from the active appearance, wallpaper tint, contrast,
+/// transparency, and window state rather than from a fixed RGB value.
+struct MopeliumSystemCanvas: View {
+    @ViewBuilder var body: some View {
+        if #available(macOS 14.0, *) {
+            Rectangle().fill(.windowBackground)
+        } else {
+            legacyWindowBackground
+        }
+    }
+
+    @ViewBuilder private var legacyWindowBackground: some View {
+        #if canImport(AppKit)
+        MopeliumLegacyWindowBackground()
+        #else
+        Rectangle().fill(.background)
+        #endif
+    }
+}
+
+#if canImport(AppKit)
+/// macOS 13 fallback for the same semantic window material.
+private struct MopeliumLegacyWindowBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .windowBackground
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+#endif
+
+// MARK: - Typography
+//
+// English brand & titles take a serif voice (an editorial nod shared with the
+// Vela family); body / Chinese stay on the system font; code, paths and other
+// technical tokens use a monospaced voice.
+
 enum MopeliumType {
-    static func brand(_ size: CGFloat = 29, _ weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .serif)
-    }
+    static func brand(_ size: CGFloat = 30, _ w: Font.Weight = .semibold) -> Font { .system(size: size, weight: w, design: .serif) }
+    static func largeTitle(_ size: CGFloat = 30, _ w: Font.Weight = .semibold) -> Font { .system(size: size, weight: w, design: .serif) }
+    static func title(_ size: CGFloat = 20, _ w: Font.Weight = .semibold) -> Font { .system(size: size, weight: w, design: .serif) }
+    static func headline(_ size: CGFloat = 16, _ w: Font.Weight = .semibold) -> Font { .system(size: size, weight: w) }
+    static func body(_ size: CGFloat = 14, _ w: Font.Weight = .regular) -> Font { .system(size: size, weight: w) }
+    static func caption(_ size: CGFloat = 12, _ w: Font.Weight = .medium) -> Font { .system(size: size, weight: w) }
+    static func mono(_ size: CGFloat = 13, _ w: Font.Weight = .regular) -> Font { .system(size: size, weight: w, design: .monospaced) }
+    static func chat(_ size: CGFloat = 15, _ w: Font.Weight = .regular) -> Font { .system(size: size, weight: w) }
+}
 
-    static func largeTitle(_ size: CGFloat = 30, _ weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .serif)
+extension MopeliumThreadStyle {
+    static func mopeliumMac(_ scheme: ColorScheme) -> MopeliumThreadStyle {
+        MopeliumThreadStyle(
+            primaryText: MopeliumTheme.deepText(scheme),
+            secondaryText: MopeliumTheme.softText(scheme),
+            tertiaryText: MopeliumTheme.tertiaryText(scheme),
+            accent: MopeliumTheme.accent(scheme),
+            stroke: MopeliumTheme.separator(scheme),
+            cardStroke: MopeliumTheme.separator(scheme),
+            error: .red)
     }
+}
 
-    static func title(_ size: CGFloat = 20, _ weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .serif)
+// MARK: - Native content surfaces
+
+private struct MopeliumCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(.regularMaterial, in: shape)
+            .overlay {
+                shape.stroke(MopeliumTheme.separator(scheme), lineWidth: 1)
+            }
     }
+}
 
-    static func headline(_ size: CGFloat = 16, _ weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight)
+extension View {
+    func mopeliumCard(cornerRadius: CGFloat = 22) -> some View {
+        modifier(MopeliumCardModifier(cornerRadius: cornerRadius))
     }
+}
 
-    static func body(_ size: CGFloat = 14, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight)
-    }
+// MARK: - Shared header
 
-    static func caption(_ size: CGFloat = 12, _ weight: Font.Weight = .medium) -> Font {
-        .system(size: size, weight: weight)
-    }
+/// Page header: a serif title plus a system-secondary subtitle.
+struct MopeliumPageHeader: View {
+    let title: String
+    var subtitle: String?
+    @Environment(\.colorScheme) private var scheme
 
-    static func mono(_ size: CGFloat = 13, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
-    }
-
-    static func button(_ size: CGFloat = 14, _ weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(MopeliumType.largeTitle(30))
+                .foregroundStyle(MopeliumTheme.deepText(scheme))
+            if let subtitle {
+                Text(subtitle)
+                    .font(MopeliumType.caption(13, .medium))
+                    .foregroundStyle(MopeliumTheme.softText(scheme))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif

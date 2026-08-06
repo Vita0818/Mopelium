@@ -1,4 +1,5 @@
 import Foundation
+import MopeliumCore
 
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -18,7 +19,7 @@ private enum BrowserToolConfig {
               profile != ".",
               profile != "..",
               profile.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." }) else {
-            throw MopeliumToolError.decoding("browser profile must use only letters, numbers, '.', '-' or '_'")
+            throw MopeliumError.decoding("browser profile must use only letters, numbers, '.', '-' or '_'")
         }
         return profile
     }
@@ -81,7 +82,7 @@ private enum BrowserToolConfig {
               let scheme = url.scheme?.lowercased(),
               (scheme == "http" || scheme == "https"),
               url.host?.isEmpty == false else {
-            throw MopeliumToolError.config("URL must be http(s) with a host")
+            throw MopeliumError.config("URL must be http(s) with a host")
         }
         return url
     }
@@ -225,7 +226,7 @@ private func browserJSONLine(from stdout: String) throws -> String {
             return trimmed
         }
     }
-    throw MopeliumToolError.decoding("browser backend did not return JSON")
+    throw MopeliumError.decoding("browser backend did not return JSON")
 }
 
 private func redactedBrowserText(_ text: String, redactions: [String]) -> String {
@@ -843,11 +844,11 @@ private func browserNavigationSnapshot(paths: BrowserPaths) -> (stack: [String],
 private func browserHistoryNavigationURL(direction: BrowserHistoryDirection, paths: BrowserPaths) throws -> String {
     let snapshot = browserNavigationSnapshot(paths: paths)
     guard snapshot.stack.isEmpty == false else {
-        throw MopeliumToolError.config("no current browser history for this profile; call browser_navigate or browser_search first")
+        throw MopeliumError.config("no current browser history for this profile; call browser_navigate or browser_search first")
     }
     let targetIndex = snapshot.index + direction.offset
     guard snapshot.stack.indices.contains(targetIndex) else {
-        throw MopeliumToolError.config(direction.missingEntryMessage)
+        throw MopeliumError.config(direction.missingEntryMessage)
     }
     return snapshot.stack[targetIndex]
 }
@@ -1058,51 +1059,55 @@ private func playwrightCommand(arguments: [String: Any]) throws -> String {
       return base ? path.join(base, path.basename(outputPath)) : outputPath;
     }
 
-    function candidatePlaywrightModules() {
-      const candidates = [];
-      if (process.env.MOPELIUM_PLAYWRIGHT_PATH) candidates.push(process.env.MOPELIUM_PLAYWRIGHT_PATH);
-      if (process.env.MOPELIUM_NODE_MODULES) candidates.push(path.join(process.env.MOPELIUM_NODE_MODULES, 'playwright'));
-      candidates.push(path.join(process.cwd(), 'node_modules', 'playwright'));
-      try {
-        const globalRoot = childProcess.execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-        if (globalRoot) candidates.push(path.join(globalRoot, 'playwright'));
-      } catch (_) {}
-      return unique(candidates);
+    function trustedPlaywrightModules() {
+      // Never resolve from cwd, NODE_PATH, npm's dynamic global root, or a
+      // caller-provided environment variable. The workspace is model-writable,
+      // so loading workspace/node_modules would turn a browser action into
+      // arbitrary native-code execution outside the tool contract.
+      return unique([
+        '/opt/homebrew/lib/node_modules/playwright',
+        '/usr/local/lib/node_modules/playwright',
+        '/usr/lib/node_modules/playwright'
+      ]);
+    }
+
+    function trustedModuleInfo(candidate) {
+      const moduleRoot = fs.realpathSync(candidate);
+      const trustedParent = fs.realpathSync(path.dirname(candidate));
+      if (moduleRoot !== candidate && !moduleRoot.startsWith(trustedParent + path.sep)) {
+        throw new Error('trusted Playwright module resolves outside its fixed runtime root');
+      }
+      const entry = fs.realpathSync(require.resolve(moduleRoot));
+      if (entry !== moduleRoot && !entry.startsWith(moduleRoot + path.sep)) {
+        throw new Error('Playwright entry resolves outside its fixed module root');
+      }
+      return { moduleRoot, entry };
     }
 
     function loadPlaywright() {
-      const checked = ['node resolution: playwright'];
-      try {
-        const mod = require('playwright');
-        return { mod, resolvedFrom: require.resolve('playwright'), checked };
-      } catch (error) {
-        checked.push(`node resolution failed: ${error.message}`);
-      }
-      for (const candidate of candidatePlaywrightModules()) {
+      const checked = [];
+      for (const candidate of trustedPlaywrightModules()) {
         checked.push(candidate);
         try {
-          const mod = require(candidate);
-          return { mod, resolvedFrom: candidate, checked };
+          const trusted = trustedModuleInfo(candidate);
+          const mod = require(trusted.entry);
+          return { mod, resolvedFrom: trusted.entry, moduleRoot: trusted.moduleRoot, checked };
         } catch (error) {
           checked.push(`${candidate} failed: ${error.message}`);
         }
       }
       const error = new Error([
         'playwright is not installed or not resolvable by Node.',
-        'Install project-local support with: npm install --save-dev playwright && npx playwright install chromium',
-        'Or install global support with: npm install -g playwright && npx playwright install chromium',
-        'Set MOPELIUM_PLAYWRIGHT_PATH or MOPELIUM_NODE_MODULES if Playwright is installed in a custom location.'
+        'Install Playwright in a trusted fixed global runtime root (/opt/homebrew, /usr/local, or /usr).',
+        'Workspace-local node_modules and environment-selected module paths are intentionally ignored.'
       ].join(' '));
       error.checked = checked;
       throw error;
     }
 
-    function playwrightVersion(resolvedFrom) {
-      const candidates = [];
-      if (resolvedFrom) candidates.push(path.join(resolvedFrom, 'package.json'));
-      try { candidates.push(require.resolve('playwright/package.json')); } catch (_) {}
-      for (const candidate of unique(candidates)) {
-        try { return JSON.parse(fs.readFileSync(candidate, 'utf8')).version || ''; } catch (_) {}
+    function playwrightVersion(moduleRoot) {
+      if (moduleRoot) {
+        try { return JSON.parse(fs.readFileSync(path.join(moduleRoot, 'package.json'), 'utf8')).version || ''; } catch (_) {}
       }
       return '';
     }
@@ -1119,7 +1124,6 @@ private func playwrightCommand(arguments: [String: Any]) throws -> String {
     function cdpExecutableForChannel(channel) {
       const value = (channel || 'chromium').toLowerCase();
       const candidates = [];
-      if (process.env.MOPELIUM_BROWSER_EXECUTABLE) candidates.push(process.env.MOPELIUM_BROWSER_EXECUTABLE);
       if (process.platform === 'darwin') {
         if (value.startsWith('msedge')) candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
         if (value.startsWith('chrome')) candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
@@ -1149,12 +1153,12 @@ private func playwrightCommand(arguments: [String: Any]) throws -> String {
       let available = false;
       let resolvedFrom = '';
       let version = '';
-      let checked = ['node resolution: playwright'];
+      let checked = trustedPlaywrightModules();
       try {
         const info = loadPlaywright();
         available = true;
         resolvedFrom = info.resolvedFrom || '';
-        version = playwrightVersion(resolvedFrom);
+        version = playwrightVersion(info.moduleRoot);
         checked = info.checked || checked;
       } catch (error) {
         checked = error.checked || checked.concat([String(error && error.message ? error.message : error)]);
@@ -1740,7 +1744,6 @@ private func cdpCommand(arguments: [String: Any]) throws -> String {
     function cdpExecutableForChannel(channel) {
       const value = (channel || 'chromium').toLowerCase();
       const candidates = [];
-      if (process.env.MOPELIUM_BROWSER_EXECUTABLE) candidates.push(process.env.MOPELIUM_BROWSER_EXECUTABLE);
       if (process.platform === 'darwin') {
         if (value.startsWith('msedge')) candidates.push('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
         if (value.startsWith('chrome')) candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
@@ -2878,15 +2881,15 @@ private func runPlaywrightUnlocked(arguments: [String: Any],
                                    redactions: [String] = [],
                                    changedFiles: [String]? = nil) async throws -> ToolObservation {
     let command = try playwrightCommand(arguments: arguments)
-    var shellResult = try await context.shell.run(command, cwd: context.workspaceRoot)
+    var shellResult = try await context.networkStructuredShell.run(command, cwd: context.workspaceRoot)
     if shellResult.exitCode != 0 && browserBackendMissing(shellResult) {
         let fallbackCommand = try cdpCommand(arguments: arguments)
-        shellResult = try await context.shell.run(fallbackCommand, cwd: context.workspaceRoot)
+        shellResult = try await context.networkStructuredShell.run(fallbackCommand, cwd: context.workspaceRoot)
     }
     guard shellResult.exitCode == 0 else {
         var message = shellResult.stderr.isEmpty ? shellResult.stdout : shellResult.stderr
         if message.count > 10_000 { message = String(message.prefix(10_000)) + "\n[truncated]" }
-        throw MopeliumToolError.io("browser backend failed: \(message)")
+        throw MopeliumError.io("browser backend failed: \(message)")
     }
     let jsonLine = try browserJSONLine(from: shellResult.stdout)
     let decoded = try JSONDecoder().decode(BrowserActionResult.self, from: Data(jsonLine.utf8))
@@ -2912,10 +2915,10 @@ private func maxCharacters(_ raw: Int?) -> Int {
 private func normalizedBrowserKey(_ raw: String) throws -> String {
     let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !value.isEmpty, value.count <= 80 else {
-        throw MopeliumToolError.decoding("browser_press_key key must be 1-80 characters")
+        throw MopeliumError.decoding("browser_press_key key must be 1-80 characters")
     }
     guard value.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
-        throw MopeliumToolError.decoding("browser_press_key key must not contain control characters")
+        throw MopeliumError.decoding("browser_press_key key must not contain control characters")
     }
     return value
 }
@@ -2935,7 +2938,7 @@ private func browserScrollDelta(direction: String?, amount: Int?, deltaX: Int?, 
         let x = deltaX ?? 0
         let y = deltaY ?? 0
         guard x != 0 || y != 0 else {
-            throw MopeliumToolError.decoding("browser_scroll requires a non-zero delta")
+            throw MopeliumError.decoding("browser_scroll requires a non-zero delta")
         }
         return (x, y)
     }
@@ -2952,7 +2955,7 @@ private func browserScrollDelta(direction: String?, amount: Int?, deltaX: Int?, 
     case "left":
         return (-pixels, 0)
     default:
-        throw MopeliumToolError.decoding("browser_scroll direction must be down, up, right, or left")
+        throw MopeliumError.decoding("browser_scroll direction must be down, up, right, or left")
     }
 }
 
@@ -3117,11 +3120,11 @@ public struct BrowserDiagnosticsTool: Tool {
             "historyFile": historyURL.path,
         ]
         let command = try playwrightCommand(arguments: payload)
-        let shellResult = try await context.shell.run(command, cwd: context.workspaceRoot)
+        let shellResult = try await context.structuredShell.run(command, cwd: context.workspaceRoot)
         guard shellResult.exitCode == 0 else {
             var message = shellResult.stderr.isEmpty ? shellResult.stdout : shellResult.stderr
             if message.count > 10_000 { message = String(message.prefix(10_000)) + "\n[truncated]" }
-            throw MopeliumToolError.io("browser diagnostics failed: \(message)")
+            throw MopeliumError.io("browser diagnostics failed: \(message)")
         }
         let jsonLine = try browserJSONLine(from: shellResult.stdout)
         let decoded = try JSONDecoder().decode(BrowserDiagnosticsResult.self, from: Data(jsonLine.utf8))
@@ -3222,7 +3225,7 @@ public struct BrowserProfileDeleteTool: Tool {
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
         let confirmed = try BrowserToolConfig.normalizedProfile(a.confirmProfile)
         guard confirmed == profile else {
-            throw MopeliumToolError.config("confirmProfile must exactly match profile to delete browser profile data")
+            throw MopeliumError.config("confirmProfile must exactly match profile to delete browser profile data")
         }
 
         let paths = try BrowserToolConfig.paths(profile: profile, workspace: context.workspaceRoot)
@@ -3675,7 +3678,7 @@ public struct BrowserClickTool: Tool {
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         guard a.selector?.isEmpty == false || a.text?.isEmpty == false || (a.role?.isEmpty == false && a.name?.isEmpty == false) else {
-            throw MopeliumToolError.decoding("browser_click requires selector, text, or role+name")
+            throw MopeliumError.decoding("browser_click requires selector, text, or role+name")
         }
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
         let paths = try BrowserToolConfig.prepare(profile: profile, workspace: context.workspaceRoot)
@@ -3752,10 +3755,10 @@ public struct BrowserTypeTool: Tool {
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         guard a.selector?.isEmpty == false || a.text?.isEmpty == false || (a.role?.isEmpty == false && a.name?.isEmpty == false) else {
-            throw MopeliumToolError.decoding("browser_type requires selector, text, or role+name")
+            throw MopeliumError.decoding("browser_type requires selector, text, or role+name")
         }
         if let reason = browserSensitiveTypeTargetReason(selector: a.selector, text: a.text, role: a.role, name: a.name) {
-            throw MopeliumToolError.config("browser_type refuses likely sensitive credential entry target (\(reason)); use browser_handoff for login, password, 2FA, token, or API key entry")
+            throw MopeliumError.config("browser_type refuses likely sensitive credential entry target (\(reason)); use browser_handoff for login, password, 2FA, token, or API key entry")
         }
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
         let paths = try BrowserToolConfig.prepare(profile: profile, workspace: context.workspaceRoot)
@@ -3909,15 +3912,15 @@ public struct BrowserSelectOptionTool: Tool {
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         guard a.selector?.isEmpty == false || a.text?.isEmpty == false || (a.role?.isEmpty == false && a.name?.isEmpty == false) else {
-            throw MopeliumToolError.decoding("browser_select_option requires selector, text, or role+name")
+            throw MopeliumError.decoding("browser_select_option requires selector, text, or role+name")
         }
         let optionValue = a.optionValue?.trimmingCharacters(in: .whitespacesAndNewlines)
         let optionLabel = a.optionLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let optionIndex = a.optionIndex, optionIndex < 0 || optionIndex > 500 {
-            throw MopeliumToolError.decoding("browser_select_option optionIndex must be between 0 and 500")
+            throw MopeliumError.decoding("browser_select_option optionIndex must be between 0 and 500")
         }
         guard optionValue?.isEmpty == false || optionLabel?.isEmpty == false || a.optionIndex != nil else {
-            throw MopeliumToolError.decoding("browser_select_option requires optionValue, optionLabel, or optionIndex")
+            throw MopeliumError.decoding("browser_select_option requires optionValue, optionLabel, or optionIndex")
         }
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
         let paths = try BrowserToolConfig.prepare(profile: profile, workspace: context.workspaceRoot)
@@ -4227,7 +4230,7 @@ public struct BrowserScreenshotTool: Tool {
         }
         let outputURL = try PathConfinement.resolve(a.outputPath, within: context.workspaceRoot)
         guard outputURL.pathExtension.lowercased() == "png" else {
-            throw MopeliumToolError.decoding("browser_screenshot outputPath must end with .png")
+            throw MopeliumError.decoding("browser_screenshot outputPath must end with .png")
         }
         let relativeOutputPath = PathConfinement.relativePath(of: outputURL, root: context.workspaceRoot)
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
@@ -4312,12 +4315,12 @@ public struct BrowserUploadFileTool: Tool {
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         guard a.selector?.isEmpty == false || a.text?.isEmpty == false || (a.role?.isEmpty == false && a.name?.isEmpty == false) else {
-            throw MopeliumToolError.decoding("browser_upload_file requires selector, text, or role+name")
+            throw MopeliumError.decoding("browser_upload_file requires selector, text, or role+name")
         }
         let fileURL = try PathConfinement.resolve(a.filePath, within: context.workspaceRoot)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            throw MopeliumToolError.notFound("upload file not found: \(a.filePath)")
+            throw MopeliumError.notFound("upload file not found: \(a.filePath)")
         }
         let relativeFilePath = PathConfinement.relativePath(of: fileURL, root: context.workspaceRoot)
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
@@ -4399,7 +4402,7 @@ public struct BrowserDownloadTool: Tool {
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         guard a.selector?.isEmpty == false || a.text?.isEmpty == false || (a.role?.isEmpty == false && a.name?.isEmpty == false) else {
-            throw MopeliumToolError.decoding("browser_download requires selector, text, or role+name")
+            throw MopeliumError.decoding("browser_download requires selector, text, or role+name")
         }
         let profile = try BrowserToolConfig.normalizedProfile(a.profile)
         let paths = try BrowserToolConfig.prepare(profile: profile, workspace: context.workspaceRoot)
