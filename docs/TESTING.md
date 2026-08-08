@@ -65,6 +65,22 @@ swift test --filter IntatisCoworkTests
 swift test --filter IntatisSharedUITests
 ```
 
+修改 Cowork automatic permission authorization context 时，至少运行：
+
+```sh
+swift test --filter PermissionReviewProtocolTests
+swift test --filter PermissionAuthorizationContextReporterTests
+swift test --filter PermissionReviewControlPlaneTests
+swift test --filter AutomaticPermissionReviewTests
+```
+
+必须覆盖 legitimate `continue`/省略指令映射、acting-provider request snapshot 与 `tools: []`、
+canonical current user message、earliest-cited→current evidence closure、intervening revoke/scope change、
+main/worker projection 隔离、同 assistant batch 多 call 独立报告、usage/no-history、legacy optional decode，
+以及 malformed/secret/unknown handle/timeout/cancel/unknown future event/缺 context 的 durable typed deny。
+另须证明 hard deny 与 manual flow 不触发 reporter，report 不能改变 exact authorization、gate、capability/
+workspace ceiling，reviewer provider 只在完整 host validation 后被调用。
+
 MCP、browser、managed terminal、OAuth、real provider 和设备测试中明确标为 opt-in 的项目，
 必须在具备相应 runtime/credential/网络的环境单独执行。
 
@@ -352,6 +368,28 @@ routing options、结构化 unsupported 同路由一次降级、裸 404 拒绝�
   线上 provider smoke 必须单独记录，不能从离线测试或编译外推。
 
 ## 最近一次真实结果
+
+2026-08-08 Cowork automatic permission authorization context 修复的直接证据：
+
+- `PermissionReviewProtocolTests`：11 tests / 0 failures；验证 additive optional wrapper、旧事件
+  缺字段解码，以及协议没有增加 model-supplied author/latest-user/digest；
+- `PermissionAuthorizationContextReporterTests`：7 tests / 0 failures；覆盖 `continue` 语义、同一
+  acting provider/model 的 exact request prefix、`tools: []`、canonical evidence closure、worker
+  scope 隔离、unknown handle、secret-bearing output、completion marker、timeout、caller cancel 与
+  request-owned stream termination；
+- `AutomaticPermissionReviewTests`：31 tests / 0 failures；`PermissionReviewControlPlaneTests`：
+  40 tests / 0 failures；覆盖合法 report 与 canonical EventLog 原文分栏、缺失/malformed context、
+  omitted intervening revocation、unknown future event、每个 tool call 独立 report、hard deny 不调用
+  reporter，以及 reviewer provider 前的 typed durable deny；
+- `testCancelAllDrainsDataPlaneBeforeShuttingDownPermissionReviewer`：1 test / 0 failures；确认 session
+  cancel 会 drain 原始 inference、request-owned report 与 reviewer，不会释放 denial 后继续第三次
+  inference 或执行文件写入；完整 `IntatisCoworkTests`：326 tests / 0 failures；
+- managed sandbox 中第一次 focused `swift test` 因 SwiftPM 无权写用户编译缓存而在 manifest 编译前
+  失败；在允许 SwiftPM 编译缓存与真实子进程边界的宿主环境重跑后，`swift test list --skip-build`
+  发现 1700 tests，完整 `swift test --disable-sandbox` 退出码 0、0 failures。`swift build
+  --disable-sandbox` 与 `git diff --check` 均通过；
+- 本次未修改 App/UI、Xcode 工程或平台 target，因此未另跑 macOS/iOS App build；未执行真实
+  provider/credential/network smoke，不能从 scripted provider 测试外推线上模型质量。
 
 2026-08-07 browser observation 与 pre-action no-effect 修复的直接证据：
 

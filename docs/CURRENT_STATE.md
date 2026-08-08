@@ -79,6 +79,16 @@ macOS 是完整产品：Chat、Code、Cowork、Settings 和本地诊断导出。
   当前窗口的只读对话选择；列表保留 session 历史上所有 durable agent，detached identity 继续
   可点击并由原状态图标显示已移除，当前选择不会跳回 `@main`。新窗口默认显示 `@main`，
   `@permission-reviewer` 等控制面 identity 仍为不可选择的状态项。
+- Cowork automatic ask-class 权限请求现已带 host-validated authorization context。请求工具的
+  acting agent 复用刚才的 exact provider/model 与 provider-facing conversation snapshot，另发一次
+  `tools: []` 的 request-owned 报告请求；模型只返回五项语义报告和临时 user handles。宿主把 handles
+  映射到同 session canonical `user_message` sequence，无条件加入当前 submission，并从最早引用到
+  当前消息闭包覆盖所有可见用户指令，防止跳过中途撤销或缩窄。`PermissionReviewControlPlane` 再独立
+  验证 complete-known history、main/worker projection、current submission、report secret/shape 与 exact
+  authorization binding，最后把 untrusted report、canonical latest instruction 和 supporting evidence
+  分栏交给 reviewer。任何缺失、超预算、unknown future event、malformed/secret output、timeout 或 cancel
+  均在 reviewer provider 前以 `authorization_context_unavailable` durable deny；hard deny、manual flow、
+  host `agentAdmission`、CapabilityLease/WorkspaceLease 和 durable-first settlement 语义没有改变。
 - Cowork 中每个 agent 的文件、Git、文档、浏览器文件与 terminal 工具仍只作用于自己的单一
   `workspaceRoot`。具有 `spawn_agent` 的 coordinator 提示词会在预知目标位于根外或收到
   out-of-workspace denial 后停止直接重试，改为按目标绝对目录创建默认只读的子 agent，再用
