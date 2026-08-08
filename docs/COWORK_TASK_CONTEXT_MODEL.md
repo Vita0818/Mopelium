@@ -1,6 +1,10 @@
-# Mopelium Cowork Task and Context Model
+# Intatis Cowork Task and Context Model
 
-This document defines the desired task-scoped and context-scoped model for Mopelium Cowork.
+> **历史文档：冻结于 v0.10 迁移阶段。** 本文只保留设计/迁移 provenance，不是当前
+> 状态、测试或实现事实源。产品基线与当前规则见 `docs/VERSIONING.md`、
+> `docs/COWORK_PRINCIPLES.md`、`docs/ARCHITECTURE.md` 和 `docs/CURRENT_STATE.md`。
+
+This document defines the desired task-scoped and context-scoped model for Intatis Cowork.
 
 ## 1. Problem
 

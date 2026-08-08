@@ -2,28 +2,23 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Mopelium derivative modification: request-local inline-math catalog.
+//  Intatis derivative modification: request-local math catalog.
 //
 
 import Foundation
 
-/// Request-local mapping between parser-safe tokens and inline math.
+/// Request-local mapping between parser-safe tokens and math attachments.
 ///
 /// A catalog is created for one parse/conversion only. Its random namespace
 /// prevents model text from naming a token that belongs to another request.
 struct InlineMathCatalog: Hashable {
-  enum Rendering: Hashable {
-    case attachment
-    case literalOnly
-  }
-
   struct Entry: Hashable {
-    /// Formula source without the surrounding `$` delimiters.
+    /// Formula source without the surrounding delimiters.
     let source: String
     /// Exact source literal, including its original delimiters.
     let originalLiteral: String
-    /// Whether conversion may create an attachment for this entry.
-    let rendering: Rendering
+    /// Whether iosMath should lay out the formula as inline or display math.
+    let presentation: MathPresentation
   }
 
   private static let tokenStart = "\u{E000}"
@@ -40,7 +35,7 @@ struct InlineMathCatalog: Hashable {
 
   func token(at index: Int) -> String {
     precondition(entries.indices.contains(index))
-    return "\(Self.tokenStart)MOPELIUMMATH\(namespace)\(index)\(Self.tokenEnd)"
+    return "\(Self.tokenStart)INTATISMATH\(namespace)\(index)\(Self.tokenEnd)"
   }
 
   /// Replaces exact current-request tokens found in a Markdown text leaf.
@@ -83,22 +78,14 @@ struct InlineMathCatalog: Hashable {
         )
       }
 
-      switch match.entry.rendering {
-      case .attachment:
-        result.append(
-          InlineMathAttachment.attributedString(
-            source: match.entry.source,
-            originalLiteral: match.entry.originalLiteral,
-            attributes: attributes
-          )
+      result.append(
+        InlineMathAttachment.attributedString(
+          source: match.entry.source,
+          originalLiteral: match.entry.originalLiteral,
+          presentation: match.entry.presentation,
+          attributes: attributes
         )
-      case .literalOnly:
-        result.append(
-          NSMutableAttributedString(
-            string: match.entry.originalLiteral
-          ).mergingAttributes(attributes)
-        )
-      }
+      )
       cursor = match.range.upperBound
     }
 

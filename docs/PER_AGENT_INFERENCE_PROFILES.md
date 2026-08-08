@@ -1,10 +1,16 @@
 # PER_AGENT_INFERENCE_PROFILES
 
-最后更新：2026-07-26
+文档状态：当前 durable inference binding 契约
+最后核对：2026-08-06
+产品基线：v0.36（build 36）
 
 ## 1. 状态与范围
 
-Mopelium Cowork 已实现同一 session 内按 agent 绑定不同推理配置的第一阶段。绑定对象不是单独的 model 字符串，而是一个指向不可变 catalog revision 的精确引用；该 revision 同时固定 connection、wire、model、variant、有效 request options、credential reference 元数据和安全路由标签。由此可以表达：
+Mopelium 的显示品牌与 Cowork-only 产品方向不改变本合同：内部 catalog、profile、binding、类型、
+配置和 durable identity 继续使用 Intatis。不得创建一套 Mopelium profile/binding mirror，也不得
+因 Chat/Code 后续隐藏而收窄 Cowork 的 exact binding 语义。
+
+Intatis Cowork 已实现同一 session 内按 agent 绑定不同推理配置的第一阶段。绑定对象不是单独的 model 字符串，而是一个指向不可变 catalog revision 的精确引用；该 revision 同时固定 connection、wire、model、variant、有效 request options、credential reference 元数据和安全路由标签。由此可以表达：
 
 - 同一 model、不同 reasoning/thinking effort 或 token budget；
 - 同一 model、不同上游 connection、credential reference 或 endpoint；
@@ -80,7 +86,7 @@ Binding 不是对 catalog current 指针的动态引用。resolver 必须用它�
 - 所有历史 immutable profile revisions；
 - 只供未来绑定使用的 mutable current-reference map。
 
-macOS app 将现有 provider/model/variant 配置编译为 connection/profile draft：connection ID/trust domain 使用不暴露 URL 的 opaque hash，egress classification 当前固定为 `user-configured-external`；用户写入配置的 raw variant key 仅用于本地查找与安全标题，durable `variantID` 是 provider/model/variant tuple 的 opaque stable digest。CLI 读取同一 Mopelium-owned OpenCode-compatible 配置形状，把所有启用的 OpenAI-compatible route、model 与 named variant 编译为 profiles；connection/trust identity 与 environment credential reference 都按 exact route configuration 隔离，resolver 始终使用目标 connection revision 自己的环境变量引用，绝不拿当前所选 route 的 key 替代。Modern CLI 的 unqualified model 只有在全 catalog 唯一时才自动切到其唯一 route；有歧义且当前显式 route 也不含该 model 时必须要求 provider-qualified ID。显式 reasoning effort 必须匹配 selected model 的 configured variant（或 base options 已明确声明同一 effort），不能临时合成一个 variant。Catalog reconciliation 保留旧 revision，因此仍被历史 binding 引用的 route revision 与其 exact environment credential reference 可继续解析。Reconciler 对语义相同的 draft 复用旧 revision；语义变化时追加 revision并保留旧定义。
+macOS app 将现有 provider/model/variant 配置编译为 connection/profile draft：connection ID/trust domain 使用不暴露 URL 的 opaque hash，egress classification 当前固定为 `user-configured-external`；用户写入配置的 raw variant key 仅用于本地查找与安全标题，durable `variantID` 是 provider/model/variant tuple 的 opaque stable digest。CLI 读取同一 Intatis-owned OpenCode-compatible 配置形状，把所有启用的 OpenAI-compatible route、model 与 named variant 编译为 profiles；connection/trust identity 与 credential reference 都按 exact route configuration 隔离，resolver 始终使用目标 connection revision 自己的 env/file/auth/config reference，绝不拿当前所选 route 的 key 替代。Modern CLI 的 unqualified model 只有在全 catalog 唯一时才自动切到其唯一 route；有歧义且当前显式 route 也不含该 model 时必须要求 provider-qualified ID。显式 reasoning effort 必须匹配 selected model 的 configured variant（或 base options 已明确声明同一 effort），不能临时合成一个 variant。Catalog reconciliation 保留旧 revision，因此仍被历史 binding 引用的 route revision 与其 exact credential reference 可继续解析。Reconciler 对语义相同的 draft 复用旧 revision；语义变化时追加 revision并保留旧定义。
 
 进入 durable Cowork catalog 的 `baseURL` / `chatEndpoint` 还必须是没有 user-info、query 或 fragment 的绝对 HTTP(S) URL。鉴权和路由参数只能由 exact connection revision 的受控 credential/adapter 契约表达，不能藏进 URL 后持久化或绕过安全投影；不满足该约束的 draft 在写入 catalog 前 fail closed。该收口不改变 Chat/Code 独立兼容配置路径的开放 JSON 契约。
 
@@ -114,7 +120,7 @@ Catalog 编译阶段采用浅覆盖，顺序固定为：
 
 当前 bound Cowork agent 的 reasoning/options 由 profile 所有；session-wide `reasoningEffort` 只用于没有 binding 的兼容路径。Cowork durable catalog **不是**开放 JSON 通道：只有显式 schema 中的有界字段可进入 revision，包括数值型 sampling/token/logprob 参数、`logprobs` / `parallel_tool_calls` 布尔值、安全 token 字符串 `reasoning_effort` / `verbosity` / `service_tier`，以及受限的 `reasoning`、`thinking`、`output_config` 和 provider routing 子结构。未知 key、错误 JSON shape、过深/过大容器、runtime structural fields、secret/auth/header/query/URL/endpoint transport material、`stream_options` 与 `n` / `best_of` / `num_return_sequences` / `candidate_count` 等多候选控制都在 catalog admission 时 fail closed；新增 durable option 必须先显式扩展 schema 与测试。
 
-这与 Chat/Code 的兼容配置路径不同：`ProviderEndpoint.modelRequestOptions` 仍保留并浅合并任意 model/variant JSON，不按厂商枚举丢弃未知字段；但 OpenAI-compatible request builder 最终拥有 `model`、`messages`、`tools`、`stream` 等结构。对所有 Chat/Agent 请求，builder 都会无条件移除配置提供的 `stream_options`、`n`、`best_of`、`num_return_sequences`、`candidate_count`，并固定 `n = 1`；只有 host 的 `includeUsage` 可以重新加入受控 `stream_options.include_usage`。当 host 另给 output-token ceiling 时，还会按忽略大小写及 `_` / `-` / `.` 分隔差异的 normalized key 清除全部竞争 token aliases，再写入 host-owned `max_tokens`。因此即使兼容 Chat/Code 配置是开放 JSON，配置也不能改变单候选、usage 或 host ceiling 请求形状；Cowork profile 更早在 durable schema admission 就会拒绝这些字段。
+这与 Chat/Code 的兼容配置路径不同：`ProviderEndpoint.modelRequestOptions` 仍保留任意 model/variant JSON，不按厂商枚举丢弃未知字段；多层 options 使用 OpenCode/Remeda `mergeDeep` 语义，只有共享 plain object 递归，array/scalar/null 由后层替换。`provider.npm` 与 model `provider.npm` 分别冻结 provider adapter 和 model override；最终 request builder 只让 exact adapter 解释已知选项，禁止全局 reasoning alias 规范化或未知 package fallback。`@ai-sdk/openai-compatible` 与 `@openrouter/ai-sdk-provider` 的 reasoning wire shape 不同，历史缺 adapter 值继续走 legacy 行为。Builder 最终拥有 `model`、`messages`、`tools`、`stream` 等结构；对所有 Chat/Agent 请求都会无条件移除配置提供的 `stream_options`、`n`、`best_of`、`num_return_sequences`、`candidate_count`。新式 `@ai-sdk/openai-compatible` / `@openrouter/ai-sdk-provider` adapter 按 pinned OpenCode package 语义省略 `n`，依赖 API 的默认单候选行为，也不会因为 Intatis tool metadata 声明 parallel-safe 就自动合成 `parallel_tool_calls`；只有 legacy Intatis wire 继续显式写入 `n = 1` 和 call-level parallel 开关。显式配置并经 adapter lowering 的 `parallel_tool_calls` 仍可保留。只有 host 的 `includeUsage` 可以重新加入受控 `stream_options.include_usage`。当 host 另给 output-token ceiling 时，还会按忽略大小写及 `_` / `-` / `.` 分隔差异的 normalized key 清除全部竞争 token aliases，再写入 host-owned `max_tokens`。因此即使兼容 Chat/Code 配置是开放 JSON，配置也不能通过候选数量字段改变单候选、usage 或 host ceiling 请求形状；Cowork profile 更早在 durable schema admission 就会拒绝候选数量字段。
 
 ## 6. Agent 生命周期语义
 
@@ -132,6 +138,12 @@ Catalog 编译阶段采用浅覆盖，顺序固定为：
 
 - 未传 `inference_profile_id`：精确继承调用者 binding，包括 revision、connection、variant 和 definition digest。
 - 显式传入：只能使用 runtime 的 host-approved profile map，且在 admission 前完成 exact resolve。
+- coordinator 可先调用 `list_inference_profiles` 查看 host-approved
+  profile ID、安全 label、model 与 variant。`spawn_agent` / list tool 的
+  model-facing descriptor 明确把“省略并继承 exact caller profile”列为默认
+  推荐；只有某个安全 label/model/variant 明确适配被委派工作时才选择不同
+  profile。当前没有硬编码按任务类型推荐特定厂商/model 的 policy tags，不能
+  把模型自己的 label 判断写成 host-guaranteed recommendation。
 - raw model 与 profile 不能同时提交；worker 不能通过 raw model 字段绕过 host-approved profile。
 - 新 agent 的完整 binding 随 durable spawn/attach 事件落盘后才进入可运行 roster。
 
@@ -206,9 +218,9 @@ Endpoint/trust-domain 变化本质上是数据出口变化。当前第一阶段�
 
 ### CLI Cowork
 
-- CLI 会从 Mopelium-owned OpenCode-compatible 配置编译所有启用的 route/model/variant，而不是只暴露当前单一 connection；每个 option 保留本地 route/model/variant selector，但 durable binding 只含 opaque exact identity/revision；
+- CLI 会从 Intatis-owned OpenCode-compatible 配置编译所有启用的 route/model/variant，而不是只暴露当前单一 connection；每个 option 保留本地 route/model/variant selector，但 durable binding 只含 opaque exact identity/revision；
 - unqualified model 仅在唯一 route 匹配时自动选择该 route；显式 reasoning 若没有匹配的 configured variant/base effort，则配置 fail closed，不生成 synthetic profile；
-- 每个 connection revision 保存自己的 exact environment credential reference；生产懒加载 resolver 只接受 `.environment`，旧 file/auth/config/keychain reference 必须在导入时归一为环境变量或 fail closed，且不能把当前 selected route 的 credential 替换到其他 route 或保留的旧 revision；
+- 每个 connection revision 保存自己的 exact credential reference；懒加载 resolver 支持 env/file/auth/config reference，且不能把当前 selected route 的 credential 替换到其他 route 或保留的旧 revision；
 - `/profiles` 列出 host-approved 的安全 profile；
 - `/profile [id]` 查看或设置未来 agent default；
 - `/agent add ... [--profile <id>]` 使用显式 profile，否则使用未来-agent default；
@@ -240,7 +252,7 @@ Endpoint/trust-domain 变化本质上是数据出口变化。当前第一阶段�
 
 - protocol round-trip 与 legacy optional-field decode；
 - Chat/Code `ProviderEndpoint` arbitrary JSON options 保真；Cowork durable schema 只接受显式 allowlisted 字段，并对 unknown key、错误 shape、secret/auth/header/query/URL/endpoint、structural/stream/multi-candidate fields fail closed；
-- 所有 OpenAI-compatible Chat/Agent request 都移除配置 `stream_options` 与多候选参数并强制 `n = 1`；host `includeUsage` 才能重建受控 usage shape，host token ceiling 另清除竞争 aliases；
+- 所有 OpenAI-compatible Chat/Agent request 都移除配置 `stream_options` 与多候选参数；新式 package adapter 省略 `n` 并依赖默认单候选，legacy wire 才显式写入 `n = 1`。新式 adapter 也不得从 parallel-safe tool metadata 自动合成 `parallel_tool_calls`；host `includeUsage` 才能重建受控 usage shape，host token ceiling 另清除竞争 aliases；
 - 语义相同复用 revision、语义变化追加 revision、旧 revision 保留；
 - store owner-only 权限、corruption/schema/permission failure 不覆盖原文件；
 - exact resolution 不回退 current，且 profile/connection revision、model/variant、safe route/trust/egress/digest 任一 mismatch 都在 secret/network 前失败；
@@ -262,8 +274,8 @@ Endpoint/trust-domain 变化本质上是数据出口变化。当前第一阶段�
 
 对应 focused suites 和命令见 `docs/TESTING.md`。真实产品验收至少要用两个 profile 在一个 session 中启动两个 agent，观察各自真实上游/model/effort，同时验证修改未来-agent default 不改变现有 agent，并验证 Project Settings/CLI 的 busy rebind 被拒绝、idle rebind 后只有下一次调用改变；还要在 current work 期间用底部 selector 连续冻结两个不同的 next-main submission，确认当前 work、direct worker、控制面与 future default 均不变化。
 
-2026-07-16 在本轮终审追加项之前的验证基线是：per-agent focused run 62/62、CLI offline `mopelium selftest`、完整 SwiftPM 734 tests（14 skipped，0 failures）、MopeliumMac macOS Debug 与 MopeliumiOS Simulator Debug build 均通过。Computer Use 在当时最新 Debug app 中确认旧 session 对 unresolved `@main` fail closed、composer/Send disabled，以及 Project sheet 的 future default profile 和逐 agent `Legacy`/Rebind menu；未保存 rebind、未发送 provider 请求。随后新增的 diagnostic URL redaction、HTTP 30x no-follow、CLI restore-main/selection fail-closed、main/control-plane startup gate + unresolved-worker invocation isolation、opaque durable variant ID 与 attach/bootstrap TOCTOU 收口，其最终复跑结果以本轮总体验证记录为准，不能沿用上述基线冒充新改动已验证。
+2026-07-16 在本轮终审追加项之前的验证基线是：per-agent focused run 62/62、CLI offline `intatis selftest`、完整 SwiftPM 734 tests（14 skipped，0 failures）、IntatisMac macOS Debug 与 IntatisiOS Simulator Debug build 均通过。Computer Use 在当时最新 Debug app 中确认旧 session 对 unresolved `@main` fail closed、composer/Send disabled，以及 Project sheet 的 future default profile 和逐 agent `Legacy`/Rebind menu；未保存 rebind、未发送 provider 请求。随后新增的 diagnostic URL redaction、HTTP 30x no-follow、CLI restore-main/selection fail-closed、main/control-plane startup gate + unresolved-worker invocation isolation、opaque durable variant ID 与 attach/bootstrap TOCTOU 收口，其最终复跑结果以本轮总体验证记录为准，不能沿用上述基线冒充新改动已验证。
 
 ## 12. 设计来源与 provenance
 
-本实现是 Mopelium 原创实现，设计调研见 `codex-report/07_16_26-17_53-per-agent-inference-profile-research.md`。该报告只作为公开产品/仓库行为的 reference-only 研究；本功能未复制或翻译第三方源码、prompt、UI 资产，也未引入新依赖，因此本阶段无需更新 `NOTICE.md`。若后续实际复用上游实现，必须另按 `docs/OPEN_SOURCE_REUSE.md` 固定 commit、核对许可证并记录 provenance。
+本实现是 Intatis 原创实现，设计调研见 `codex-report/07_16_26-17_53-per-agent-inference-profile-research.md`。该报告只作为公开产品/仓库行为的 reference-only 研究；本功能未复制或翻译第三方源码、prompt、UI 资产，也未引入新依赖，因此本阶段无需更新 `NOTICE.md`。若后续实际复用上游实现，必须另按 `docs/OPEN_SOURCE_REUSE.md` 固定 commit、核对许可证并记录 provenance。

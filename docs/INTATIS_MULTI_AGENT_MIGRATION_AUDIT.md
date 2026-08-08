@@ -1,5 +1,15 @@
 # Intatis 多 Agent 与文献研究能力迁移审计
 
+> **历史文档：执行策略已于 2026-08-06 被取代。** 仓库已经不再维护旧 Mopelium 源树或
+> `References/Intatis/` 参考目录，而是把 Intatis 快照直接提升为根活动代码基线。因此本文关于
+> 选择性复制模块、新建 `Mopelium*` 后端 package、重命名 Intatis 内部类型、先迁移哪些切片、
+> 排除 Code/Git 源码以及旧文件/测试数量的建议均不得继续执行。
+>
+> 当前决定是：Mopelium 只作为用户可见品牌和 Cowork 领域化体验；内部 target、模块、类型、
+> Bundle ID、命令、配置和 durable identity 保持 Intatis；所有新增产品功能只在现有 Cowork 内
+> 建设；Chat/Code 后续只隐藏、不删除。权威边界见 `MOPELIUM_PRODUCT_DIRECTION.md`。本文其余
+> 内容只保留为当时为何选择 durable multi-agent architecture 的历史论证。
+
 审计日期：2026-07-11
 
 目标仓库：Mopelium

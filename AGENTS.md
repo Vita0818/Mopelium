@@ -1,19 +1,23 @@
-# Mopelium 项目常驻上下文
+# Mopelium（Intatis 快照基线）项目常驻上下文
 
-本文件继承 `/Users/vita/Vitemis/AGENTS.md` 中的 Vitemis 通用 Agent 规则。若本文件与通用规则冲突，在不违反系统和用户指令的前提下，以更具体、更严格的项目规则为准。
+本文件继承 `/Users/vita/Vitemis/AGENTS.md` 中的 Vitemis 通用 Agent 规则。若本文件与通用规则冲突，在不违反系统和用户指令的前提下，以更具体、更严格的规则为准。
 
-本文是 AI Agent 每轮进入本仓库时的入口文件。执行任何代码修改、配置修改、构建脚本修改或测试源码修改之前，必须先按顺序阅读并核对下列文档：
+本文是 AI Agent 每轮进入本仓库时的入口文件。仓库根目录已经直接采用 `SNAPSHOT.md` 固定的 Intatis 快照作为活动源码、构建、测试和资源基线；不存在需要仿照或同步的嵌套快照。执行任何代码修改、配置修改、构建脚本修改或测试源码修改之前，必须先按顺序阅读并核对下列文档：
 
 0. `/Users/vita/Vitemis/AGENTS.md`
-1. `docs/CURRENT_STATE.md`
-2. `docs/PROJECT_MAP.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/DO_NOT_BREAK.md`
-5. `docs/OPEN_SOURCE_REUSE.md`
-6. `docs/TESTING.md`
-7. `docs/NEXT_TARGET.md`（如果存在）
-8. `docs/COWORK_PRINCIPLES.md`（修改 Cowork / AgentKernel / MessageBus / 权限 / agent 编排前必读）
-9. `docs/AI_PROVIDER_MODEL_CONFIGURATION.md`（修改 provider/model/variant、凭据环境变量引用或 Cowork 推理 profile 配置前必读）
+1. `SNAPSHOT.md`
+2. `docs/MOPELIUM_PRODUCT_DIRECTION.md`
+3. `docs/VERSIONING.md`
+4. `docs/CURRENT_STATE.md`
+5. `docs/MACOS_DISTRIBUTION.md`
+6. `docs/PROJECT_MAP.md`
+7. `docs/ARCHITECTURE.md`
+8. `docs/DO_NOT_BREAK.md`
+9. `docs/OPEN_SOURCE_REUSE.md`
+10. `docs/TESTING.md`
+11. `docs/NEXT_TARGET.md`（如果存在）
+12. `docs/COWORK_PRINCIPLES.md`（修改 Cowork / AgentKernel / MessageBus / 权限 / agent 编排前必读）
+13. `docs/AI_PROVIDER_MODEL_CONFIGURATION.md`（修改 provider/model/variant 或凭据配置时必读）
 
 如果文档与源码、工程配置、测试或脚本冲突，必须以当前源码和配置为准，并在最终报告中明确指出冲突位置和采用源码为准的原因。
 
@@ -31,13 +35,38 @@ git status --short
 
 要求：
 
-- `pwd` 与 `git rev-parse --show-toplevel` 必须指向同一个仓库根目录：`/Users/vita/Vitemis/Virgo/Mopelium`。
-- 如果当前目录不是 Git root，停止修改，只报告路径问题。
+- `pwd` 与 `git rev-parse --show-toplevel` 必须同时是 `/Users/vita/Vitemis/Virgo/Mopelium`。
+- 若 `pwd` 或 Git root 不符合上述精确路径，停止修改，只报告路径问题。
 - 读取 `git status --short` 后，先区分用户已有改动与本轮计划改动；不得覆盖、回退或清理用户已有改动。
+- `/Users/vita/Vitemis/Intatis` 只是在 `SNAPSHOT.md` 中固定的来源仓库，不是后续默认写入目标；不得把修改写回来源或在两处隐式同步。
+
+## Mopelium 产品方向与文档边界
+
+`docs/MOPELIUM_PRODUCT_DIRECTION.md` 是当前产品方向的权威说明：
+
+- Mopelium 只替换用户可见品牌；内部 target、模块、类型、Bundle ID、命令、配置键、存储路径和协议继续保持 Intatis；
+- 所有新增 Mopelium 产品功能只在 Cowork 内建设，不新增平行模式或后端；
+- Chat 与 Code 保留现有代码、数据兼容和测试，用户明确要求后才从产品入口隐藏，不删除。
+
+快照自带文档继续说明当前源码事实。`docs/AI_PROVIDER_MODEL_CONFIGURATION.md` 是 AI 配置操作合同；
+`docs/INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md` 已是历史审计，不再提供迁移计划。若历史文档与当前源码、
+构建配置或产品方向冲突，以源码/配置和 `MOPELIUM_PRODUCT_DIRECTION.md` 为准。
 
 ## 修改边界
 
 本仓库是 Apple-first、Swift-native 优先的本地 AI 工作区（Swift 多 target，SwiftPM + XcodeGen），含三个产品面：Chat（普通多模态对话）/ Code（单 agent 本地工作区）/ Cowork（多 agent 本地工作区协作）。macOS 是全量产品；iOS 是 chat 子集。允许按 `docs/OPEN_SOURCE_REUSE.md` 选择性复用兼容许可证的公开源码；当前实现是否实际包含上游代码以 `NOTICE.md` 为准。
+
+上述三个产品面是当前源码事实，不是未来 Mopelium 信息架构。产品新增能力只能进入 Cowork；
+不得为 Mopelium 复制 AgentKernel、EventLog、scheduler、permission、session runtime 或工具链。
+显示品牌变更不得触发内部 Intatis 命名的机械替换。Chat/Code 的隐藏和品牌实现都须等待用户明确任务。
+
+macOS 只通过 Developer ID 签名、公证和直接下载分发；不做 Mac App Store
+版本。`IntatisMacAppStore`、`.macAppStore` 与 App Store entitlements 是源码中
+尚未删除的遗留实现，不是产品面、设计约束、默认测试矩阵或 release gate。
+后续不得仅为 Mac App Store App Sandbox 裁剪功能或增加替代实现，也不要默认
+构建/修复该 target。此决定不弱化 Intatis 自有权限链、Workspace confinement、
+managed-terminal Seatbelt、Hardened Runtime、签名/公证或 iOS 平台边界；精确
+合同见 `docs/MACOS_DISTRIBUTION.md`。
 
 未来常规任务可以按用户要求修改业务源码；但在只要求项目自查或文档更新的任务中，只允许修改：
 
@@ -46,29 +75,26 @@ git status --short
 
 除非用户明确要求，不要修改：
 
-- `Apps/`（MopeliumMac / MopeliumiOS / mopelium-cli）
-- `Packages/`（11 个 Mopelium* 模块及其 Tests）
+- `Apps/`（IntatisMac / IntatisiOS / intatis-cli）
+- `Packages/`（当前 14 个公共库、3 个内部 C/guard target、开发期 MCP
+  conformance executable 及其 Tests；精确清单以 `Package.swift` 为准）
 - `Package.swift`
 - `project.yml`
 - `Makefile`
 - `NOTICE.md`
-
-## Intatis 参考快照边界
-
-- `References/Intatis/` 是从 `/Users/vita/Vitemis/Intatis` 复制的只读参考快照，当前基线记录在 `References/Intatis/SNAPSHOT.md`。
-- 活动构建只能使用已经迁入 `Apps/`、`Packages/`、`Vendor/` 和根构建配置的 Mopelium 源码；不得把 `References/Intatis/` 直接接成 product、target、package dependency 或运行时资源。
-- 日常实现不得直接修改该快照。只有用户明确要求刷新参考基线时，才允许整体更新快照和 `SNAPSHOT.md`；刷新仍须排除嵌套 `.git/`、构建缓存、报告目录、运行态、浏览器 profile、环境文件、认证文件、密钥、证书和 provisioning profile。
-- 活动产品的模块名、类型名、Bundle ID、命令、环境变量、配置路径、界面文案和资产必须保持 Mopelium 品牌；不得把上游产品品牌带入活动构建。`References/Intatis/` 的来源名称及 `NOTICE.md` 中真实的第三方归属不属于产品品牌替换范围。
 
 ## 禁止事项
 
 - 不执行破坏性 Git 操作：`git reset --hard`、`git clean -fd`、`git checkout .`、强制 push、删除用户未提交文件。
 - 未经用户明文要求具体 Git 操作，不 add、不 commit、不 push、不创建 PR；编辑、整理、修复、验证或准备工作都不等于提交请求。
 - 若用户要求提交，只提交当前 Git root 中与本任务相关的文件；不得递归进入、暂存、提交或推送子仓库、submodule、nested Git repo 或依赖 checkout。
-- 不引入新依赖，不改构建脚本，不改测试源码，除非任务明确要求。当前 Markdown/math 渲染依赖必须继续固定为仓内 `Vendor/SwiftStreamingMarkdown` 及其已审计的 exact 传递依赖；计划中的 SwiftGit2/libgit2 须先过许可证审查。
+- 不引入新依赖，不改构建脚本，不改测试源码，除非任务明确要求。当前第三方依赖与
+  vendored 派生源码以 `NOTICE.md`、`ThirdPartyNotices/` 和
+  `docs/OPEN_SOURCE_REUSE.md` 为准；任何新增或升级都须先过许可证与 provenance 审查。
 - 不把密钥、token、证书私钥、shared secret、账号密码、完整指纹、完整 API 响应、完整转写文本或个人隐私路径写入文档。
-- API key 只允许从环境变量读取。配置、UserDefaults、认证文件、普通文件、Keychain、EventLog 和项目文档只能保存非秘密的环境变量名，不能保存 key 值；`api_key` / `apiKey` / `api-key` 明文配置必须拒绝或忽略。
-- 不绕过 3 层权限门（DeterministicPolicyGate / ModelPermissionReviewer / PermissionEngine）、PathConfinement 工作区边界、SecretScanner、Mediator 秘密拦截或环境变量凭据隔离。
+- 不以显示品牌为理由批量替换 `Intatis` target/module/type、Bundle ID、`INTATIS_*`、配置/存储路径、CLI 命令、EventLog 或协议标识。
+- 不把 Mopelium 实现为与 Cowork 并列的新模式或平行 runtime；不删除 Chat/Code，也不在未获明确授权时隐藏它们。
+- 不绕过 3 层权限门（DeterministicPolicyGate / ModelPermissionReviewer / PermissionEngine）、PathConfinement 工作区边界、SecretScanner、Mediator 秘密拦截或 Keychain 凭据隔离。
 - 不把 Cowork 实现为硬编码递归 agent 树（main/coordinator/worker/leaf 永久角色）；遵循 `docs/COWORK_PRINCIPLES.md`。
 - 不让 `AgentLoop` 直接同步递归调用另一个 `AgentLoop`；用 mailbox / scheduler / event flow。
 - 不让 worker 默认获得 coordinator 工具（spawn_agent / remove_agent / delegate_task）；能力须经 `CapabilityLease` 显式授予。
@@ -81,24 +107,33 @@ git status --short
 
 修改前至少确认：
 
-- 入口：`Apps/MopeliumMac/Sources/MopeliumMacApp.swift`（`@main struct MopeliumMacApp`，全量 macOS）、`Apps/MopeliumiOS/Sources/MopeliumiOSApp.swift`（`@main struct MopeliumiOSApp`，chat 子集）、`Apps/mopelium-cli/Sources/MopeliumCLI.swift`（CLI）。
+- 入口：`Apps/IntatisMac/Sources/IntatisMacApp.swift`（`@main struct IntatisMacApp`，全量 macOS）、`Apps/IntatisiOS/Sources/IntatisiOSApp.swift`（`@main struct IntatisiOSApp`，chat 子集）、`Apps/intatis-cli/Sources/IntatisCLI.swift`（CLI）。
 - Chat 链路：`ChatViewModel` → `GoalInputParser`（行首 `/goal` 只生成可选 Goal 元数据，provider 收到清洗后的文本）→ `ChatLoop`（无工具）→ `EventLog`(JSONL append-only) → `ConversationProjection`。
 - Code 链路：`CodeViewModel` → `GoalInputParser` → 共享 headless `AgentRuntime.code` → `AgentLoop`（maxIterations 50）→ `ContextBuilder` + `RuntimeEnvironmentManifest` → `OpenAIWireProvider` → `runTool` → `PermissionEngine`（3 层门）→ `EventLog` → `CodeProjection`。
-- Cowork 链路：`CoworkViewModel` → `GoalInputParser` + `CoworkMentionRouter` → `SubmittedIntentStore`（outbox → 原子 `user_message + queued`）→ `Orchestrator.runtime`（先取得 session writer lease）→ FIFO scheduler → 共享 headless `AgentRuntime.cowork` → `AgentLoop` → `PermissionEngine` → durable tool execution ticket → executor → `EventLog`；`MessageBus` → `Mediator`。fresh Cowork 在任何模型请求前，以同一原子 7-event batch 登记完整 session settings、`@main` 与 `@permission-reviewer` 各自的 workspace/capability lease 和 identity；两者初始 exact inference binding 与 canonical workspace 相同，但 identity/lease 独立，reviewer 为 read_only、空工具/通信/委派且 depth 0。GUI/CLI 默认启用该保留控制面 agent，`AgentPermissionResponder` 把结构化 `PermissionReviewTask` 交给独立 `PermissionReviewControlPlane` FIFO/single-flight；reviewer 有独立 timeout/cancel、单次输出上限与可选 soft token warning，不占普通 scheduler 槽，只返回 `allow` / `deny`。request/settled 均先落 EventLog，allow 只有 settled 成功后生效；pre-submit caller cancel 直接返回 typed deny、不创建 review lifecycle；timeout、malformed、provider/persistence failure 和已登记 review 在 terminal-claim 前被观察到的 cancel durable deny 当前调用，不转 GUI 人工等待；claim 后 cancel 保留唯一 settlement 但最终 authorization delivery deny。每个 provider dispatch 都使用 exact `{reviewTaskID, nonce}` generation；provider/timeout 竞争同代首 terminal，caller cancel 由同步 request token、actor path 与下游围栏共同处理。production 按冻结 reviewer exact binding 逐代 fresh-resolve provider wrapper；timeout/cancel 只影响当前 call，若已有 active generation 就只 retire 该代，late/duplicate output 无权影响新代或执行工具。`ToolCallingProvider.stream` 必须立即返回 request-owned stream，并传播 consumer termination；不得用 `Task.detached` 宣称支持同步永久阻塞实现。旧 `provider_still_stopping` 只保留 legacy decode。Phase A 后 GUI composer 始终可编辑，Send 先冻结并持久化本地提交；reviewer 未就绪只显示状态并使后续 ask-class tool fail closed，不阻止普通主请求。CLI `/auto` 重启，只有用户明确 `/default` 才进入人工模式。审查者不得作为普通 send/delegate/message/ask 目标，不得运行嵌套 `AgentLoop`。
+- Cowork 链路：`CoworkViewModel` → `GoalInputParser` + `CoworkMentionRouter` → `SubmittedIntentStore`（outbox → 原子 `user_message + queued`）→ `Orchestrator.runtime`（先取得 session writer lease）→ FIFO scheduler → 共享 headless `AgentRuntime.cowork` → `AgentLoop` → `PermissionEngine` → durable tool execution ticket → executor → `EventLog`；`MessageBus` → `Mediator`。fresh Cowork 在任何模型请求前，以同一原子 7-event batch 登记完整 session settings、`@main` 与 `@permission-reviewer` 各自的 workspace/capability lease 和 identity；两者初始 exact inference binding 与 canonical workspace 相同，但 identity/lease 独立，reviewer 为 read_only、空工具/通信/委派且 depth 0。GUI/CLI 默认启用该保留控制面 agent，`AgentPermissionResponder` 把结构化 `PermissionReviewTask` 交给独立 `PermissionReviewControlPlane` FIFO/single-flight；reviewer 有独立 timeout/cancel 与可选 soft token warning，不占普通 scheduler 槽，只返回 `allow` / `deny`。reviewer 默认不得注入 `temperature`、output-token 或字符上限；只有用户/host 显式策略或真实上游/上下文约束存在时才可传递相应控制。request/settled 均先落 EventLog，allow 只有 settled 成功后生效；pre-submit caller cancel 直接返回 typed deny、不创建 review lifecycle；timeout、malformed、provider/persistence failure 和已登记 review 在 terminal-claim 前被观察到的 cancel durable deny 当前调用，不转 GUI 人工等待；claim 后 cancel 保留唯一 settlement 但最终 authorization delivery deny。每个 provider dispatch 都使用 exact `{reviewTaskID, nonce}` generation；provider/timeout 竞争同代首 terminal，caller cancel 由同步 request token、actor path 与下游围栏共同处理。production 按冻结 reviewer exact binding 逐代 fresh-resolve provider wrapper；timeout/cancel 只影响当前 call，若已有 active generation 就只 retire 该代，late/duplicate output 无权影响新代或执行工具。`ToolCallingProvider.stream` 必须立即返回 request-owned stream，并传播 consumer termination；不得用 `Task.detached` 宣称支持同步永久阻塞实现。旧 `provider_still_stopping` 只保留 legacy decode。Phase A 后 GUI composer 始终可编辑，Send 先冻结并持久化本地提交；reviewer 未就绪只显示状态并使后续 ask-class tool fail closed，不阻止普通主请求。CLI `/auto` 重启，只有用户明确 `/default` 才进入人工模式。审查者不得作为普通 send/delegate/message/ask 目标，不得运行嵌套 `AgentLoop`。
 - 权限 3 层：`DeterministicPolicyGate`（纯函数、模型无关、deny 终局；普通写入/网络/exec 进入 ask 流）→ `ModelPermissionReviewer`（只能收窄 gate `pass`，不能放行 hard deny）→ `PermissionEngine`（`askUser` 交给当前 `PermissionResponder`；Cowork 自动模式只接受 control-plane allow/deny，人工模式须由用户显式切换）。
 - Phase C 权限/turn 合同：每个新 Chat/Code/Cowork turn 使用稳定 `TurnID` 并追加唯一语义的 `turn_outcome`；权限请求携带 turn/tool-call/authorization correlation 与 manual/automatic mode。`EventLog.registerPermissionRequest` 对同一 RequestID first-write-wins，`settlePermissionRequest` 在 complete-known history 与跨进程锁内执行 first-terminal CAS：exact duplicate 幂等，冲突 payload/terminal fail closed。人工 `Decline Call` 只写当前 call 的 typed denied `tool_result` 并允许模型继续；`Cancel Turn` 写 permission terminal 后中断整个 turn，禁止伪造 denied tool result。user/policy/reviewer/sandbox/runtime/cancel 必须保留 typed source；明确的 sandbox wrapper startup denial 结算为 `sandbox_denied/not_started` 且不自动 retry，普通 nonzero/EPERM 不得误分类。权限投影保持 FIFO，重显复用同一 RequestID，任意一项终结不得重排其余项；取消/终止必须先 drain tool/provider 清理，再写 task/turn terminal 并恢复 caller。
 - Phase L 应用生命周期：macOS 的 Chat/Code/Cowork runtime 由进程级 `AppSessionRuntimeManager` 按 exact `{SessionKind, SessionID}` 持有，窗口只持有当前展示选择；切换 mode/session、Command-W 或关闭最后窗口不得隐式 stop。删除 session 必须先精确 drain 对应 runtime，其他窗口收到 removal 后退出已删除详情。Command-Q 先关闭新操作 admission，再同时广播所有 runtime stop，并在有界 deadline 后允许进程退出；超时不伪造 settled。冷启动只 replay/reconcile：历史 active Goal durable 转为 paused（达到预算则 budget-limited），历史 running/stopping 由既有恢复路径显示 interrupted，不自动调用 provider；只有明确 Retry、Resume、Send 或 CLI `/auto|/default` 后的显式 data-plane 动作才可继续。Chat/Code/Cowork shutdown 均须取消并等待本 runtime 已登记的 provider/tool/operation task，再释放权限 waiter、subscription 与 workspace scope。
 - 平台边界：iOS 是 macOS 真子集（chat/multimodal/providers/artifacts，无 Tools/Permission/AgentKernel/Cowork）；`PlatformProfile.current` 默认 `.iOS`（最受限）。
-- 持久化：`EventLog`（`~/Library/Application Support/Mopelium/<session>/events.jsonl`）是 session canonical truth；append/batch 在跨进程锁内分配单调 `seq`，settings revision 也在同一事务边界分配，返回值/subscriber 发布实际落盘 bytes 反解的 canonical Envelope；production Cowork runtime 全生命周期持有 writer lease，旧 JSONL 必须继续可解码。`session.json` 是 owner-only、schema v2、可由 EventLog 重建的派生投影，含 `projectedThroughSeq`、settings revision、Cowork settings、agent/workspace/capability 摘要与 migration marker；缺失、损坏、落后或伪造领先时 EventLog 胜出，合法未知 future event 时旧程序不得覆盖投影。`workspace-access.plist` 是 session-owned、schema v1、owner-only binary plist，只保存 canonical path、opaque security-scoped bookmark 与 primary 标志；bookmark bytes 不得进入 JSONL/session.json，App 以 RAII lease 成对持有 scope，恢复时必须先启用 scope 再校验 canonical identity。共享 capability 只有 settings + live roster 都证明零引用才可清理；primary 在 UI/方法/store 默认拒删，只有未成立的创建事务失败回滚可显式删除。旧 Cowork settings/bookmark UserDefaults 仅是一次性迁移输入：必须按具体 session/path 核对来源、迁完全部所需 capability、读回验证并写 durable marker 后才清理，失败保留以便重试。`ArtifactStore` 保存 blobs + `index.json`。全局 `UserDefaults` 仍保存 provider catalog（`mopelium.providerCatalog.v1`）与聊天页当前选择（`mopelium.providerSelection.v1`，另有 `mopelium.baseURL`/`mopelium.model` 兼容镜像）；高级 macOS JSON/JSONC 配置继续按 `MOPELIUM_CONFIG`、`~/.config/mopelium/mopelium.json[c]`、app support `mopelium.json[c]` 与旧 `~/.config/mopelium/config.json` 兜底优先级读取。provider/model options/variants 必须按原始 JSON 保真到 wire adapter；任何 API-key 字段只可保存 `{env:NAME}` 或等价环境变量名，真实凭据仅在请求时从该环境变量解析，不得从配置、Keychain、auth/file/providerConfig 读取。
+- macOS 分发边界：唯一发行 App 是 Developer ID/direct-distribution
+  `IntatisMac`。不得把遗留 `IntatisMacAppStore` 的 App Sandbox 限制带回
+  产品设计、依赖选择或默认验证；不得把“无 App Store 约束”误解为可以移除
+  PermissionEngine、Lease、PathConfinement、SecretScanner、Seatbelt 或
+  Hardened Runtime。
+- 持久化：`EventLog`（`~/Library/Application Support/Intatis/<session>/events.jsonl`）是 session canonical truth；append/batch 在跨进程锁内分配单调 `seq`，settings revision 也在同一事务边界分配，返回值/subscriber 发布实际落盘 bytes 反解的 canonical Envelope；production Cowork runtime 全生命周期持有 writer lease，旧 JSONL 必须继续可解码。`session.json` 是 owner-only、schema v2、可由 EventLog 重建的派生投影，含 `projectedThroughSeq`、settings revision、Cowork settings、agent/workspace/capability 摘要与 migration marker；缺失、损坏、落后或伪造领先时 EventLog 胜出，合法未知 future event 时旧程序不得覆盖投影。`workspace-access.plist` 是 session-owned、schema v1、owner-only binary plist，只保存 canonical path、opaque security-scoped bookmark 与 primary 标志；bookmark bytes 不得进入 JSONL/session.json，App 以 RAII lease 成对持有 scope，恢复时必须先启用 scope 再校验 canonical identity。共享 capability 只有 settings + live roster 都证明零引用才可清理；primary 在 UI/方法/store 默认拒删，只有未成立的创建事务失败回滚可显式删除。旧 Cowork settings/bookmark UserDefaults 仅是一次性迁移输入：必须按具体 session/path 核对来源、迁完全部所需 capability、读回验证并写 durable marker 后才清理，失败保留以便重试。`ArtifactStore` 保存 blobs + `index.json`。全局 `UserDefaults` 仍保存 provider catalog（`intatis.providerCatalog.v1`）与聊天页当前选择（`intatis.providerSelection.v1`，另有 `intatis.baseURL`/`intatis.model` 兼容镜像）；高级 macOS JSON/JSONC 配置继续按 `INTATIS_CONFIG`、`~/.config/intatis/intatis.json[c]`、app support `intatis.json[c]` 与旧 `~/.config/intatis/config.json` 兜底优先级读取。provider/model options/variants 必须按原始 JSON 保真到 wire adapter，凭据只从 Keychain/env/file/auth/config 懒加载，不得写入事件、投影或项目文档。
 - Phase A durable 文件：`submitted-intent-outbox.json` 是 session-owned schema v1 owner-only 暂存，只在 canonical `user_message + queued(attempt 1)` 原子落盘前存在；`SubmissionID` first-write-wins、attempt one-based 单调、retry 复用 exact task 且不重复 user message。`ArtifactStore` 的 root/blobs/index/lock 必须 current-UID、no-follow、owner-only/single-link，索引在稳定锁内 read-merge-atomic-write；unsafe mode/symlink/hardlink fail closed，无法证明 rename durability 时返回 `commitUncertain`。
 - production Code/Cowork registry 不暴露 raw `run_shell`；macOS DeveloperID 与 CLI 的 shell-capable Code/Cowork runtime 改为显式提供 runtime-owned `exec_command` / `write_stdin` managed terminal。它是真实持久进程/PTY，但每次启动和后续输入仍必须经过 ToolRegistry、CapabilityLease、PermissionEngine 与 durable tool ticket，并按 exact session/agent/task/attempt/WorkspaceLease/root identity 隔离；默认断网，macOS 走 Seatbelt，取消、task terminal 与 runtime shutdown 必须先 drain 进程。交互输入不得原样进入 EventLog/permission preview，延迟回显也必须清洗；危险命令 guard 必须跨调用跟踪已支持的行输入，无法可靠还原的 cursor/completion/history/escape/keymap 改写 fail closed，partial-write uncertainty 必须终止 session。terminal executor 必须把不可移除的敏感凭据路径清单并入任何新旧 WorkspaceLease，并以大小写无关的 Seatbelt denied rules 执行。read-only worker、reviewer、iOS 与禁用 shell 的 host 不得看到这两个工具。不得重新启用 raw `run_shell`，不得退回裸 shell；Linux 仅在 bwrap 可用时运行，否则 fail closed，PTY 当前仍不支持。structured browser/document backend 与 managed terminal 分流，但同样必须有 timeout/cancel 与进程清理。
-- 安全：`KeychainRef` 是兼容保留的凭据引用类型，但生产 App/CLI resolver 只接受 `.environment`，默认变量名为 `MOPELIUM_API_KEY`，可由 `MOPELIUM_API_KEY_ENV` 指定其他变量名；非环境来源 fail closed。其余边界为 `PathConfinement`（拒 `..` 与越界）、`SecretScanner`、sandbox/entitlements（AppStore sandbox 无 shell；DeveloperID Hardened Runtime）。
+- 安全：`KeychainStore`（generic-password，凭据引用 `KeychainRef`；`KeychainSecretResolver` 仅在真实 provider 请求中按 keychain/env/file/auth JSON/Intatis-owned OpenCode-compatible config `options.apiKey` 懒加载 secret 并做进程内缓存；macOS auth JSON 默认先看 `~/.config/intatis/auth.json`，再兼容 `~/.local/share/intatis/auth.json`；不默认读取 `~/.local/share/opencode/auth.json`）、`PathConfinement`（拒 `..` 与越界）、`SecretScanner`、Developer ID Hardened Runtime，以及 managed terminal 自有的 workspace-scoped Seatbelt/default-network-deny；这些安全边界与已取消的 Mac App Store App Sandbox 产品约束无关。
 
 不确定的模块必须标注 `UNKNOWN` 或 `需要后续确认`，不要编造。
 
 ## 文档索引
 
+- `SNAPSHOT.md`：当前根基线的来源 commit、复制范围和后续刷新规则。
+- `docs/MOPELIUM_PRODUCT_DIRECTION.md`：显示品牌边界、Cowork-only 新功能策略和 Chat/Code 保留规则。
 - `docs/PROJECT_MAP.md`：目录、target、入口、关键文件、生成物和脚本地图。
+- `docs/MACOS_DISTRIBUTION.md`：macOS Developer ID 直接分发决策、遗留
+  App Store target 状态、仍须保留的运行时安全边界和默认验证矩阵。
 - `docs/ARCHITECTURE.md`：总体架构、主要链路、数据模型、权限与安全机制。
 - `docs/CURRENT_STATE.md`：当前真实状态、已有能力、风险、工作区改动。
 - `docs/TESTING.md`：环境、构建、测试、lint/format 与手动验证方式。
@@ -106,7 +141,8 @@ git status --short
 - `docs/OPEN_SOURCE_REUSE.md`：开源源码/公开 prompt/依赖准入、provenance、Apple-first 集成、NOTICE 与上游升级规则。
 - `docs/NEXT_TARGET.md`：临时下一目标记录；目标完成或不再有效后删除。
 - `docs/COWORK_PRINCIPLES.md`：Cowork 架构原则（agent 身份/任务契约/能力租约/上下文投影/递归禁止/安全边界/实现顺序/测试期望）。
-- `docs/AI_PROVIDER_MODEL_CONFIGURATION.md`：面向 AI Agent 的 provider/model/variant 配置写入合同、environment-only 凭据规则与 Cowork per-agent 绑定操作流程。
+- `docs/AI_PROVIDER_MODEL_CONFIGURATION.md`：沿用 Intatis 内部身份的 provider/model/variant 配置合同。
+- `docs/INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md`：已被当前快照落地取代的历史迁移审计。
 
 ## 完成标准
 

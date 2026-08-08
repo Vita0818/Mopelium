@@ -3,13 +3,13 @@
 ## Current status: not distributed
 
 Syntax highlighting is disabled in the current SwiftStreamingMarkdown
-derivative used by Mopelium. Code blocks are rendered as plain text with native
+derivative used by Intatis. Code blocks are rendered as plain text with native
 SwiftUI/AppKit/UIKit presentation and a native copy button.
 
 The current root `Package.swift`, `Package.resolved`, and derivative manifest
-contain no HighlightSwift or highlight.js dependency. The former Mopelium
+contain no HighlightSwift or highlight.js dependency. The former Intatis
 vendored resources are removed from the current working tree and from the
-`MopeliumSharedUI` resource list:
+`IntatisSharedUI` resource list:
 
 - `highlight.min.js`
 - `a11y-light.css`
@@ -21,7 +21,7 @@ present in a current macOS or iOS product artifact.
 
 ## Historical provenance
 
-Mopelium previously shipped a selectively vendored highlight.js 11.11.1 engine
+Intatis previously shipped a selectively vendored highlight.js 11.11.1 engine
 and two HighlighterSwift-derived a11y styles. That provenance remains available
 in Git history, but those files and their runtime are not part of the current
 renderer or distribution notice set. Reintroducing syntax highlighting requires

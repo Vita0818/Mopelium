@@ -1,6 +1,22 @@
 # COWORK_PRINCIPLES
 
-本文提炼自仓内 `docs/COWORK_AGENT_ARCHITECTURE.md` / `COWORK_TASK_CONTEXT_MODEL.md` / `COWORK_CURRENT_FINDINGS.md` / `COWORK_MIGRATION_PLAN.md` / `COWORK_AGENT_INVOCATION_MODEL.md` / `PER_AGENT_INFERENCE_PROFILES.md` 及原 `AGENTS.md` 的英文原则。它是 Cowork 架构的原则基准，**不是**当前完成度声明。修改 Cowork / AgentKernel / MessageBus / 权限 / agent 编排前必读。
+文档状态：当前 Cowork/AgentKernel 原则
+最近核对：2026-08-06
+产品基线：v0.36（build 36）
+
+本文提炼自仓内 v0.10 历史 Cowork 设计文档、`PER_AGENT_INFERENCE_PROFILES.md` 及
+项目操作规则。旧设计文档只保留迁移 provenance；本文件是当前原则基准，**不是**完成度
+声明。修改 Cowork / AgentKernel / MessageBus / 权限 / agent 编排前必读。
+
+## 0. Mopelium 的 Cowork-only 产品边界
+
+Mopelium 是 Cowork 的显示品牌与领域化产品体验，不是新的编排内核。所有新增产品功能只在
+Cowork 内建设，并复用本文件规定的身份、任务、租约、上下文、调度、消息、权限和 durable
+execution 边界。领域功能可以表现为 Cowork tool、Skill、MCP、artifact、WorkTask 语义、projection
+或 UI，但不得复制一套 Mopelium AgentKernel/Orchestrator/EventLog。
+
+Chat/Code 当前仍保留；未来只隐藏用户入口，不删除或降级共享实现。内部 Intatis 名称也不因
+Mopelium 显示品牌而替换。完整决策见 `MOPELIUM_PRODUCT_DIRECTION.md`。
 
 ## 1. 核心原则
 
@@ -46,6 +62,8 @@ Task Graph + Scheduler  任务图 + 调度器驱动协作
 
 ### 2.1 Agent Identity
 Agent 是持久本地身份。应含 `id` / `displayName` / exact `AgentInferenceBinding` / `workspace lease or default workspace` / `local memory or mailbox` / `status`。兼容 `model` 字段不能覆盖 exact binding。**不应**含永久 "leaf" 或 "coordinator" 角色。
+
+必须区分 durable identity history 与 live operational roster。`agent_detached` 终止当前运行时成员资格、lease 与可操作入口，但不抹除该 identity 已写入 EventLog 的对话和生命周期。GUI 的 session 历史目录保留所有曾 durable attach/spawn 的 agent；ordinary detached agent 仍可只读查看，当前正在查看它时不得强制跳回 `@main`，状态由既有状态图标显示为 detached。send/delegate/message/ask/rebind/remove、workspace 恢复与 capability 引用判断仍只接受 live roster；控制面 identity 即使保留在历史目录也继续 status-only。
 
 ### 2.2 Task Contract（AgentInvocation 层）
 角色按 AgentInvocation 分派。Task contract 应告诉 agent 它为何存在于当前工作流、预期交付什么；它不是用户可见 WorkTask。建议 shape：
@@ -122,6 +140,8 @@ Provider resolution 也必须是原子的：shipping resolver 一次返回 exact
 
 `rename_session` 是普通工具协议中的 session-local metadata 能力，但不是普通 coordinator 能力。它只进入 exact `@main` 的 default capability lease；worker、spawn 出的 coordinator、task-scoped non-main lease 与 reviewer 都必须移除，不能通过 intersection/继承意外流下去。模型只提供名称，宿主绑定当前 session/kind 和 durable execution ID；不存在跨 session 目标解析。
 
+`update_goal` / `submit_goal_verdict` 同样不是普通 coordinator 能力。产品数据面只把它加入 exact `@main` 的 current default/task lease；worker、spawn coordinator、task-scoped non-main 与 reviewer 必须移除，legacy main default 必须通过 durable replacement 升级而非原地改写。该工具只能请求 complete/blocked 转换，不能创建 audit：complete 仍必须已有独立 GoalVerifier 输出并经 host-derived validation evidence 校验，blocked 仍必须已有连续三轮相同 verified blocker。因此 `@main` 获得调用入口不等于获得 Goal 自我认证 authority。
+
 Lease 不只是工具列表：task-scoped lease 必须核对 task ID、communication/delegation grant，并在终态撤销；WorkspaceLease 必须执行 root、read-only/read-write、allow/deny path，并固定 canonical root 的文件系统 identity。任何可能跨 await 的授权都不能只在入口校验：attach commit、权限等待后、durable prepare 后紧邻 executor、派生/retry 与 process 启动前必须复核 identity；同路径目录被替换或 legacy lease 无 identity 时 fail closed。retry 只可从原 lease 的持久审计记录克隆，缺失历史时收窄到 worker，禁止按 agent 默认角色扩大权限。
 
 ### 2.5 Task Graph + Scheduler
@@ -140,15 +160,62 @@ failed | cancelled -> queued  only through an explicit bounded retry attempt
 
 这里的判断单位是“这一次具体调用是否可能已经产生副作用”，不是只看工具静态类别。write 类工具继续默认 non-replayable；只有拥有 mutation boundary 的受信实现或 prepare 前 durable state 能证明该边界未被跨越时，才能追加可选 `effectDisposition=not_started` 的失败/取消 settlement。typed ordinary failure 可作为 observation 回灌同一 Agent turn；pre-executor cancellation 结算后仍中断 turn；legacy repair 只对账 EventLog，不存在当前 turn。新成功 settlement 必须显式标为 `committed`；legacy nil+succeeded 仅兼容成已完成效果并继续阻断 whole-task retry。生产 Orchestrator 的 `task_update` stale revision 是当前首个精确 no-effect case；公共 manager 的同名错误、普通 error、timeout、executor 内 cancellation、legacy failure nil/unknown 都不能套用。Projection 对 execution ID 坚持一次 prepare：第二个 prepare 即使相同也永久 ambiguous，冲突 terminal 同样保留首记录并永久 ambiguous；只有完全相同 terminal 可幂等，`succeeded + not_started` 是无效矛盾并进入 uncertain。旧日志修复必须先由 `replayForProjectionChecked()` + `hasCompleteKnownHistory` 证明历史完整，并且只能发生在无 current Goal、exact 唯一 prepare、没有任何 settlement/ambiguity、JSON safe integer 与 prepare 前 monotonic revision proof 同时成立时，不得解析自由文本或用 prepare 后状态猜测。Goal startup/进程内 launch、Orchestrator restore 与 whole-task retry 都必须使用同一 complete-known-history gate；unknown future type 或 seq gap 不能支持 absence/order proof。任务级确定错误应局部终结，不应无条件升级成整个 session 不可输入；无 Goal 的隔离仍须证明 exact contract-before-prepare、正 attempt 与 exact-attempt terminal-after-prepare，无法归属、损坏/不完整历史、非终态任务与任何 current Goal 的 uncertain 副作用保持 fail closed。
 
-Permission Reviewer 是独立控制面，不是普通 worker：使用结构化 `PermissionReviewTask`、有界 FIFO/single-flight、独立 timeout/cancellation/单次输出上限，不占数据面 scheduler 槽，也不得递归运行 `AgentLoop`。deadline 从 submit 计时，queue full/timeout fail closed；自动模式只有 `allow` / `deny`。pre-submit caller cancel 直接返回 typed deny且不创建 review lifecycle；timeout、truncated、malformed、tool call、provider/persistence failure 与已登记 review 在 terminal-claim 前被观察到的 cancel durable deny 当前调用，不得隐式切到 GUI 人工 fallback；claim 后 cancel 保留唯一 settlement 但最终 authorization delivery deny。review request 与 verdict 都必须 durable-first；`allow` 只有 settled audit 成功后才可返回，自审或 hard deny 都不得放行，恢复时 orphan request 必须显式关闭。每个 provider dispatch 使用 exact `{reviewTaskID, nonce}` generation；provider/timeout 竞争同代首 terminal，provider-backed terminal claim 必须匹配该 generation，pre-dispatch terminal 则从 running/no-generation 状态唯一 claim。caller cancel 由同步 request token、actor path 与 settlement/delivery/admission 围栏共同处理。timeout/cancel 只影响当前 call；若已有 active generation 就只 retire 该代，下一 request fresh-resolve provider wrapper；旧代 late/duplicate result 无 EventLog/health/authorization 能力。provider factory 冻结 reviewer identity/exact binding，且不得捕获 Orchestrator；`ToolCallingProvider.stream` 必须立即返回 request-owned stream，并传播 consumer termination，同步永久阻塞实现不在契约内。累计 token 仅可作为 soft warning/度量，默认不得用不可恢复的 session-lifetime cap 永久关闭 reviewer。用户取消当前数据面任务不得顺带关闭常驻 reviewer；只有 session stop、显式 disable 或控制面自身安全故障才进入 quiesce/shutdown。停用 reviewer 先 quiesce，再持久化 revoke/detach；迟到 allow 或落盘失败不得被误报成成功停用，detach 失败 resume 后仍必须用 fresh generation。terminal claim 后 cancel/quiesce 可使最终 authorization delivery deny，但不得重写唯一 reviewer settlement 或执行工具。reviewer 只可在 deterministic gate 的最大权限边界内收窄，不能批准真正越权；人工模式只能由用户显式切换。legacy `provider_still_stopping` 只作旧 EventLog 解码，不得重新成为 live permission-review state。
+Permission Reviewer 是独立控制面，不是普通 worker：使用结构化 `PermissionReviewTask`、有界 FIFO/single-flight 与独立 timeout/cancellation，不占数据面 scheduler 槽，也不得递归运行 `AgentLoop`。模型请求默认不得硬编码 `temperature`、output-token 或字符上限；只有用户/host 显式策略或真实上游/上下文约束存在时才可传递和执行对应控制。deadline 从 submit 计时，queue full/timeout fail closed；自动模式只有 `allow` / `deny`。pre-submit caller cancel 直接返回 typed deny且不创建 review lifecycle；timeout、truncated、malformed、tool call、provider/persistence failure 与已登记 review 在 terminal-claim 前被观察到的 cancel durable deny 当前调用，不得隐式切到 GUI 人工 fallback；claim 后 cancel 保留唯一 settlement 但最终授权交付 deny。review request 与 verdict 都必须 durable-first；`allow` 只有 settled audit 成功后才可返回，自审或 hard deny 都不得放行，恢复时 orphan request 必须显式关闭。每个 provider dispatch 使用 exact `{reviewTaskID, nonce}` generation；provider/timeout 竞争同代首 terminal，provider-backed terminal claim 必须匹配该 generation，pre-dispatch terminal 则从 running/no-generation 状态唯一 claim。caller cancel 由同步 request token、actor path 与 settlement/delivery/admission 围栏共同处理。timeout/cancel 只影响当前 call；若已有 active generation 就只 retire 该代，下一 request fresh-resolve provider wrapper；旧代 late/duplicate result 无 EventLog/health/authorization 能力。provider factory 冻结 reviewer identity/exact binding，且不得捕获 Orchestrator；`ToolCallingProvider.stream` 必须立即返回 request-owned stream，并传播 consumer termination，同步永久阻塞实现不在契约内。累计 token 仅可作为 soft warning/度量，默认不得用不可恢复的 session-lifetime cap 永久关闭 reviewer。用户取消当前数据面任务不得顺带关闭常驻 reviewer；只有 session stop、显式 disable 或控制面自身安全故障才进入 quiesce/shutdown。停用 reviewer 先 quiesce，再持久化 revoke/detach；迟到 allow 或落盘失败不得被误报成成功停用，detach 失败 resume 后仍必须用 fresh generation。terminal claim 后 cancel/quiesce 可使最终 authorization delivery deny，但不得重写唯一 reviewer settlement 或执行工具。reviewer 只可在 deterministic gate 的最大权限边界内收窄，不能批准真正越权；人工模式只能由用户显式切换。legacy `provider_still_stopping` 只作旧 EventLog 解码，不得重新成为 live permission-review state。
 
 每个 ask-class request 还必须有稳定 RequestID、TurnID 与 toolCallID，并在 responder/UI/transport 可见前 durable register。EventLog 在完整已知历史与跨进程锁内实现 request first-write、settlement first-terminal；exact duplicate/reconnect 幂等共享原 owner generation/terminal，冲突 payload 或终态 fail closed。人工 action 必须显式区分 approve、decline、cancel-turn：decline 是 call-scoped，写 typed denied tool result 后允许同一 turn 继续；cancel-turn 是 turn-scoped，只写 permission terminal并结束为 interrupted，不能制造 user-denied tool result。automatic mode 从最早通用 request event 起不可人工操作或 fallback。pending projection/CLI responder 保持 FIFO，结算中间项不能改变其他请求相对顺序。取消/停止先 drain provider/tool child，再清 waiter、关闭 reviewer与发布 terminal。
 
-Goal Verifier 是另一条独立控制面，职责仅是判定 Goal 是否已有充分证据完成。它不是 Permission Reviewer，也不是普通 agent：使用独立 system/context、无工具 provider 请求、有界 timeout/cancel/output，不能写 EventLog 或执行 workspace 动作。WorkTask result/evidence 是 agent-reported，不是完成证明；只有 host 从同一 Goal 的 durable 成功 tool-execution settlement 经 validation-tool allowlist 派生的 `validationEvidence` 才能作为 completion proof。malformed、tool call、缺完成标记、provider/usage failure、timeout/cancel 必须 fail safe 为 `continue`，不能误报 Goal 完成。只有 host 校验 verifier 返回的 requirement/evidence 与这些 host-bound evidence 一致后，才可追加 Goal audit/completed 事件。
+Goal Verifier 是另一条独立控制面，职责仅是判定 Goal 是否已有充分证据完成。它不是 Permission Reviewer，也不是普通 agent：使用独立 system/context、无工具 provider 请求与有界 timeout/cancel，默认同样不注入 sampling 或 output 上限；不能写 EventLog 或执行 workspace 动作。WorkTask result/evidence 是 agent-reported，不是完成证明；只有 host 从同一 Goal 的 durable 成功 tool-execution settlement 经 validation-tool allowlist 派生的 `validationEvidence` 才能作为 completion proof。malformed、tool call、缺完成标记、provider/usage failure、timeout/cancel 必须 fail safe 为 `continue`，不能误报 Goal 完成。只有 host 校验 verifier 返回的 requirement/evidence 与这些 host-bound evidence 一致后，才可追加 Goal audit/completed 事件。
 
 Goal 生命周期必须由 host 串行化：start、ordinary turn、Goal mutation 与 stop/shutdown 分别有 single-flight/mutation/stop gate；pending durable stop 未结算前不得启动新 run，start 取消后若已创建 continuation，必须先 scoped cancel、等待退出并 checkpoint 才返回失败。restore 必须持续暂停 scheduler，直到 roster/reviewer/main 与 Goal recovery/reconcile 完成。GUI 随后只释放新工作并继续围栏 restored roots；CLI 才执行显式 data-plane resume。Cowork `/goal` 是明确 host action；普通自然语言只有在窄、确定性的中英文持续目标分类器命中时才可为本轮提供 create intent，复杂请求、Goal 提及、一次性目标、引用示例或附件内容不得提升权限。
 
-模型可见的 agent/task/message/goal/session 操作与文件、网络、文档工具遵循同一个 ToolCall 协议。WorkTask CRUD、Goal create/update 与 session rename 都必须先过 schema、lease（Cowork）与 PermissionEngine；`rename_session` 的 exact current-session/no-path/no-network/no-data-effect intent 可由 deterministic gate 低风险放行，但 near-miss 与 locked 状态不能借此绕过。worker 默认只能读取 Goal/相关 WorkTask，并更新自己当前绑定的 WorkTask，不能改 DAG/owner/priority/retry/cancel、提交 Goal verdict或改 session 名称。一个外部 ToolCall 只能有一个权限决定；`spawn_agent` / 原子 `delegate_task` 获准后，内部 roster、lease、mailbox、task graph 与 scheduler admission 必须作为 executor 的 durable transaction 完成，不能再次递归进入 PermissionEngine。Code 与 Cowork agent 共用 headless `AgentRuntime`；首个 system message 必须稳定声明 Mopelium 模式、API tools 权威性、严格 JSON Schema 与 ToolResult 完成语义，动态 workspace/task/lease/goal/run 数据仍放在 user-role untrusted context。
+模型可见的 agent/task/message/goal/session 操作与文件、网络、文档工具遵循同一个 ToolCall 协议。WorkTask CRUD、Goal create/update 与 session rename 都必须先过 schema、lease（Cowork）与 PermissionEngine；`rename_session` 的 exact current-session/no-path/no-network/no-data-effect intent 可由 deterministic gate 低风险放行，但 near-miss 与 locked 状态不能借此绕过。worker 默认只能读取 Goal/相关 WorkTask，并更新自己当前绑定的 WorkTask，不能改 DAG/owner/priority/retry/cancel、提交 Goal verdict或改 session 名称。一个外部 ToolCall 只能有一个权限决定；`spawn_agent` / 原子 `delegate_task` 获准后，内部 roster、lease、mailbox、task graph 与 scheduler admission 必须作为 executor 的 durable transaction 完成，不能再次递归进入 PermissionEngine。Code 与 Cowork agent 共用 headless `AgentRuntime`；首个 system message 必须稳定声明 Intatis 模式、API tools 权威性、严格 JSON Schema 与 ToolResult 完成语义，动态 workspace/task/lease/goal/run 数据仍放在 user-role untrusted context。
+
+### 2.3b Coordinator routing Skill
+
+拥有 coordinator lease 的 agent 默认是主动执行者，而不是等待用户逐步给出下一步：每个请求先
+建立本轮执行目标、交付物、约束和验证方式，检查 bounded Skill catalog 并激活/完整读取明确相关的
+exact Skill；非简单工作在 task tools 可用时建立最小可验证 WorkTask DAG，持续更新开始、进展、
+阻塞、重规划、result 与 evidence。它应在任务开始时识别真正受益于并行、专业能力、独立复核、
+多模态或不同 workspace 的分支，满足调度收益时尽早委派，并在子 agent 运行时继续自己的关键路径，
+最后核验报告、显式结算 WorkTask 并持续推进到验证完成或真实 blocker。这里的“本轮执行目标”不自动
+创建 durable Goal；后者仍只由用户明确要求的持续/跨 run 意图触发。
+
+主动性不改变既有边界：coordinator 仍只能使用 authoritative tool list 中的工具，Skill 仍只是上下文，
+必须服从 CapabilityLease、WorkspaceLease、PermissionEngine、exact inference binding、最小 team 与
+最小权限；一步两步可直接完成的工作不得仪式化 spawn，child report 也不能自动证明 WorkTask/Goal
+完成。普通 worker 继续只执行自己的 task，不获得上述全局拆解、spawn 或协调语义。
+
+拥有 coordinator lease 的 agent 必须在第一次 direct/reuse/delegate/spawn/profile/
+lease 调度决定前激活 exact bundled system Skill
+`cowork-agent-orchestration`。它是调度上下文而非权限：不得替代 scheduler、
+WorkTask graph、CapabilityLease、WorkspaceLease、PermissionEngine 或 exact
+inference binding。找不到 exact system entry 或激活失败时，不得采用同名
+workspace/user Skill，必须保守回退为 direct、继承 exact profile、read-only、
+无 child coordination，除非任务本身明确要求创建 agent。
+
+调度模式只有三种：`cost-first` 选择最低成本且明确足够的 approved profile；
+`cost-efficient-balanced` 优化包含协调/返工的预计总成本并作为默认；
+`efficiency-first` 优化关键路径 wall-clock 与首轮成功率。任何显式 child profile
+都必须先取当前 `list_inference_profiles` 的 exact ID；dated vendor reference 只
+辅助解释 host label，不能创建 route。选择必须先满足 exact declared capabilities，
+再排除 retired/deprecated route，并在足够候选中优先较新的 active generation；成本
+仍按三种模式作为真实 tradeoff，而非被“最新”完全覆盖。自定义/无法识别的 model
+不得伪造发布日期或价格。
+
+reference 的正式 provider 矩阵可以覆盖多于当前 JSON 的厂商（当前为 OpenAI、
+Anthropic、Google、Meta、xAI、Mistral、DeepSeek、Kimi、Z.ai、MiniMax、Qwen），
+但只能作为 exact configured candidates 的 dated shortlist。stable 默认优先于
+Preview；开放权重或经第三方托管的模型没有可假定的统一价格。任何 entry 不在当前
+profile list、未声明 required capability 或生命周期不合格，就必须先被删除。
+
+涉及 image/audio/video input 或 generation/editing 时，capability 是 hard gate。
+main 未声明所需能力必须搭配一个 `list_inference_profiles` 明确声明能力的副 agent；
+该副 agent 默认 read-only/no-coordinate，只承担 modality-specific WorkTask。没有
+合格 profile 或 attachment/artifact 不能真实交付时必须 fail closed/report blocked，
+不得把文本推断写成多模态验收结果。优先最小 team 和最小 lease：自动委派默认
+read-only/inherit，写任务才显式 read-write，需要真实子图所有权时才授予
+`canCoordinate`。不同 profile 或持久/write-capable worker 使用 `spawn_agent`
+成功后再委派；`delegate_task` 本身不能切换 profile。
 
 ## 3. 通信 vs 委派
 
@@ -210,6 +277,16 @@ secret/token/key directories
 ```
 
 所有文件访问必须经工作区约束与权限策略。
+
+`@main` 与其他 agent 本身仍只有一个 `workspaceRoot`。如果 coordinator 预先知道任务所需目录
+在根外，或直接工具返回 out-of-workspace denial，不应重复同一路径、尝试 `..`/绝对路径逃逸，
+也不应因目录内工作很小就停在错误路径上。只有当当前 authoritative tool list 包含
+`spawn_agent` 时，system prompt 才应要求它以目标绝对目录创建子 agent：默认
+`requestedAccess=read_only`，只有目录内交付物需要修改时才请求 `read_write`，并保持
+`canCoordinate=false`，除非子 agent 确实需要拥有下级任务图；spawn 成功后再用 `delegate_task`
+交付目录内工作。工具不存在或 workspace expansion 被拒时，coordinator 应报告需要的目录能力
+与 blocker；普通 worker 只报告给上级/用户，不得宣称能 spawn。这是失败后的可行动路由，不是
+对 WorkspaceLease、bookmark、PathConfinement、PermissionEngine 或 hard deny 的例外。
 
 managed terminal 不能成为这条规则的例外。macOS process/PTY 必须在 WorkspaceLease 对应的 OS sandbox 内运行并默认断网；交互输入也要经过危险命令 hard deny。输出要持续有界 drain，stdin 原文/无盐固定摘要/延迟回显不能进入 EventLog 或 agent 间消息；取消、失败、task terminal 与 runtime shutdown 必须先 drain terminal process tree，再发布上层终态。Linux 缺少可证明的 sandbox/PTY backend 时应 fail closed。
 
@@ -388,7 +465,7 @@ unknown future events do not cause EventLog sequence reuse
 
 ## 9. 平台边界
 
-macOS 是全量 Mopelium 产品。iOS 是 macOS 的真子集：
+macOS 是全量 Intatis 产品。iOS 是 macOS 的真子集：
 ```text
 iOS supports Chat, multimodal, providers, artifacts, session history.
 iOS must not include local workspace Agent execution.
@@ -398,11 +475,11 @@ iOS must not link shell/git/patch/local-agent workspace modules.
 
 ## 10. 开源复用与产品身份规则
 
-Mopelium 允许按 `docs/OPEN_SOURCE_REUSE.md` 选择性复制、翻译、修改或运行兼容许可证的公开 agent/runtime 实现，包括 OpenCode 等项目中经过文件级许可证和 provenance 核对的源码、公开 model-facing prompt 与测试。复用不能改变本原则定义的 TaskContract、Scoped Context、CapabilityLease、WorkspaceLease、TaskGraph/Scheduler、MessageBus 和无嵌套 `AgentLoop` 边界；上游实现若与这些原则冲突，必须适配后再进入 Mopelium，不能因“来自成熟项目”而直接放行。
+Intatis 允许按 `docs/OPEN_SOURCE_REUSE.md` 选择性复制、翻译、修改或运行兼容许可证的公开 agent/runtime 实现，包括 OpenCode 等项目中经过文件级许可证和 provenance 核对的源码、公开 model-facing prompt 与测试。复用不能改变本原则定义的 TaskContract、Scoped Context、CapabilityLease、WorkspaceLease、TaskGraph/Scheduler、MessageBus 和无嵌套 `AgentLoop` 边界；上游实现若与这些原则冲突，必须适配后再进入 Intatis，不能因“来自成熟项目”而直接放行。
 
-永久禁止使用泄露/私有源码或 prompt，也不复制第三方产品名称、Logo、图标、截图、UI 资产、商标性外观或品牌文案作为 Mopelium 产品身份。直接复制或逐行翻译必须记录上游 URL、固定 commit、许可证和本地修改，并更新 `NOTICE.md`。Apple 平台继续 Swift-native 优先；非 Swift runtime 只能作为受控、可审计的 macOS 隔离组件评估，不得进入 iOS workspace Agent target。
+永久禁止使用泄露/私有源码或 prompt，也不复制第三方产品名称、Logo、图标、截图、UI 资产、商标性外观或品牌文案作为 Intatis 产品身份。直接复制或逐行翻译必须记录上游 URL、固定 commit、许可证和本地修改，并更新 `NOTICE.md`。Apple 平台继续 Swift-native 优先；非 Swift runtime 只能作为受控、可审计的 macOS 隔离组件评估，不得进入 iOS workspace Agent target。
 
-产品与协议继续使用 Mopelium 自己的通用术语：
+产品与协议继续使用 Intatis 自己的通用术语：
 ```text
 local agent workspace
 native agent kernel

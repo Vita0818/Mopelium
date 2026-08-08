@@ -2,7 +2,7 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Mopelium derivative modification: native TextKit 2 inline-math attachments.
+//  Intatis derivative modification: native TextKit 2 inline-math attachments.
 //
 
 import Foundation
@@ -15,13 +15,13 @@ import UIKit
 import AppKit
 #endif
 
-/// Dedicated attachment type for Mopelium single-dollar inline mathematics.
+/// Dedicated attachment type for Intatis inline and display mathematics.
 ///
 /// The attachment crosses the parser-to-MainActor ownership boundary with
-/// bounded scalar data only. A short-lived `MTMathUILabel` is used for bounded
-/// layout preflight, while TextKit 2 owns the live label used for display.
+/// scalar data only. A short-lived `MTMathUILabel` is used for layout preflight,
+/// while TextKit 2 owns the live label used for display.
 final class InlineMathAttachment: NSTextAttachment {
-  static let mimeType = "application/vnd.vita0818.mopelium-inline-math+json"
+  static let mimeType = "application/vnd.vita0818.intatis-inline-math+json"
   static let typeIdentifier: String = {
     guard let type = UTType(
       tag: mimeType,
@@ -32,16 +32,13 @@ final class InlineMathAttachment: NSTextAttachment {
     }
     return type.identifier
   }()
-  static let maximumRenderedWidth: CGFloat = 1_024
-  static let maximumRenderedHeight: CGFloat = 256
-
   let mathData: MathAttachmentData
   let textColor: MDColor
   let font: MDFont
 
   /// The attachment subclass owns its provider directly instead of installing
   /// a process-global provider for a broad public UTI. This also keeps the live
-  /// TextKit 2 path available in package-test hosts that do not export Mopelium's
+  /// TextKit 2 path available in package-test hosts that do not export Intatis's
   /// private UTI in their main-bundle Info.plist.
   override var usesTextAttachmentView: Bool {
     allowsTextAttachmentView && contents != nil
@@ -106,6 +103,7 @@ final class InlineMathAttachment: NSTextAttachment {
   static func attributedString(
     source: String,
     originalLiteral: String,
+    presentation: MathPresentation = .inline,
     attributes: NSAttributeContainer
   ) -> NSMutableAttributedString {
     guard !source.isEmpty,
@@ -117,6 +115,7 @@ final class InlineMathAttachment: NSTextAttachment {
     let data = MathAttachmentData(
       source: source,
       originalLiteral: originalLiteral,
+      presentation: presentation,
       fontSize: Double(font.pointSize)
     )
     guard let payload = try? JSONEncoder().encode(data) else {
@@ -138,7 +137,7 @@ final class InlineMathAttachment: NSTextAttachment {
     return result
   }
 
-  /// Measures the formula on the MainActor and freezes a bounded attachment
+  /// Measures the formula on the MainActor and freezes its intrinsic attachment
   /// rectangle. A `false` result means the caller must replace the attachment
   /// with `originalLiteral` before handing the paragraph to TextKit.
   @MainActor
@@ -153,16 +152,7 @@ final class InlineMathAttachment: NSTextAttachment {
       return false
     }
 
-    #if canImport(UIKit)
-    let measured = label.sizeThatFits(
-      CGSize(
-        width: Self.maximumRenderedWidth,
-        height: Self.maximumRenderedHeight
-      )
-    )
-    #elseif canImport(AppKit)
     let measured = label.intrinsicContentSize
-    #endif
     let renderedSize = CGSize(
       width: measured.width.rounded(.up),
       height: (measured.height + 1).rounded(.up)
@@ -170,9 +160,7 @@ final class InlineMathAttachment: NSTextAttachment {
     guard renderedSize.width.isFinite,
           renderedSize.height.isFinite,
           renderedSize.width > 0,
-          renderedSize.height > 0,
-          renderedSize.width <= Self.maximumRenderedWidth,
-          renderedSize.height <= Self.maximumRenderedHeight else {
+          renderedSize.height > 0 else {
       return false
     }
 
@@ -203,7 +191,7 @@ final class InlineMathAttachment: NSTextAttachment {
   @MainActor
   private func configure(label: MTMathUILabel, textColor: MDColor) {
     label.displayErrorInline = false
-    label.mode = .text
+    label.mode = mathData.presentation == .display ? .display : .text
     label.fontSize = CGFloat(mathData.fontSize)
     label.textColor = textColor
     label.latex = mathData.source
@@ -220,7 +208,7 @@ final class InlineMathAttachment: NSTextAttachment {
 
 /// Registers the dedicated TextKit 2 provider for one exact attachment type.
 ///
-/// Production uses the exact dynamic UTI derived from Mopelium's unique MIME
+/// Production uses the exact dynamic UTI derived from Intatis's unique MIME
 /// tag, so no broad public attachment type is ever registered process-wide.
 @MainActor
 func registerInlineMathAttachmentViewProvider(
@@ -241,7 +229,7 @@ final class InlineMathLabelView: MTMathUILabel {
     semanticTextColor = attachment.textColor
     super.init(frame: .zero)
     displayErrorInline = false
-    mode = .text
+    mode = attachment.mathData.presentation == .display ? .display : .text
     fontSize = CGFloat(attachment.mathData.fontSize)
     latex = attachment.mathData.source
     isAccessibilityElement = false
@@ -275,7 +263,7 @@ final class InlineMathLabelView: MTMathUILabel {
     semanticTextColor = attachment.textColor
     super.init(frame: .zero)
     displayErrorInline = false
-    mode = .text
+    mode = attachment.mathData.presentation == .display ? .display : .text
     fontSize = CGFloat(attachment.mathData.fontSize)
     latex = attachment.mathData.source
     setAccessibilityElement(false)

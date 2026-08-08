@@ -1,4 +1,8 @@
-# Mopelium Cowork v0.10 Status
+# Intatis Cowork v0.10 Status
+
+> **历史文档：冻结于 v0.10 迁移阶段。** 本文只保留设计/迁移 provenance，不是当前
+> 状态、测试或实现事实源。产品基线与当前规则见 `docs/VERSIONING.md`、
+> `docs/COWORK_PRINCIPLES.md`、`docs/ARCHITECTURE.md` 和 `docs/CURRENT_STATE.md`。
 
 This document summarizes the v0.10 Cowork Agent Invocation architecture after the Phase 0-8 migration pass.
 
@@ -79,14 +83,14 @@ Minimum closure commands:
 
 ```bash
 swift test --quiet
-swift run mopelium --help
+swift run intatis --help
 xcodegen generate
 ```
 
 Manual CLI cowork flow:
 
 ```text
-1. swift run mopelium
+1. swift run intatis
 2. /mode cowork
 3. approve @main workspace attach
 4. ask @main to create macOS and iOS Swift counters
