@@ -140,53 +140,71 @@ public protocol ShellRunner: Sendable {
     func run(_ command: String, cwd: URL) async throws -> ShellResult
 }
 
+/// Fixed executable families accepted by the document process boundary.
+/// Model-authored arguments never select one of these values: each concrete
+/// document tool constructs one opaque invocation after schema, path, and
+/// operation validation.
+public enum DocumentBackendExecutable: String, Equatable, Sendable {
+    case pythonRuntime
+    case libreOffice
+    case pdfcpu
+    case rbookHelper
+    case epubCheck
+}
+
+/// Opaque, host-authored document backend request. Public read-only fields
+/// keep injected runners observable in tests while the internal initializer
+/// prevents clients outside IntatisTools from manufacturing a process launch.
+public struct DocumentBackendInvocation: Equatable, Sendable {
+    public let executable: DocumentBackendExecutable
+    public let arguments: [String]
+    public let environment: [String: String]
+    public let readableWorkspacePaths: [String]
+    /// User-visible destinations that were included in permission review.
+    public let writableWorkspacePaths: [String]
+    /// Host-created same-parent staging paths. The production runner verifies
+    /// their binding to a reviewed destination before extending the process
+    /// allow-list; these paths are never accepted from model arguments.
+    public let internalWritableWorkspacePaths: [String]
+    /// Exact files inside an internal staging root that a validator or later
+    /// pipeline stage may read but must not modify. The surrounding stage can
+    /// remain writable for reports or sibling outputs.
+    public let internalReadOnlyWorkspacePaths: [String]
+
+    init(executable: DocumentBackendExecutable,
+         arguments: [String],
+         environment: [String: String] = [:],
+         readableWorkspacePaths: [String],
+         writableWorkspacePaths: [String],
+         internalWritableWorkspacePaths: [String] = [],
+         internalReadOnlyWorkspacePaths: [String] = []) {
+        self.executable = executable
+        self.arguments = arguments
+        self.environment = environment
+        self.readableWorkspacePaths = readableWorkspacePaths
+        self.writableWorkspacePaths = writableWorkspacePaths
+        self.internalWritableWorkspacePaths = internalWritableWorkspacePaths
+        self.internalReadOnlyWorkspacePaths = internalReadOnlyWorkspacePaths
+    }
+}
+
+/// Dedicated no-shell process seam for mature document runtimes. Production
+/// implementations resolve the executable from a fixed Intatis runtime and
+/// reuse the managed timeout/cancellation/process-tree boundary.
+public protocol DocumentBackendRunner: Sendable {
+    func run(_ invocation: DocumentBackendInvocation,
+             cwd: URL) async throws -> ShellResult
+}
+
 /// Opaque invocation accepted by the dedicated browser backend. Production
 /// callers cannot turn this into a general shell: only Intatis browser tools
 /// construct the fixed Node source, encoded structured arguments, and exact
 /// workspace access plan.
-struct BrowserBackendSessionSpec: Sendable {
-    let profileDirectory: String
-    let channel: String
-    let headless: Bool
-}
-
 struct BrowserBackendInvocation: Sendable {
     let javaScript: String
     let encodedArguments: String
     let readableWorkspacePaths: [String]
     let writableWorkspacePaths: [String]
-    let session: BrowserBackendSessionSpec?
-
-    init(javaScript: String,
-         encodedArguments: String,
-         readableWorkspacePaths: [String],
-         writableWorkspacePaths: [String],
-         session: BrowserBackendSessionSpec? = nil) {
-        self.javaScript = javaScript
-        self.encodedArguments = encodedArguments
-        self.readableWorkspacePaths = readableWorkspacePaths
-        self.writableWorkspacePaths = writableWorkspacePaths
-        self.session = session
-    }
-
-    func connected(to port: Int,
-                   browserPath: String,
-                   executable: String) throws -> BrowserBackendInvocation {
-        guard let data = Data(base64Encoded: encodedArguments),
-              var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw IntatisError.decoding("browser backend arguments are not valid structured JSON")
-        }
-        object["cdpPort"] = port
-        object["cdpBrowserPath"] = browserPath
-        object["managedBrowserExecutable"] = executable
-        let connectedData = try JSONSerialization.data(withJSONObject: object, options: [])
-        return BrowserBackendInvocation(
-            javaScript: javaScript,
-            encodedArguments: connectedData.base64EncodedString(),
-            readableWorkspacePaths: readableWorkspacePaths,
-            writableWorkspacePaths: writableWorkspacePaths,
-            session: session)
-    }
 
     var injectedShellCommand: String {
         """
@@ -202,19 +220,6 @@ struct BrowserBackendInvocation: Sendable {
 protocol BrowserBackendRunner: Sendable {
     func run(_ invocation: BrowserBackendInvocation,
              cwd: URL) async throws -> ShellResult
-}
-
-/// Runtime-owned browser process service. Browser actions still pass through
-/// ToolRegistry, permission review, and durable tool execution independently;
-/// this service only preserves the live tab/DOM state between those approved
-/// actions and drains the browser when its owning runtime shuts down.
-public protocol BrowserSessionManaging: Sendable {
-    func terminate(profileDirectory: URL, reason: String) async
-    func shutdown(reason: String) async
-}
-
-protocol BrowserSessionBackendProviding: BrowserSessionManaging {
-    func backend(scopedTo workspaceLease: WorkspaceLease) -> BrowserBackendRunner
 }
 
 /// Compatibility seam for injected test/custom shell runners. Shipping
@@ -390,15 +395,27 @@ public enum AgentMessengerReply: Equatable, Sendable {
 public protocol AgentMessenger: Sendable {
     func ask(to agent: String, question: String) async -> AgentMessengerReply
     func sendMessage(to agent: String, content: String) async -> String
-    func requestInformation(to agent: String, question: String) async -> String
-    func replyMessage(to agent: String, content: String, inReplyTo: String?) async -> String
-    func requestDelegation(objective: String, reason: String) async -> String
+    func requestInformation(to agent: String,
+                            question: String,
+                            basedOn: String?) async -> String
+    func replyMessage(to agent: String,
+                      content: String,
+                      inReplyTo: String) async -> String
     func delegateTask(authorization: ResolvedToolAuthorization,
+                      executionID: String,
                       to agent: String?,
                       workTaskID: WorkTaskID?,
                       objective: String?,
                       roleHint: String?,
-                      expectedDeliverable: String?) async -> String
+                      expectedDeliverable: String?) async throws -> String
+}
+
+/// Host-bound control-plane seam for the exact ContinuationRun that owns an
+/// invocation. Tools never accept a session/run/task identifier from the
+/// model; the Cowork host resolves those identities before exposing them.
+public protocol RunController: Sendable {
+    func requestClose(outcome: ContinuationRunCloseOutcome,
+                      reason: String) async -> String
 }
 
 /// Seam for agent lifecycle management (v0.3 coordinator). Cowork provides an
@@ -409,7 +426,6 @@ public protocol AgentManager: Sendable {
     func spawnAgent(authorization: ResolvedToolAuthorization?,
                     name: String,
                     path: String,
-                    model: String?,
                     inferenceProfileID: String?,
                     requestedAccess: WorkspaceAccess,
                     canCoordinate: Bool) async -> String
@@ -440,10 +456,9 @@ public struct ToolContext: Sendable {
     /// invocations. It accepts only the opaque structured invocation above,
     /// never a model-authored shell string.
     let browserBackend: BrowserBackendRunner
-    /// Session-lifetime owner for live browser processes. Production Code and
-    /// Cowork runtimes inject one shared owner; isolated tool hosts receive an
-    /// owner scoped to this ToolContext.
-    public let browserSession: (any BrowserSessionManaging)?
+    /// Dedicated backend for fixed document runtime invocations. Unlike
+    /// `structuredShell`, this interface cannot receive a shell command.
+    public let documentBackend: any DocumentBackendRunner
     /// Long-lived, runtime-owned terminal service used by `exec_command` and
     /// `write_stdin`. It is optional so isolated tool hosts must opt in rather
     /// than silently creating a process manager with the wrong lifetime.
@@ -453,6 +468,7 @@ public struct ToolContext: Sendable {
     public let agentManager: AgentManager?
     public let workTaskManager: WorkTaskManager?
     public let goalManager: GoalManager?
+    public let runController: RunController?
     public let imageGenerator: ImageGenerationToolService?
     /// Host service bound to the session that owns this exact invocation.
     /// The model never supplies a session identifier.
@@ -476,13 +492,14 @@ public struct ToolContext: Sendable {
                 structuredShell: ShellRunner? = nil,
                 networkStructuredShell: ShellRunner? = nil,
                 browserBackendShell: ShellRunner? = nil,
-                browserSession: (any BrowserSessionManaging)? = nil,
+                documentBackend: (any DocumentBackendRunner)? = nil,
                 terminal: (any TerminalSessionManaging)? = nil,
                 git: GitService = ProcessGitService(),
                 messenger: AgentMessenger? = nil,
                 agentManager: AgentManager? = nil,
                 workTaskManager: WorkTaskManager? = nil,
                 goalManager: GoalManager? = nil,
+                runController: RunController? = nil,
                 imageGenerator: ImageGenerationToolService? = nil,
                 sessionNaming: SessionNamingService? = nil,
                 executionID: String? = nil,
@@ -492,24 +509,33 @@ public struct ToolContext: Sendable {
         let effectiveLease = workspaceLease ?? WorkspaceLease(
             rootPath: workspaceRoot.resolvingSymlinksInPath().standardizedFileURL.path,
             access: .readWrite)
+        var processLease = effectiveLease
+        var processDenied = Set(processLease.deniedPatterns)
+        for pattern in WorkspaceLease.mandatoryManagedStoreDeniedPatterns
+            where processDenied.insert(pattern).inserted {
+            processLease.deniedPatterns.append(pattern)
+        }
         self.workspaceRoot = workspaceRoot
+        // Keep the exact reviewed lease available to authorization-aware
+        // host tools such as Knowledge. Generic process backends receive the
+        // independently hardened projection below.
         self.workspaceLease = effectiveLease
         if let processShell = shell as? ProcessShellRunner {
-            self.shell = processShell.scoped(to: effectiveLease)
+            self.shell = processShell.scoped(to: processLease)
         } else {
             self.shell = shell
         }
         let resolvedStructuredShell: ShellRunner
         if let structuredShell {
             if let processShell = structuredShell as? StructuredProcessShellRunner {
-                resolvedStructuredShell = processShell.scoped(to: effectiveLease)
+                resolvedStructuredShell = processShell.scoped(to: processLease)
             } else if let processShell = structuredShell as? ProcessShellRunner {
-                resolvedStructuredShell = processShell.scoped(to: effectiveLease)
+                resolvedStructuredShell = processShell.scoped(to: processLease)
             } else {
                 resolvedStructuredShell = structuredShell
             }
         } else if shell is ProcessShellRunner {
-            resolvedStructuredShell = StructuredProcessShellRunner(workspaceLease: effectiveLease)
+            resolvedStructuredShell = StructuredProcessShellRunner(workspaceLease: processLease)
         } else {
             // Preserve injected fake runners in unit tests and custom hosts.
             resolvedStructuredShell = shell
@@ -518,16 +544,16 @@ public struct ToolContext: Sendable {
         let resolvedNetworkStructuredShell: ShellRunner
         if let networkStructuredShell {
             if let processShell = networkStructuredShell as? StructuredProcessShellRunner {
-                resolvedNetworkStructuredShell = processShell.scoped(to: effectiveLease)
+                resolvedNetworkStructuredShell = processShell.scoped(to: processLease)
             } else if let processShell = networkStructuredShell as? ProcessShellRunner {
-                resolvedNetworkStructuredShell = processShell.scoped(to: effectiveLease)
+                resolvedNetworkStructuredShell = processShell.scoped(to: processLease)
             } else {
                 resolvedNetworkStructuredShell = networkStructuredShell
             }
         } else if shell is ProcessShellRunner, structuredShell == nil {
             resolvedNetworkStructuredShell = StructuredProcessShellRunner(
                 allowsNetwork: true,
-                workspaceLease: effectiveLease)
+                workspaceLease: processLease)
         } else {
             // Preserve the pre-existing single fake-runner injection behavior.
             resolvedNetworkStructuredShell = resolvedStructuredShell
@@ -536,33 +562,30 @@ public struct ToolContext: Sendable {
         if let browserBackendShell {
             let resolvedShell: ShellRunner
             if let processShell = browserBackendShell as? StructuredProcessShellRunner {
-                resolvedShell = processShell.scoped(to: effectiveLease)
+                resolvedShell = processShell.scoped(to: processLease)
             } else if let processShell = browserBackendShell as? ProcessShellRunner {
-                resolvedShell = processShell.scoped(to: effectiveLease)
+                resolvedShell = processShell.scoped(to: processLease)
             } else {
                 resolvedShell = browserBackendShell
             }
             self.browserBackend = InjectedShellBrowserBackendRunner(shell: resolvedShell)
-            self.browserSession = browserSession
         } else if shell is ProcessShellRunner {
-            let resolvedBrowserSession = browserSession ?? ProcessBrowserSessionManager()
-            if let provider = resolvedBrowserSession as? any BrowserSessionBackendProviding {
-                self.browserBackend = provider.backend(scopedTo: effectiveLease)
-                self.browserSession = resolvedBrowserSession
-            } else {
-                self.browserBackend = BrowserBackendProcessRunner(
-                    workspaceLease: effectiveLease)
-                self.browserSession = resolvedBrowserSession
-            }
+            self.browserBackend = BrowserBackendProcessRunner(
+                workspaceLease: processLease)
         } else {
             // Preserve the pre-existing single fake-runner injection behavior.
             self.browserBackend = InjectedShellBrowserBackendRunner(
                 shell: resolvedNetworkStructuredShell)
-            self.browserSession = browserSession
+        }
+        if let documentBackend {
+            self.documentBackend = documentBackend
+        } else {
+            self.documentBackend = DocumentBackendProcessRunner(
+                workspaceLease: processLease)
         }
         self.terminal = terminal
         if let processGit = git as? ProcessGitService {
-            self.git = processGit.scoped(to: effectiveLease)
+            self.git = processGit.scoped(to: processLease)
         } else {
             self.git = git
         }
@@ -570,6 +593,7 @@ public struct ToolContext: Sendable {
         self.agentManager = agentManager
         self.workTaskManager = workTaskManager
         self.goalManager = goalManager
+        self.runController = runController
         self.imageGenerator = imageGenerator
         self.sessionNaming = sessionNaming
         self.executionID = executionID
@@ -587,6 +611,11 @@ public protocol Tool: Sendable {
     /// `write_file` and `apply_patch` are two operations in one
     /// `filesystem.edit` capability family.
     static var canonicalPermission: String? { get }
+    /// Tool-specific semantic validation that runs before permission review.
+    /// JSON Schema remains the provider-facing shape check; this hook enforces
+    /// nested operation matrices and cross-field invariants without widening
+    /// the generic schema interpreter.
+    func validateArguments(_ args: ToolArgs) throws
     func touchedPaths(_ args: ToolArgs) -> [String]
     func risksNetwork(_ args: ToolArgs) -> Bool
     /// Build the structured authorization input for this exact invocation.
@@ -615,6 +644,7 @@ public protocol Tool: Sendable {
 
 public extension Tool {
     static var canonicalPermission: String? { nil }
+    func validateArguments(_ args: ToolArgs) throws {}
     func touchedPaths(_ args: ToolArgs) -> [String] { [] }
     func risksNetwork(_ args: ToolArgs) -> Bool { false }
     func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
@@ -703,6 +733,46 @@ public extension Tool {
 /// One authoritative model-visible tool entry. The concrete tool supplies both
 /// its schema and executor; `grantingCapabilities` records which lease
 /// capability aliases may expose that concrete entry in a scoped registry.
+/// Tool-neutral evidence envelope used by AgentKernel immediately before a
+/// final answer is committed. Domain modules keep ownership of the mechanical
+/// replay implementation; AgentKernel only preserves current-turn identity
+/// and invokes this exact registration-owned closure.
+public struct ToolGroundingEvidence: Equatable, Sendable {
+    public let toolName: String
+    public let evidenceID: String
+    public let knowledgeBase: String
+    public let knowledgeBaseRevision: String
+    public let retrievalSnapshot: String
+    public let retrievalSnapshotRevision: String
+    public let textSHA256: String
+    public let evidenceURI: String
+    public let structuredEvidence: JSONValue
+
+    public init(toolName: String,
+                evidenceID: String,
+                knowledgeBase: String,
+                knowledgeBaseRevision: String,
+                retrievalSnapshot: String,
+                retrievalSnapshotRevision: String,
+                textSHA256: String,
+                evidenceURI: String,
+                structuredEvidence: JSONValue) {
+        self.toolName = toolName
+        self.evidenceID = evidenceID
+        self.knowledgeBase = knowledgeBase
+        self.knowledgeBaseRevision = knowledgeBaseRevision
+        self.retrievalSnapshot = retrievalSnapshot
+        self.retrievalSnapshotRevision = retrievalSnapshotRevision
+        self.textSHA256 = textSHA256
+        self.evidenceURI = evidenceURI
+        self.structuredEvidence = structuredEvidence
+    }
+}
+
+public typealias ToolGroundingEvidenceRevalidator = @Sendable (
+    ToolGroundingEvidence
+) async throws -> Void
+
 public struct ToolRegistration: Sendable {
     /// The exact instance-level descriptor advertised, authorized, and
     /// executed by this registration. Dynamic tools must supply this value
@@ -726,6 +796,10 @@ public struct ToolRegistration: Sendable {
     private let usesStaticToolMetadata: Bool
     private let argumentValidator:
         @Sendable (ToolArgs) throws -> Void
+    private let argumentValidationFailureBuilder:
+        (@Sendable (String) -> ToolObservation)?
+    public let groundingEvidenceRevalidator:
+        ToolGroundingEvidenceRevalidator?
 
     /// Compatibility initializer for the existing static tool surface.
     public init(tool: any Tool,
@@ -741,7 +815,9 @@ public struct ToolRegistration: Sendable {
             requiredDelegation: requiredDelegation,
             mcpAuthorization: nil,
             mcpResourceAuthorizationResolver: nil,
-            argumentValidator: { _ in },
+            argumentValidator: { try tool.validateArguments($0) },
+            argumentValidationFailureBuilder: nil,
+            groundingEvidenceRevalidator: nil,
             usesStaticToolMetadata: true)
     }
 
@@ -762,7 +838,11 @@ public struct ToolRegistration: Sendable {
                     ) throws -> MCPResourceInvocationAuthorizationSnapshot?)?
                         = nil,
                 argumentValidator:
-                    @escaping @Sendable (ToolArgs) throws -> Void = { _ in }) {
+                    @escaping @Sendable (ToolArgs) throws -> Void = { _ in },
+                argumentValidationFailureBuilder:
+                    (@Sendable (String) -> ToolObservation)? = nil,
+                groundingEvidenceRevalidator:
+                    ToolGroundingEvidenceRevalidator? = nil) {
         self.init(
             descriptor: descriptor,
             tool: tool,
@@ -774,6 +854,10 @@ public struct ToolRegistration: Sendable {
             mcpResourceAuthorizationResolver:
                 mcpResourceAuthorizationResolver,
             argumentValidator: argumentValidator,
+            argumentValidationFailureBuilder:
+                argumentValidationFailureBuilder,
+            groundingEvidenceRevalidator:
+                groundingEvidenceRevalidator,
             usesStaticToolMetadata: false)
     }
 
@@ -790,6 +874,10 @@ public struct ToolRegistration: Sendable {
                     ) throws -> MCPResourceInvocationAuthorizationSnapshot?)?,
                  argumentValidator:
                     @escaping @Sendable (ToolArgs) throws -> Void,
+                 argumentValidationFailureBuilder:
+                    (@Sendable (String) -> ToolObservation)?,
+                 groundingEvidenceRevalidator:
+                    ToolGroundingEvidenceRevalidator?,
                  usesStaticToolMetadata: Bool) {
         self.descriptor = descriptor
         self.tool = tool
@@ -801,6 +889,10 @@ public struct ToolRegistration: Sendable {
         self.mcpResourceAuthorizationResolver =
             mcpResourceAuthorizationResolver
         self.argumentValidator = argumentValidator
+        self.argumentValidationFailureBuilder =
+            argumentValidationFailureBuilder
+        self.groundingEvidenceRevalidator =
+            groundingEvidenceRevalidator
         self.usesStaticToolMetadata = usesStaticToolMetadata
     }
 
@@ -848,6 +940,15 @@ public struct ToolRegistration: Sendable {
 
     public func validateArguments(_ args: ToolArgs) throws {
         try argumentValidator(args)
+    }
+
+    /// Optional typed result for a structurally valid tool call whose business
+    /// arguments fail this registration's strict schema. Unknown tools and
+    /// malformed outer transports remain protocol/runtime failures.
+    public func argumentValidationFailure(
+        message: String
+    ) -> ToolObservation? {
+        argumentValidationFailureBuilder?(message)
     }
 
     public func execute(_ args: ToolArgs,
@@ -1495,8 +1596,6 @@ public struct ToolRegistry: Sendable {
         switch grant {
         case .none:
             return "none"
-        case .requestOnly:
-            return "request-only"
         case .granted(let budget):
             return "granted:\(budget.maxTasks):\(budget.maxDepth)"
         }
@@ -1528,9 +1627,6 @@ public struct ToolRegistry: Sendable {
     ) -> Bool {
         switch requirement {
         case .none:
-            return true
-        case .requestOrGranted:
-            if case .none = grant { return false }
             return true
         case .granted:
             if case .granted = grant { return true }
@@ -1632,7 +1728,10 @@ public struct ToolRegistry: Sendable {
     /// stays implemented for isolated tests/future helper processes but is not
     /// model-exposed because arbitrary commands cannot declare exact touched
     /// paths for WorkspaceLease denied-pattern enforcement.
-    public static func standard(includesTerminal: Bool = false) -> ToolRegistry {
+    public static func standard(
+        includesTerminal: Bool = false,
+        hostedWebSearch: (any HostedWebSearchToolService)? = nil
+    ) -> ToolRegistry {
         var tools: [any Tool] = [
             ReadFileTool(), ListFilesTool(), SearchTextTool(), WriteFileTool(),
             ApplyPatchTool(), GitStatusTool(), GitDiffTool(),
@@ -1644,7 +1743,9 @@ public struct ToolRegistry: Sendable {
             GitWorktreeCreateTool(), GitWorktreeRemoveTool(),
             GitRemotesTool(), GitFetchTool(), GitPullFastForwardTool(),
             GitPushTool(), GitSwitchBranchTool(),
-            ReadPDFTool(), ReadDocumentTool(), EditPDFPagesTool(), ReconstructDocumentImageTool(),
+            ReadPDFTool(), ReadDOCXTool(), ReadPPTXTool(), ReadXLSXTool(),
+            ReadHTMLTool(), ReadEPUBTool(), DocumentOCRTool(), DocumentRenderTool(),
+            DocumentExportPDFTool(), DocumentWriteTool(),
             CompileLaTeXTool(), GenerateImageTool(), EditImageTool(),
             WebFetchTool(), BrowserDiagnosticsTool(), BrowserProfilesTool(), BrowserProfileDeleteTool(), BrowserHistoryTool(),
             BrowserNavigateTool(), BrowserSnapshotTool(), BrowserHandoffTool(), BrowserClickTool(),
@@ -1658,7 +1759,19 @@ public struct ToolRegistry: Sendable {
             tools.append(ExecCommandTool())
             tools.append(WriteStdinTool())
         }
-        return ToolRegistry(tools)
+        var registrations = tools.map { ToolRegistration(tool: $0) }
+        if let hostedWebSearch {
+            registrations.append(ToolRegistration(
+                tool: HostedWebSearchTool(service: hostedWebSearch),
+                grantingCapabilities: [.hostedWebSearch]))
+        }
+        // The document surface changed incompatibly from the legacy aggregate
+        // group, and provider-hosted search adds a distinct network tool.
+        // Keep the replacement identity explicit so a durable authorization
+        // issued for an old catalog can never validate against this one.
+        return ToolRegistry(
+            registrations: registrations,
+            registryVersion: "intatis.standard.v4")
     }
 }
 

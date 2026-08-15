@@ -32,7 +32,7 @@ public struct SendMessageTool: Tool {
             dataEffects: [.none],
             controlEffects: [.message],
             risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
@@ -58,24 +58,40 @@ public struct RequestInformationTool: Tool {
             "properties": .object([
                 "to": .object(["type": .string("string"), "description": .string("target agent name")]),
                 "question": .object(["type": .string("string")]),
+                "based_on": .object([
+                    "type": .string("string"),
+                    "description": .string("required reply Message ID when this is an explicit follow-up from a mailbox receipt"),
+                ]),
             ]),
             "required": .array([.string("to"), .string("question")]),
             "additionalProperties": .bool(false),
         ])
     )
 
-    struct Args: Decodable { let to: String; let question: String }
+    struct Args: Decodable {
+        let to: String
+        let question: String
+        let basedOn: String?
+
+        enum CodingKeys: String, CodingKey {
+            case to, question
+            case basedOn = "based_on"
+        }
+    }
 
     public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
         let value = try? args.decode(Args.self)
         return PermissionIntent(
             action: "information.request",
             resources: [PermissionResource(kind: .agent, value: value?.to ?? "unknown")],
-            metadata: ["questionLength": .number(Double(value?.question.count ?? 0))],
+            metadata: [
+                "questionLength": .number(Double(value?.question.count ?? 0)),
+                "basedOn": value?.basedOn.map(JSONValue.string) ?? .null,
+            ],
             dataEffects: [.none],
             controlEffects: [.message],
             risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
@@ -84,7 +100,10 @@ public struct RequestInformationTool: Tool {
             throw IntatisError.io("agent messaging is not available in this session")
         }
         return try Self.checked(
-            await messenger.requestInformation(to: a.to, question: a.question),
+            await messenger.requestInformation(
+                to: a.to,
+                question: a.question,
+                basedOn: a.basedOn),
             successPrefix: "requested information from @")
     }
 }
@@ -94,21 +113,21 @@ public struct ReplyMessageTool: Tool {
 
     public static let descriptor = ToolDescriptor(
         name: "reply_message",
-        description: "Reply to another agent's message or information request without creating a task.",
+        description: "Answer one exact frozen information request without creating a task. This closes only that request correlation; it is not an acknowledgment tool.",
         sideEffect: .readOnly,
         parameters: .object([
             "type": .string("object"),
             "properties": .object([
                 "to": .object(["type": .string("string"), "description": .string("target agent name")]),
                 "content": .object(["type": .string("string")]),
-                "inReplyTo": .object(["type": .string("string"), "description": .string("optional message id")]),
+                "inReplyTo": .object(["type": .string("string"), "description": .string("exact information request Message ID")]),
             ]),
-            "required": .array([.string("to"), .string("content")]),
+            "required": .array([.string("to"), .string("content"), .string("inReplyTo")]),
             "additionalProperties": .bool(false),
         ])
     )
 
-    struct Args: Decodable { let to: String; let content: String; let inReplyTo: String? }
+    struct Args: Decodable { let to: String; let content: String; let inReplyTo: String }
 
     public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
         let value = try? args.decode(Args.self)
@@ -123,7 +142,7 @@ public struct ReplyMessageTool: Tool {
             dataEffects: [.none],
             controlEffects: [.message],
             risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
@@ -139,50 +158,28 @@ public struct ReplyMessageTool: Tool {
     }
 }
 
-public struct RequestDelegationTool: Tool {
-    public init() {}
+/// Optional, explicitly reviewed Knowledge authority attached to one delegated
+/// task. Omission is the default and grants no Knowledge tools. The value is
+/// intentionally task-scoped rather than a mutation of the worker's durable
+/// default lease.
+enum DelegatedKnowledgeAccess: String, Codable, Sendable {
+    case search
+    case build
+    case buildAndSearch = "build_and_search"
 
-    public static let descriptor = ToolDescriptor(
-        name: "request_delegation",
-        description: "Ask the assigning agent or orchestrator for additional help without spawning agents or creating tasks.",
-        sideEffect: .readOnly,
-        parameters: .object([
-            "type": .string("object"),
-            "properties": .object([
-                "objective": .object(["type": .string("string")]),
-                "reason": .object(["type": .string("string")]),
-            ]),
-            "required": .array([.string("objective"), .string("reason")]),
-            "additionalProperties": .bool(false),
-        ])
-    )
-
-    struct Args: Decodable { let objective: String; let reason: String }
-
-    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
-        let value = try? args.decode(Args.self)
-        return PermissionIntent(
-            action: "task.delegation.request",
-            resources: [PermissionResource(kind: .task, value: "current")],
-            metadata: [
-                "objectiveLength": .number(Double(value?.objective.count ?? 0)),
-                "reasonLength": .number(Double(value?.reason.count ?? 0)),
-            ],
-            dataEffects: [.none],
-            controlEffects: [.message],
-            risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+    var capabilities: Set<ToolCapability> {
+        switch self {
+        case .search:
+            return [.searchKnowledge]
+        case .build:
+            return [.buildKnowledge]
+        case .buildAndSearch:
+            return [.buildKnowledge, .searchKnowledge]
+        }
     }
 
-    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
-        let a = try args.decode(Args.self)
-        guard let messenger = context.messenger else {
-            throw IntatisError.io("agent messaging is not available in this session")
-        }
-        return try Self.checked(await messenger.requestDelegation(
-            objective: a.objective,
-            reason: a.reason),
-            successPrefix: "delegation request delivered to @")
+    var workspaceAccess: WorkspaceAccess {
+        capabilities.contains(.buildKnowledge) ? .readWrite : .readOnly
     }
 }
 
@@ -193,21 +190,26 @@ public struct DelegateTaskTool: Tool {
         name: "delegate_task",
         description: "Run one ready durable WorkTask by ID. The WorkTask remains the source of truth, "
             + "and the invocation report is only a candidate result until task_update explicitly settles it. "
-            + "Legacy unscoped calls may provide objective instead. If 'to' names an attached agent it is reused; "
-            + "if that name does not exist, or 'to' is omitted/'auto', Intatis reuses an idle worker "
-            + "or atomically creates a worker in your current workspace. Returns invocation task_id, agent_id, and the mediated Task Report.",
+            + "Unscoped calls may provide objective instead. 'to' must name an attached agent; if omitted or 'auto', Intatis selects an available attached worker. "
+            + "Create an agent in an earlier tool-call round when no suitable worker exists. knowledge_access may explicitly grant only this task search, build, or build_and_search Knowledge tools. Returns invocation task_id, agent_id, and the mediated Task Report.",
         sideEffect: .write,
         parameters: .object([
             "type": .string("object"),
             "properties": .object([
                 "to": .object(["type": .string("string"), "description": .string("target agent name")]),
                 "work_task_id": .object(["type": .string("string"), "description": .string("ready durable WorkTask ID")]),
-                "objective": .object(["type": .string("string"), "description": .string("legacy unscoped invocation objective")]),
+                "objective": .object(["type": .string("string"), "description": .string("unscoped invocation objective")]),
                 "role_hint": .object(["type": .string("string")]),
                 "expected_deliverable": .object(["type": .string("string")]),
-                // Compatibility aliases for previously emitted tool calls.
-                "roleHint": .object(["type": .string("string")]),
-                "expectedDeliverable": .object(["type": .string("string")]),
+                "knowledge_access": .object([
+                    "type": .string("string"),
+                    "enum": .array([
+                        .string("search"),
+                        .string("build"),
+                        .string("build_and_search"),
+                    ]),
+                    "description": .string("optional task-scoped Knowledge capability grant"),
+                ]),
             ]),
             "required": .array([]),
             "additionalProperties": .bool(false),
@@ -220,6 +222,7 @@ public struct DelegateTaskTool: Tool {
         let objective: String?
         let roleHint: String?
         let expectedDeliverable: String?
+        let knowledgeAccess: DelegatedKnowledgeAccess?
 
         enum CodingKeys: String, CodingKey {
             case to
@@ -227,8 +230,7 @@ public struct DelegateTaskTool: Tool {
             case objective
             case roleHint = "role_hint"
             case expectedDeliverable = "expected_deliverable"
-            case legacyRoleHint = "roleHint"
-            case legacyExpectedDeliverable = "expectedDeliverable"
+            case knowledgeAccess = "knowledge_access"
         }
 
         init(from decoder: Decoder) throws {
@@ -237,33 +239,42 @@ public struct DelegateTaskTool: Tool {
             workTaskID = try container.decodeIfPresent(WorkTaskID.self, forKey: .workTaskID)
             objective = try container.decodeIfPresent(String.self, forKey: .objective)
             roleHint = try container.decodeIfPresent(String.self, forKey: .roleHint)
-                ?? container.decodeIfPresent(String.self, forKey: .legacyRoleHint)
             expectedDeliverable = try container.decodeIfPresent(String.self, forKey: .expectedDeliverable)
-                ?? container.decodeIfPresent(String.self, forKey: .legacyExpectedDeliverable)
+            knowledgeAccess = try container.decodeIfPresent(
+                DelegatedKnowledgeAccess.self,
+                forKey: .knowledgeAccess)
         }
     }
 
     public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
         let value = try? args.decode(Args.self)
+        var resources = [
+            PermissionResource(kind: .agent, value: value?.to ?? "auto"),
+            PermissionResource(kind: .task, value: value?.workTaskID?.rawValue ?? "new"),
+            PermissionResource(
+                kind: .workspace,
+                value: workspaceRoot.standardizedFileURL.path,
+                access: value?.knowledgeAccess?.workspaceAccess ?? .readOnly),
+        ]
+        if let knowledgeAccess = value?.knowledgeAccess {
+            resources.append(PermissionResource(
+                kind: .tool,
+                value: "delegated_knowledge:\(knowledgeAccess.rawValue)",
+                access: knowledgeAccess.workspaceAccess))
+        }
         return PermissionIntent(
             action: "task.delegate",
-            resources: [
-                PermissionResource(kind: .agent, value: value?.to ?? "auto"),
-                PermissionResource(kind: .task, value: value?.workTaskID?.rawValue ?? "new"),
-                PermissionResource(
-                    kind: .workspace,
-                    value: workspaceRoot.standardizedFileURL.path,
-                    access: .readOnly),
-            ],
+            resources: resources,
             metadata: [
                 "objectiveLength": .number(Double(value?.objective?.count ?? 0)),
                 "roleHint": value?.roleHint.map(JSONValue.string) ?? .null,
-                "mayCreateWorker": .bool(true),
+                "knowledgeAccess": value?.knowledgeAccess
+                    .map { .string($0.rawValue) } ?? .null,
             ],
             dataEffects: [.none],
-            controlEffects: [.delegateTask, .createAgent, .attachWorkspace, .grantCapability],
+            controlEffects: [.delegateTask, .grantCapability],
             risks: [.controlPlaneMutation, .capabilityGrant, .modelCost],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
@@ -273,7 +284,7 @@ public struct DelegateTaskTool: Tool {
         }
         guard a.workTaskID != nil
                 || !(a.objective?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) else {
-            throw IntatisError.decoding("delegate_task requires work_task_id or a legacy objective")
+            throw IntatisError.decoding("delegate_task requires work_task_id or an unscoped objective")
         }
         guard let authorization = context.authorization,
               authorization.toolName == Self.descriptor.name,
@@ -285,8 +296,15 @@ public struct DelegateTaskTool: Tool {
             throw IntatisError.permissionDenied(
                 "delegate_task requires a concrete host-resolved target authorization")
         }
-        return try Self.checked(await messenger.delegateTask(
+        guard let executionID = context.executionID,
+              !executionID.isEmpty else {
+            throw ToolExecutionRejectedWithoutSideEffect(
+                code: "delegation_execution_id_missing",
+                message: "delegate_task was rejected before admission because its durable execution identity is unavailable")
+        }
+        return try Self.checked(try await messenger.delegateTask(
             authorization: authorization,
+            executionID: executionID,
             to: concreteTarget,
             workTaskID: a.workTaskID,
             objective: a.objective,

@@ -132,12 +132,78 @@ final class MessageDelegationSplitTests: XCTestCase {
             $0.kind == .mailboxDelivery && $0.assignee == worker
         })
         XCTAssertEqual(wakeTask.issuer, main)
+        XCTAssertEqual(wakeTask.mailboxMessageIDs, [message.messageId])
+        let capabilityLease = try XCTUnwrap(events.compactMap { envelope -> CapabilityLease? in
+            guard case .capabilityLeaseCreated(let payload) = envelope.event,
+                  payload.lease.taskID == wakeTask.id else { return nil }
+            return payload.lease
+        }.first)
+        let workspaceLease = try XCTUnwrap(events.compactMap { envelope -> WorkspaceLease? in
+            guard case .workspaceLeaseGranted(let payload) = envelope.event,
+                  payload.lease.taskID == wakeTask.id else { return nil }
+            return payload.lease
+        }.first)
+        XCTAssertEqual(workspaceLease.access, .readOnly)
+        XCTAssertEqual(capabilityLease.communication, .none)
+        XCTAssertEqual(capabilityLease.delegation, .none)
+        XCTAssertTrue(capabilityLease.mcpGrants.isEmpty)
+        XCTAssertFalse(capabilityLease.tools.contains(.manageWorkTasks))
+        XCTAssertFalse(capabilityLease.tools.contains(.updateBoundWorkTask))
+        XCTAssertFalse(capabilityLease.tools.contains(.delegateTask))
+        XCTAssertFalse(capabilityLease.tools.contains(.runShell))
+        XCTAssertFalse(capabilityLease.tools.contains(.gitControl))
+        XCTAssertFalse(capabilityLease.tools.contains(.gitRemote))
+        XCTAssertFalse(capabilityLease.tools.contains(.applyPatch))
+        XCTAssertFalse(capabilityLease.tools.contains(.browseWeb))
+        XCTAssertTrue(capabilityLease.tools.contains(.readPDF))
+        XCTAssertTrue([
+            ToolCapability.readDOCX,
+            .readPPTX,
+            .readXLSX,
+            .readHTML,
+            .readEPUB,
+        ].allSatisfy(capabilityLease.tools.contains))
+        XCTAssertFalse(capabilityLease.tools.contains(.documentRead))
+        XCTAssertTrue(capabilityLease.tools.contains(.documentOCR))
+        XCTAssertFalse(capabilityLease.tools.contains(.documentRender))
+        XCTAssertFalse(capabilityLease.tools.contains(.documentExportPDF))
+        XCTAssertFalse(capabilityLease.tools.contains(.documentWrite))
+        let mailboxToolNames = Set(Orchestrator.toolRegistry(
+            for: capabilityLease).descriptors().map(\.name))
+        XCTAssertTrue(mailboxToolNames.contains("read_pdf"))
+        XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
+            .allSatisfy(mailboxToolNames.contains))
+        XCTAssertFalse(mailboxToolNames.contains("document_read"))
+        XCTAssertTrue(mailboxToolNames.contains("document_ocr"))
+        XCTAssertFalse(mailboxToolNames.contains("document_render"))
+        XCTAssertFalse(mailboxToolNames.contains("document_export_pdf"))
+        XCTAssertFalse(mailboxToolNames.contains("document_write"))
+        XCTAssertFalse(mailboxToolNames.contains("task_create"))
+        XCTAssertFalse(mailboxToolNames.contains("task_update"))
+        XCTAssertFalse(mailboxToolNames.contains("delegate_task"))
+        XCTAssertFalse(mailboxToolNames.contains("ask_agent"))
+        XCTAssertFalse(mailboxToolNames.contains("reply_message"))
+        XCTAssertFalse(mailboxToolNames.contains("exec_command"))
+        XCTAssertFalse(mailboxToolNames.contains("write_stdin"))
+        XCTAssertFalse(mailboxToolNames.contains("apply_patch"))
+        XCTAssertFalse(mailboxToolNames.contains("web_fetch"))
+        XCTAssertFalse(mailboxToolNames.contains { $0.hasPrefix("git_") })
+        XCTAssertFalse(mailboxToolNames.contains { $0.hasPrefix("browser_") })
         XCTAssertTrue(events.contains {
             if case .taskQueued(let payload) = $0.event {
                 return payload.contract.id == wakeTask.id && payload.reason == "mailbox delivery"
             }
             return false
         })
+        let completedSeq = try XCTUnwrap(events.first {
+            guard case .taskCompleted(let payload) = $0.event else { return false }
+            return payload.taskID == wakeTask.id
+        }?.seq)
+        let consumedSeq = try XCTUnwrap(events.first {
+            guard case .agentMessageConsumed(let payload) = $0.event else { return false }
+            return payload.messageID == message.messageId
+        }?.seq)
+        XCTAssertEqual(consumedSeq, completedSeq + 1)
         XCTAssertTrue(events.contains {
             if case .agentMessageConsumed(let payload) = $0.event {
                 return payload.messageID == message.messageId
@@ -182,7 +248,7 @@ final class MessageDelegationSplitTests: XCTestCase {
             profile: .reviewed))
         XCTAssertTrue(mainAttached)
         XCTAssertTrue(workerAttached)
-        await orch.setMessageConsumptionAppender { _ in
+        await orch.setMessageConsumptionPreflightForTesting { _ in
             throw SplitProviderFailure.forcedFailure
         }
 
@@ -201,9 +267,22 @@ final class MessageDelegationSplitTests: XCTestCase {
         let mailbox = await orch.mailbox(for: worker)
         XCTAssertEqual(
             workerProvider.requestCount,
-            4,
-            "the unacknowledged message is redelivered, then the failed delivery task uses its bounded three attempts")
+            3,
+            "consumption failure retries one exact delivery TaskID through its bounded attempts")
         XCTAssertEqual(mailbox.pendingMessages, [message.messageId])
+        let deliveryQueues = events.compactMap { envelope -> (TaskID, Int)? in
+            guard case .taskQueued(let payload) = envelope.event,
+                  payload.contract.kind == .mailboxDelivery,
+                  let attempt = payload.attempt else { return nil }
+            return (payload.contract.id, attempt)
+        }
+        XCTAssertEqual(Set(deliveryQueues.map(\.0)).count, 1)
+        XCTAssertEqual(deliveryQueues.map(\.1), [1, 2, 3])
+        let deliveryTaskID = try XCTUnwrap(deliveryQueues.first?.0)
+        XCTAssertFalse(events.contains {
+            guard case .taskCompleted(let payload) = $0.event else { return false }
+            return payload.taskID == deliveryTaskID
+        })
         XCTAssertFalse(events.contains {
             guard case .agentMessageConsumed(let payload) = $0.event else { return false }
             return payload.messageID == message.messageId
@@ -220,7 +299,7 @@ final class MessageDelegationSplitTests: XCTestCase {
 
         let result = await orch.requestInformation(from: main, to: worker.rawValue, question: "Which folder is active?")
 
-        XCTAssertEqual(result, "requested information from @worker")
+        XCTAssertTrue(result.hasPrefix("requested information from @worker (request_id: "))
         await orch.runSchedulerUntilIdle()
         let events = await log.replay()
         let request = try XCTUnwrap(events.compactMap { envelope -> InformationRequestedPayload? in
@@ -233,6 +312,7 @@ final class MessageDelegationSplitTests: XCTestCase {
         let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
             $0.kind == .mailboxDelivery && $0.assignee == worker
         })
+        XCTAssertEqual(wakeTask.mailboxMessageIDs, [request.requestID])
         XCTAssertTrue(events.contains {
             if case .agentMessageConsumed(let payload) = $0.event {
                 return payload.messageID == request.requestID
@@ -246,7 +326,7 @@ final class MessageDelegationSplitTests: XCTestCase {
         XCTAssertFalse(events.contains { if case .taskDelegated = $0.event { return true } else { return false } })
     }
 
-    func testReplyMessageCreatesDurableMailboxWakeTaskAndConsumesReply() async throws {
+    func testReplyMessageRejectsUnfrozenCorrelation() async throws {
         let log = try splitLog()
         let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
         defer {
@@ -267,34 +347,25 @@ final class MessageDelegationSplitTests: XCTestCase {
             inReplyTo: "msg_info",
             taskID: currentTaskID)
 
-        XCTAssertEqual(result, "replied to @main")
+        XCTAssertEqual(
+            result,
+            "error: reply_message may answer only an information request frozen into this mailbox invocation")
         await orch.runSchedulerUntilIdle()
         let events = await log.replay()
-        let reply = try XCTUnwrap(events.compactMap { envelope -> InformationRepliedPayload? in
-            if case .informationReplied(let payload) = envelope.event,
-               payload.from == worker
-                    && payload.to == main
-                    && payload.inReplyTo == MessageID(rawValue: "msg_info")
-                    && payload.content.contains("ready")
-                    && payload.taskID == currentTaskID {
-                return payload
-            }
-            return nil
-        }.first)
-        let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
-            $0.kind == .mailboxDelivery && $0.assignee == main
-        })
-        XCTAssertEqual(wakeTask.relatedTasks, [currentTaskID])
-        XCTAssertTrue(events.contains {
-            if case .agentMessageConsumed(let payload) = $0.event {
-                return payload.messageID == reply.replyID
-                    && payload.agent == main
-                    && payload.taskID == wakeTask.id
-            }
+        XCTAssertFalse(events.contains {
+            if case .informationReplied = $0.event { return true }
             return false
         })
-        let mainMailbox = await orch.mailbox(for: main)
-        XCTAssertTrue(mainMailbox.pendingMessages.isEmpty)
+    }
+
+    func testReplyMessageSchemaRequiresExactCorrelationAndRejectsExtraFields() throws {
+        let data = try JSONEncoder().encode(ReplyMessageTool.descriptor.parameters)
+        let schema = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(
+            Set((schema["required"] as? [String]) ?? []),
+            ["to", "content", "inReplyTo"])
+        XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
     }
 
     func testDelegateTaskCreatesTaskContractAndTaskDelegatedEvent() async throws {
@@ -330,62 +401,18 @@ final class MessageDelegationSplitTests: XCTestCase {
         })
     }
 
-    func testRequestDelegationUsesCurrentTaskAndWakesAssigningAgentWithoutSpawnOrAttach() async throws {
-        let log = try splitLog()
-        let (orch, wsMain, wsWorker) = try await makeOrchestrator(log: log)
-        defer {
-            try? FileManager.default.removeItem(at: wsMain)
-            try? FileManager.default.removeItem(at: wsWorker)
-        }
-        let current = await orch.enqueueDelegatedTask(
-            from: main,
-            to: worker.rawValue,
-            objective: "Inspect the assigned source scope.",
-            replyMode: .none)
-        let currentTaskID = try XCTUnwrap(current.taskID)
-        let before = await log.replay().filter { if case .agentAttached = $0.event { return true } else { return false } }.count
-
-        let result = await orch.requestDelegation(from: worker,
-                                                  objective: "Need docs counter",
-                                                  reason: "Assigned workspace excludes docs",
-                                                  parentTaskID: currentTaskID)
-
-        XCTAssertEqual(result, "delegation request delivered to @main")
-        await orch.runSchedulerUntilIdle()
-        let events = await log.replay()
-        let request = try XCTUnwrap(events.compactMap { envelope -> DelegationRequestedPayload? in
-            if case .delegationRequested(let payload) = envelope.event,
-               payload.requester == worker, payload.objective == "Need docs counter" {
-                return payload
-            }
-            return nil
-        }.first)
-        XCTAssertEqual(request.recipient, main)
-        XCTAssertEqual(request.parentTaskID, currentTaskID)
-        let wakeTask = try XCTUnwrap(splitTaskContracts(events).first {
-            $0.kind == .mailboxDelivery && $0.assignee == main
-        })
-        XCTAssertEqual(wakeTask.relatedTasks, [currentTaskID])
-        XCTAssertTrue(events.contains {
-            if case .agentMessageConsumed(let payload) = $0.event {
-                return payload.messageID == MessageID(rawValue: request.requestID.rawValue)
-                    && payload.agent == main
-                    && payload.taskID == wakeTask.id
-            }
-            return false
-        })
-        let mainMailbox = await orch.mailbox(for: main)
-        XCTAssertTrue(mainMailbox.pendingMessages.isEmpty)
-        let after = events.filter { if case .agentAttached = $0.event { return true } else { return false } }.count
-        XCTAssertEqual(after, before)
-        XCTAssertFalse(events.contains { if case .agentSpawned = $0.event { return true } else { return false } })
-    }
-
     func testCapabilityLeaseControlsMessageAndDelegationTools() {
         let workerTools = Set(Orchestrator.toolRegistry(for: .worker()).descriptors().map(\.name))
         XCTAssertTrue(workerTools.contains("reply_message"))
-        XCTAssertTrue(workerTools.contains("request_delegation"))
+        XCTAssertFalse(workerTools.contains("request_delegation"))
         XCTAssertTrue(workerTools.contains("read_pdf"))
+        XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
+            .allSatisfy(workerTools.contains))
+        XCTAssertFalse(workerTools.contains("document_read"))
+        XCTAssertTrue(workerTools.contains("document_ocr"))
+        XCTAssertFalse(workerTools.contains("document_render"))
+        XCTAssertFalse(workerTools.contains("document_export_pdf"))
+        XCTAssertFalse(workerTools.contains("document_write"))
         XCTAssertFalse(workerTools.contains("delegate_task"))
         XCTAssertFalse(workerTools.contains("ask_agent"))
         XCTAssertFalse(workerTools.contains("generate_image"))
@@ -419,7 +446,16 @@ final class MessageDelegationSplitTests: XCTestCase {
         XCTAssertTrue(coordinatorTools.contains("reply_message"))
         XCTAssertTrue(coordinatorTools.contains("delegate_task"))
         XCTAssertTrue(coordinatorTools.contains("ask_agent"))
-        XCTAssertTrue(coordinatorTools.contains("edit_pdf_pages"))
+        XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
+            .allSatisfy(coordinatorTools.contains))
+        XCTAssertFalse(coordinatorTools.contains("document_read"))
+        XCTAssertTrue(coordinatorTools.contains("document_ocr"))
+        XCTAssertTrue(coordinatorTools.contains("document_render"))
+        XCTAssertTrue(coordinatorTools.contains("document_export_pdf"))
+        XCTAssertTrue(coordinatorTools.contains("document_write"))
+        XCTAssertFalse(coordinatorTools.contains("read_document"))
+        XCTAssertFalse(coordinatorTools.contains("edit_pdf_pages"))
+        XCTAssertFalse(coordinatorTools.contains("reconstruct_document_image"))
         XCTAssertTrue(coordinatorTools.contains("compile_latex"))
         XCTAssertTrue(coordinatorTools.contains("generate_image"))
         XCTAssertTrue(coordinatorTools.contains("edit_image"))
@@ -481,12 +517,15 @@ final class MessageDelegationSplitTests: XCTestCase {
             objective: "Prepare a reply for the current task.",
             replyMode: .none)
         let currentTaskID = try XCTUnwrap(current.taskID)
-        _ = await orch.replyMessage(
+        let invalidReply = await orch.replyMessage(
             from: worker,
             to: main.rawValue,
             content: "answer",
             inReplyTo: nil,
             taskID: currentTaskID)
+        XCTAssertEqual(
+            invalidReply,
+            "error: inReplyTo is required and must identify the frozen information request")
         _ = await orch.sendMessage(from: main, to: worker.rawValue, content: "hello")
         _ = await orch.requestInformation(from: main, to: worker.rawValue, question: "question")
         _ = await orch.delegateTask(from: main, to: worker.rawValue, objective: "Do one task.")
@@ -496,7 +535,7 @@ final class MessageDelegationSplitTests: XCTestCase {
         let types = events.map { $0.event.type }
         XCTAssertTrue(types.contains(.agentMessage))
         XCTAssertTrue(types.contains(.informationRequested))
-        XCTAssertTrue(types.contains(.informationReplied))
+        XCTAssertFalse(types.contains(.informationReplied))
         XCTAssertTrue(types.contains(.agentToAgentMessage))
         XCTAssertTrue(types.contains(.taskDelegated))
         XCTAssertTrue(types.contains(.taskCreated))

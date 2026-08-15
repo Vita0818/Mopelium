@@ -49,7 +49,7 @@ public struct IntatisThreadStyle {
 }
 
 /// User bubbles are already identified by their trailing alignment and
-/// Material surface, so repeating a sender label adds noise without adding
+/// Liquid Glass surface, so repeating a sender label adds noise without adding
 /// information. Other message roles keep their structured identity header.
 public enum IntatisMessageHeaderPolicy {
     public static func showsIdentity(for role: MessageRole) -> Bool {
@@ -58,6 +58,282 @@ public enum IntatisMessageHeaderPolicy {
             return false
         case .assistant, .agent, .system:
             return true
+        }
+    }
+}
+
+struct IntatisThreadErrorEntry: Identifiable, Equatable, Sendable {
+    let id: String
+    var title: String?
+    var details: [String]
+    var retrySubmissionID: SubmissionID?
+    fileprivate var titlePriority: Int
+}
+
+/// Collects every error source that would otherwise compete with the
+/// conversation, and produces the corresponding error-free transcript copy.
+/// Durable facts remain unchanged; this is only a SharedUI presentation rule.
+enum IntatisThreadErrorPresentation {
+    private struct Candidate {
+        let fingerprint: String
+        let entry: IntatisThreadErrorEntry
+    }
+
+    static func errors(
+        items: [CodeItem],
+        errorTexts: [String]
+    ) -> [IntatisThreadErrorEntry] {
+        let latestSubmissionID = items.reversed().first(where: {
+            $0.kind == .user && $0.submissionID != nil
+        })?.submissionID
+        var orderedFingerprints: [String] = []
+        var entriesByFingerprint: [String: IntatisThreadErrorEntry] = [:]
+
+        func insert(_ candidate: Candidate) {
+            let fingerprint = candidate.fingerprint
+            if var existing = entriesByFingerprint[fingerprint] {
+                if candidate.entry.titlePriority > existing.titlePriority {
+                    existing.title = candidate.entry.title
+                    existing.titlePriority = candidate.entry.titlePriority
+                }
+                for detail in candidate.entry.details
+                    where !existing.details.contains(where: {
+                        normalized($0) == normalized(detail)
+                    }) {
+                    existing.details.append(detail)
+                }
+                if existing.retrySubmissionID == nil {
+                    existing.retrySubmissionID =
+                        candidate.entry.retrySubmissionID
+                }
+                entriesByFingerprint[fingerprint] = existing
+                orderedFingerprints.removeAll { $0 == fingerprint }
+                orderedFingerprints.append(fingerprint)
+            } else {
+                entriesByFingerprint[fingerprint] = candidate.entry
+                orderedFingerprints.append(fingerprint)
+            }
+        }
+
+        for item in items {
+            if let candidate = candidate(
+                for: item,
+                latestSubmissionID: latestSubmissionID
+            ) {
+                insert(candidate)
+            }
+        }
+        for (index, errorText) in errorTexts.enumerated() {
+            guard cleaned(errorText) != nil else { continue }
+            if let candidate = makeCandidate(
+                id: "host-error-\(index)",
+                title: nil,
+                primaryDetail: errorText,
+                supportingDetails: [],
+                retrySubmissionID: nil,
+                titlePriority: 0) {
+                insert(candidate)
+            }
+        }
+
+        return orderedFingerprints.reversed().compactMap {
+            entriesByFingerprint[$0]
+        }
+    }
+
+    static func transcriptItems(_ items: [CodeItem]) -> [CodeItem] {
+        items.compactMap { source in
+            switch source.kind {
+            case .error:
+                return nil
+            case .toolCall, .toolResult, .patch, .note:
+                if source.isFailure || source.recoveryAdvice != nil {
+                    return nil
+                }
+            case .user, .agent, .agentToAgent:
+                break
+            }
+
+            var item = source
+            item.recoveryAdvice = nil
+            item.isFailure = false
+            if item.kind == .user,
+               item.submissionStatus == .failed
+                    || item.submissionFailure != nil {
+                item.submissionStatus = nil
+                item.submissionFailure = nil
+            }
+            return item
+        }
+    }
+
+    private static func candidate(
+        for item: CodeItem,
+        latestSubmissionID: SubmissionID?
+    ) -> Candidate? {
+        let advice = item.recoveryAdvice
+
+        if item.kind == .user,
+           item.submissionStatus == .failed || item.submissionFailure != nil {
+            let failure = item.submissionFailure
+            return makeCandidate(
+                id: "submission-error-\(item.id)",
+                title: IntatisLocalization.string("Needs attention"),
+                primaryDetail: failure?.message
+                    ?? advice?.detail
+                    ?? IntatisLocalization.string("Needs attention"),
+                supportingDetails: [advice?.title, advice?.detail],
+                retrySubmissionID: failure?.retryable == true
+                    && item.submissionID == latestSubmissionID
+                    ? item.submissionID
+                    : nil,
+                titlePriority: 2)
+        }
+
+        if item.kind == .error {
+            return makeCandidate(
+                id: "runtime-error-\(item.id)",
+                title: item.title,
+                primaryDetail: item.body.isEmpty
+                    ? advice?.detail
+                    : item.body,
+                supportingDetails: [advice?.title, advice?.detail],
+                retrySubmissionID: nil,
+                titlePriority: 3)
+        }
+
+        // A user-cancelled submission is terminal state, not an error. Its
+        // status remains attached to the user row and must not manufacture a
+        // generic "You" entry in the right rail.
+        if item.isFailure, item.kind != .user {
+            let isConversationText = item.kind == .agent
+                || item.kind == .agentToAgent
+                || item.kind == .user
+            return makeCandidate(
+                id: "failed-item-\(item.id)",
+                title: item.title,
+                primaryDetail: isConversationText
+                    ? advice?.detail
+                    : (item.body.isEmpty ? advice?.detail : item.body),
+                supportingDetails: [advice?.title, advice?.detail],
+                retrySubmissionID: nil,
+                titlePriority: 2)
+        }
+
+        if let advice {
+            return makeCandidate(
+                id: "recovery-error-\(item.id)",
+                title: item.title.isEmpty ? advice.title : item.title,
+                primaryDetail: advice.detail,
+                supportingDetails: [advice.title],
+                retrySubmissionID: nil,
+                titlePriority: 1)
+        }
+
+        return nil
+    }
+
+    private static func makeCandidate(
+        id: String,
+        title: String?,
+        primaryDetail: String?,
+        supportingDetails: [String?],
+        retrySubmissionID: SubmissionID?,
+        titlePriority: Int
+    ) -> Candidate? {
+        let cleanTitle = cleaned(title)
+        let cleanPrimary = cleaned(primaryDetail)
+        let fallback = supportingDetails.compactMap(cleaned).first
+            ?? cleanTitle
+            ?? IntatisLocalization.string("Needs attention")
+        let fingerprint = normalized(cleanPrimary ?? fallback)
+        guard !fingerprint.isEmpty else { return nil }
+
+        var details: [String] = []
+        let normalizedTitle = cleanTitle.map(normalized)
+        for candidateValue in [cleanPrimary] + supportingDetails.map(cleaned) {
+            guard let value = candidateValue else { continue }
+            let normalizedValue = normalized(value)
+            if normalizedTitle.map({ $0 == normalizedValue }) == true
+                || details.contains(where: {
+                    normalized($0) == normalizedValue
+                }) {
+                continue
+            }
+            details.append(value)
+        }
+
+        return Candidate(
+            fingerprint: fingerprint,
+            entry: IntatisThreadErrorEntry(
+                id: id,
+                title: cleanTitle,
+                details: details,
+                retrySubmissionID: retrySubmissionID,
+                titlePriority: titlePriority))
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .lowercased()
+    }
+}
+
+struct IntatisThreadErrorList: View {
+    let errors: [IntatisThreadErrorEntry]
+    let style: IntatisThreadStyle
+    let onRetrySubmission: ((SubmissionID) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(errors.enumerated()), id: \.element.id) {
+                index, error in
+                if index > 0 {
+                    Divider().opacity(0.25)
+                }
+                errorRow(error)
+            }
+        }
+    }
+
+    private func errorRow(_ error: IntatisThreadErrorEntry) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if error.title != nil || error.retrySubmissionID != nil {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let title = error.title {
+                        Text(title)
+                            .font(.caption.bold())
+                            .foregroundStyle(style.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    if let submissionID = error.retrySubmissionID,
+                       let onRetrySubmission {
+                        Button(IntatisLocalization.string("Retry")) {
+                            onRetrySubmission(submissionID)
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption.bold())
+                        .accessibilityIdentifier(
+                            "submission.\(submissionID.rawValue).retry")
+                    }
+                }
+            }
+            ForEach(error.details, id: \.self) { detail in
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(style.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
         }
     }
 }
@@ -1681,6 +1957,32 @@ public extension View {
             .intatisGlassButton(prominent: prominent)
     }
 
+    /// Composer-only sizing keeps the native circular button artwork inside
+    /// the same 40-point row geometry as the input capsule. iOS's regular
+    /// glass control size renders visibly taller than that contract, while the
+    /// macOS regular size already matches it.
+    @ViewBuilder func intatisComposerIconButton(
+        prominent: Bool = false
+    ) -> some View {
+        #if os(iOS)
+        labelStyle(.iconOnly)
+            .controlSize(IntatisComposerControlMetrics.iconControlSize(
+                for: .iOS))
+            .buttonBorderShape(.circle)
+            .intatisGlassButton(prominent: prominent)
+            .frame(
+                width: IntatisComposerControlMetrics.controlHeight,
+                height: IntatisComposerControlMetrics.controlHeight)
+            .contentShape(Circle())
+        #else
+        intatisCompactIconButton(prominent: prominent)
+            .frame(
+                width: IntatisComposerControlMetrics.controlHeight,
+                height: IntatisComposerControlMetrics.controlHeight)
+            .contentShape(Circle())
+        #endif
+    }
+
     /// A native Menu owns selection and keyboard behavior while its label
     /// supplies the same interactive Liquid Glass surface as the composer.
     func intatisComposerSelectionMenu() -> some View {
@@ -2192,6 +2494,69 @@ public enum IntatisComposerControlMetrics {
     public static let inputHorizontalPadding: CGFloat = 14
     public static let inputVerticalPadding: CGFloat = 9
     public static let inputCornerRadius: CGFloat = controlHeight / 2
+
+    /// `GlassEffectContainer.spacing` is the distance at which neighboring
+    /// glass shapes begin to merge, not the visual HStack spacing. Keep the
+    /// iOS value below the 8-point row gap so the input, voice and primary
+    /// action remain physically independent; preserve the existing macOS
+    /// grouping behavior.
+    static func glassEffectSpacing(
+        for platform: IntatisComposerGlassPlatform
+    ) -> CGFloat {
+        switch platform {
+        case .iOS:
+            return 0
+        case .macOS:
+            return 10
+        }
+    }
+
+    /// Native glass buttons use different chrome metrics on iOS and macOS.
+    /// Keep iOS on the compact native size so its artwork remains centered in
+    /// the shared 40-point composer frame; macOS regular already fits it.
+    static func iconControlSize(
+        for platform: IntatisComposerGlassPlatform
+    ) -> ControlSize {
+        switch platform {
+        case .iOS:
+            return .small
+        case .macOS:
+            return .regular
+        }
+    }
+}
+
+enum IntatisComposerGlassPlatform: Sendable {
+    case iOS
+    case macOS
+}
+
+public enum IntatisSidebarGesturePolicy {
+    public static let minimumDistance: CGFloat = 12
+    public static let leadingEdgeWidth: CGFloat = 24
+    public static let minimumOpenTranslation: CGFloat = 52
+    public static let minimumCloseTranslation: CGFloat = 44
+    public static let horizontalDominance: CGFloat = 1.25
+
+    public static func shouldOpen(
+        startX: CGFloat,
+        translation: CGSize
+    ) -> Bool {
+        startX >= 0
+            && startX <= leadingEdgeWidth
+            && translation.width >= minimumOpenTranslation
+            && isHorizontallyDominant(translation)
+    }
+
+    public static func shouldClose(translation: CGSize) -> Bool {
+        translation.width <= -minimumCloseTranslation
+            && isHorizontallyDominant(translation)
+    }
+
+    private static func isHorizontallyDominant(_ translation: CGSize) -> Bool {
+        abs(translation.width)
+            >= abs(translation.height) * horizontalDominance
+    }
 }
 
 public struct IntatisThreadComposer: View {
@@ -2208,13 +2573,11 @@ public struct IntatisThreadComposer: View {
     private let inputLeadingAccessory: AnyView?
     private let onSend: () -> Void
     @FocusState private var focused: Bool
+    @ScaledMetric(relativeTo: .body)
+    private var inputPointSize: CGFloat = IntatisTypography.spec(for: .chat).nominalPointSize
 
     private var inputFont: Font {
-        #if os(iOS)
-        return .body
-        #else
-        return .system(size: 15)
-        #endif
+        IntatisTypography.chat(inputPointSize)
     }
 
     public init(placeholder: String,
@@ -2273,10 +2636,18 @@ public struct IntatisThreadComposer: View {
         VStack(alignment: .leading, spacing: 8) {
             topAccessoryRow
 
-            IntatisGlassEffectGroup(spacing: 10) {
+            IntatisGlassEffectGroup(spacing: composerGlassEffectSpacing) {
                 composerControls
             }
         }
+    }
+
+    private var composerGlassEffectSpacing: CGFloat {
+        #if os(iOS)
+        IntatisComposerControlMetrics.glassEffectSpacing(for: .iOS)
+        #else
+        IntatisComposerControlMetrics.glassEffectSpacing(for: .macOS)
+        #endif
     }
 
     @ViewBuilder private var topAccessoryRow: some View {
@@ -2377,7 +2748,7 @@ public struct IntatisThreadComposer: View {
                     }
                 }
         }
-        .intatisCompactIconButton()
+        .intatisComposerIconButton()
         .help(action.help)
         .accessibilityLabel(action.help)
         .disabled(action.isDisabled)
@@ -2388,7 +2759,7 @@ public struct IntatisThreadComposer: View {
             Label(IntatisLocalization.string("Send"), systemImage: "arrow.up")
                 .intatisComposerIconLabel()
         }
-        .intatisCompactIconButton(prominent: true)
+        .intatisComposerIconButton(prominent: true)
         .disabled(!canSend)
         .accessibilityLabel(IntatisLocalization.string("Send"))
         .accessibilityIdentifier("thread.composer.send")
@@ -2410,7 +2781,7 @@ public struct IntatisThreadComposer: View {
                     }
                 }
         }
-        .intatisCompactIconButton(prominent: true)
+        .intatisComposerIconButton(prominent: true)
         .tint(.red)
         .help(action.help)
         .disabled(action.isDisabled)
@@ -2705,11 +3076,11 @@ struct IntatisWorkspaceThreadHeader: View {
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 30, weight: .semibold, design: .serif))
+                .font(IntatisTypography.largeTitle())
                 .foregroundStyle(style.primaryText)
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(IntatisTypography.caption(13, .medium))
                     .foregroundStyle(style.secondaryText)
                     .lineLimit(2)
             }
@@ -2757,12 +3128,12 @@ struct IntatisWorkspaceThreadHeader: View {
     ) -> some View {
         if action.isIconOnly {
             Image(systemName: action.systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .font(IntatisTypography.body(13, .semibold))
                 .frame(width: 16, height: 16)
                 .accessibilityLabel(action.title)
         } else {
             Label(action.title, systemImage: action.systemImage)
-                .font(.system(size: 13, weight: .semibold))
+                .font(IntatisTypography.body(13, .semibold))
         }
     }
 }

@@ -8,6 +8,7 @@ import IntatisPermission
 import IntatisAgentKernel
 import IntatisCowork
 import IntatisSkills
+import IntatisArtifacts
 
 enum REPLExit { case quit; case switchTo(Mode) }
 
@@ -17,7 +18,7 @@ private enum S {
 }
 
 private func banner(mode: Mode, model: String, host: String) {
-    out("\n\(S.bold)Mopelium\(S.reset) \(S.dim)·\(S.reset) \(S.cyan)\(mode.rawValue)\(S.reset) \(S.dim)· \(model) · \(host)\(S.reset)\n")
+    out("\n\(S.bold)Intatis\(S.reset) \(S.dim)·\(S.reset) \(S.cyan)\(mode.rawValue)\(S.reset) \(S.dim)· \(model) · \(host)\(S.reset)\n")
     out("\(S.dim)/help for commands · /mode to switch · /exit to quit\(S.reset)\n")
 }
 
@@ -66,6 +67,31 @@ private func coworkSessionLog(workspace: URL) throws -> EventLog {
         fileURL: directory.appendingPathComponent("events.jsonl"))
 }
 
+private func sessionArtifactStore(_ log: EventLog) throws -> ArtifactStore {
+    try ArtifactStore(
+        root: log.sessionDirectoryURL
+            .appendingPathComponent(
+                "artifacts",
+                isDirectory: true))
+}
+
+private func preserveAgentImages(
+    _ images: [PendingImageAttachment],
+    in store: ArtifactStore
+) async throws -> [ArtifactID] {
+    var ids: [ArtifactID] = []
+    ids.reserveCapacity(images.count)
+    for image in images {
+        try Task.checkCancellation()
+        let ref = try await store.addAttachment(
+            name: image.name,
+            data: image.data,
+            mime: image.mime)
+        ids.append(ref.id)
+    }
+    return ids
+}
+
 /// Top-level mode driver: runs the current mode's REPL and relaunches when a
 /// `/mode` command asks to switch (so chat ⇄ code ⇄ cowork is live).
 func runMode(_ config: CLIConfig, mode startMode: Mode, workspace: URL) async throws {
@@ -105,15 +131,29 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
     let registry = ProviderRegistry(
         config: config.providerConfig(),
         resolver: CLIExactSecretResolver(config: config))
+    let knowledgeConfigurationNotice = mode == .code
+        ? cliKnowledgeToolsConfigurationNotice(config: config)
+        : nil
+    let knowledgeAugmenter = mode == .code
+        ? makeCLIKnowledgeToolAugmenter(
+            config: config,
+            registry: registry)
+        : nil
     var model = config.model
     var reasoning = config.reasoningEffort
     var pending = PendingAttachments()
     var log = try sessionLog()
+    var codeArtifactStore =
+        mode == .code
+            ? try sessionArtifactStore(log)
+            : nil
     var codeMCPHost =
         mode == .code
             ? MCPCLIInteractiveCodeHost(
                 log: log,
-                workspace: workspace)
+                workspace: workspace,
+                additionalCapabilities:
+                    knowledgeAugmenter?.additionalCapabilities ?? [])
             : nil
     if let codeMCPHost {
         _ = try await codeMCPHost
@@ -122,7 +162,6 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
     let spinner = TurnSpinner()
     let editor = LineEditor()
     let options = RenderOptions()
-    let browserSession = ProcessBrowserSessionManager()
     let terminal = ProcessTerminalSessionManager()
     var render = Task { await renderLoop(log, spinner: spinner, options: options) }
     defer { render.cancel(); spinner.stop() }
@@ -133,12 +172,14 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                 reason:
                     "CLI Code session ended")
         }
-        await browserSession.shutdown(reason: "CLI \(mode.rawValue) session ended")
         await terminal.shutdown(reason: "CLI \(mode.rawValue) session ended")
         return exit
     }
 
     banner(mode: mode, model: model, host: config.selectedRouteLabel)
+    if let knowledgeConfigurationNotice {
+        out("\(S.yellow)\(knowledgeConfigurationNotice)\(S.reset)\n")
+    }
 
     while true {
         if !pending.isEmpty {
@@ -248,11 +289,17 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                             "CLI Code /clear replaced the exact session")
                 }
                 log = try sessionLog()
+                codeArtifactStore =
+                    mode == .code
+                        ? try sessionArtifactStore(log)
+                        : nil
                 codeMCPHost =
                     mode == .code
                         ? MCPCLIInteractiveCodeHost(
                             log: log,
-                            workspace: workspace)
+                            workspace: workspace,
+                            additionalCapabilities:
+                                knowledgeAugmenter?.additionalCapabilities ?? [])
                         : nil
                 render.cancel()
                 render = Task {
@@ -263,7 +310,12 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                 }
                 out("(new session)\n")
             case "config":
-                out("\(config.selectedRouteLabel) · endpoint hidden · model \(model) · reasoning \(reasoning?.rawValue ?? "off")\n")
+                let knowledge = mode == .code
+                    ? (knowledgeAugmenter == nil
+                        ? "knowledge unavailable (\(knowledgeConfigurationNotice ?? "invalid configuration"))"
+                        : "knowledge ready")
+                    : "knowledge not exposed in Chat"
+                out("\(config.selectedRouteLabel) · endpoint hidden · model \(model) · reasoning \(reasoning?.rawValue ?? "off") · \(knowledge)\n")
             default:
                 out("unknown command /\(cmd) — /help\n")
             }
@@ -274,7 +326,6 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
         var sendText = text
         for file in pending.textFiles { sendText += "\n\n[attached file: \(file.name)]\n\(file.content)" }
         let sendImages = pending.images
-        pending.clear()
 
         spinner.start()
         do {
@@ -289,8 +340,27 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                     reasoningEffort: reasoning,
                     includeUsage: config.includeUsage,
                     webSearch: route.webSearch)
-                    .send(sendText, images: sendImages)
+                    .send(
+                        sendText,
+                        images: sendImages.map(
+                            \.providerAttachment))
             case .code:
+                guard let codeArtifactStore else {
+                    throw IntatisError.config(
+                        "CLI Code artifact storage is unavailable.")
+                }
+                let attachmentIDs = try await preserveAgentImages(
+                    sendImages,
+                    in: codeArtifactStore)
+                let userMessage = UserMessagePayload(
+                    text: sendText,
+                    attachments: attachmentIDs.isEmpty
+                        ? nil
+                        : attachmentIDs,
+                    submissionID: SubmissionID.new(),
+                    turnID: TurnID.new())
+                let imageResolver = AgentImageResolution.resolver(
+                    store: codeArtifactStore)
                 let mcpActivation:
                     MCPCLIInteractiveCodeActivation?
                 if let codeMCPHost {
@@ -319,9 +389,36 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         workspaceRoot: workspace,
                         model: route.model,
                         profile: .reviewed)
-                    let baseRegistry = skillSnapshot.augmenting(
+                    let hostedWebSearch = codeMCPSession
+                        .capabilityLease.tools.contains(.hostedWebSearch)
+                        ? route.hostedWebSearch.map {
+                            ProviderHostedWebSearchToolService(route: $0)
+                        }
+                        : nil
+                    let unaugmentedRegistry = skillSnapshot.augmenting(
                         ToolRegistry.standard(
-                            includesTerminal: true))
+                            includesTerminal: true,
+                            hostedWebSearch: hostedWebSearch))
+                    let knowledgeLease:
+                        HostToolRegistryAugmentationLease?
+                    let baseRegistry: ToolRegistry
+                    if let knowledgeAugmenter {
+                        let lease = try await knowledgeAugmenter.augment(
+                            HostToolRegistryAugmentationInput(
+                                sessionID: codeMCPSession.sessionID,
+                                agentID: codeMCPSession.agentID,
+                                taskID: nil,
+                                capabilityLease:
+                                    codeMCPSession.capabilityLease,
+                                workspaceLease:
+                                    codeMCPSession.workspaceLease,
+                                baseRegistry: unaugmentedRegistry))
+                        knowledgeLease = lease
+                        baseRegistry = lease.registry
+                    } else {
+                        knowledgeLease = nil
+                        baseRegistry = unaugmentedRegistry
+                    }
                     let runtime = AgentRuntime.code(
                         registry: baseRegistry,
                         allowsShell: true,
@@ -340,11 +437,11 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         context: ContextBuilder(
                             skillSnapshot: skillSnapshot,
                             runtimeEnvironment: .code),
-                        browserSession: browserSession,
                         terminal: terminal,
                         imageGenerator:
                             ProviderImageGenerationToolService(
                                 registry: registry),
+                        imageResolver: imageResolver,
                         sessionNaming:
                             EventLogSessionNamingService(
                                 log: log,
@@ -379,9 +476,19 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                                     consentConfirmation:
                                         nil)
                         })
-                    _ = try await loop.send(
-                        sendText,
-                        images: sendImages)
+                    do {
+                        _ = try await loop.send(
+                            sendText,
+                            userMessage: userMessage)
+                    } catch let runError {
+                        if let knowledgeLease {
+                            try await knowledgeLease.closeRequiringDrain()
+                        }
+                        throw runError
+                    }
+                    if let knowledgeLease {
+                        try await knowledgeLease.closeRequiringDrain()
+                    }
                 } else {
                     let agent = Agent(
                         name:
@@ -389,13 +496,57 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         workspaceRoot: workspace,
                         model: route.model,
                         profile: .reviewed)
+                    let logSessionID = await log.sessionID
+                    var capabilityLease =
+                        CapabilityLease.worker(
+                            workspaceAccess: .readWrite)
+                    capabilityLease.id = CapabilityLeaseID(
+                        rawValue:
+                            "clease_cli_code_\(logSessionID.rawValue)")
+                    capabilityLease.expiresAtTaskCompletion = false
+                    if let knowledgeAugmenter {
+                        capabilityLease.tools.formUnion(
+                            knowledgeAugmenter.additionalCapabilities)
+                    }
                     let workspaceLease =
                         WorkspaceLease(
+                            id: WorkspaceLeaseID(
+                                rawValue:
+                                    "wlease_cli_code_\(logSessionID.rawValue)"),
+                            workspaceID: WorkspaceID(
+                                rawValue:
+                                    "workspace_cli_code_\(logSessionID.rawValue)"),
                             rootPath: workspace.path,
-                            access: .readWrite)
-                    let baseRegistry = skillSnapshot.augmenting(
+                            access: .readWrite,
+                            expiresAtTaskCompletion: false)
+                    let hostedWebSearch = capabilityLease.tools.contains(
+                        .hostedWebSearch)
+                        ? route.hostedWebSearch.map {
+                            ProviderHostedWebSearchToolService(route: $0)
+                        }
+                        : nil
+                    let unaugmentedRegistry = skillSnapshot.augmenting(
                         ToolRegistry.standard(
-                            includesTerminal: true))
+                            includesTerminal: true,
+                            hostedWebSearch: hostedWebSearch))
+                    let knowledgeLease:
+                        HostToolRegistryAugmentationLease?
+                    let baseRegistry: ToolRegistry
+                    if let knowledgeAugmenter {
+                        let lease = try await knowledgeAugmenter.augment(
+                            HostToolRegistryAugmentationInput(
+                                sessionID: logSessionID,
+                                agentID: agent.name,
+                                taskID: nil,
+                                capabilityLease: capabilityLease,
+                                workspaceLease: workspaceLease,
+                                baseRegistry: unaugmentedRegistry))
+                        knowledgeLease = lease
+                        baseRegistry = lease.registry
+                    } else {
+                        knowledgeLease = nil
+                        baseRegistry = unaugmentedRegistry
+                    }
                     let runtime = AgentRuntime.code(
                         registry: baseRegistry,
                         allowsShell: true,
@@ -404,7 +555,7 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         maxIterations: config.maxSteps,
                         modelContextPolicy:
                             route.modelContextPolicy)
-                    _ = try await runtime.makeLoop(
+                    let loop = runtime.makeLoop(
                         log: log,
                         provider: route.provider,
                         responder: TerminalResponder(),
@@ -412,24 +563,37 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         context: ContextBuilder(
                             skillSnapshot: skillSnapshot,
                             runtimeEnvironment: .code),
-                        browserSession: browserSession,
                         terminal: terminal,
                         imageGenerator:
                             ProviderImageGenerationToolService(
                                 registry: registry),
+                        imageResolver: imageResolver,
                         sessionNaming:
                             EventLogSessionNamingService(
                                 log: log,
                                 kind: .code),
+                        capabilityLease:
+                            capabilityLease,
                         workspaceLease:
                             workspaceLease)
-                        .send(
+                    do {
+                        _ = try await loop.send(
                             sendText,
-                            images: sendImages)
+                            userMessage: userMessage)
+                    } catch let runError {
+                        if let knowledgeLease {
+                            try await knowledgeLease.closeRequiringDrain()
+                        }
+                        throw runError
+                    }
+                    if let knowledgeLease {
+                        try await knowledgeLease.closeRequiringDrain()
+                    }
                 }
             case .cowork:
                 break
             }
+            pending.clear()
         } catch {
             errOut("error: \(error.localizedDescription)\n")
         }
@@ -475,10 +639,17 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         config: config.providerConfig(),
         resolver: CLIExactSecretResolver(config: config),
         inferenceCatalogSnapshot: inferenceProfiles.snapshot)
+    let knowledgeConfigurationNotice =
+        cliKnowledgeToolsConfigurationNotice(config: config)
+    let knowledgeAugmenter = makeCLIKnowledgeToolAugmenter(
+        config: config,
+        registry: registry)
     var defaultProfile = inferenceProfiles.defaultBinding
-    let controlPlaneInference = CLIControlPlaneInferenceBinding()
+    let permissionReviewerBinding = inferenceProfiles.permissionReviewerBinding
+    let goalVerifierInference = CLIGoalVerifierInferenceBinding()
     var pending = PendingAttachments()
     let log = try coworkSessionLog(workspace: workspace)
+    let artifactStore = try sessionArtifactStore(log)
     let coworkMCPHost =
         MCPCLIInteractiveCoworkHost(
             log: log,
@@ -506,6 +677,8 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         },
         requiresInferenceBindings: true,
         imageGeneratorFor: { _ in ProviderImageGenerationToolService(registry: registry) },
+        imageResolver: AgentImageResolution.resolver(
+            store: artifactStore),
         toolSnapshotProvider: {
             agent,
             capabilityLease,
@@ -539,6 +712,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
                     outputBudget,
                 consentConfirmation: nil)
         },
+        internalToolRegistryAugmenter: knowledgeAugmenter,
         sessionNaming: EventLogSessionNamingService(log: log, kind: .cowork),
         resolvedInferenceFor: { agent in
             guard let binding = agent.agentInferenceBinding else {
@@ -590,22 +764,24 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         }
     }
 
-    /// The first exact, resolvable @main binding owns both no-tools control
-    /// planes for this CLI process. A later data-plane rebind cannot retarget a
-    /// running reviewer or verifier mid-session.
-    func freezeControlPlaneInferenceIfPossible() async -> AgentInferenceBinding? {
-        if let frozen = await controlPlaneInference.binding() { return frozen }
+    /// Goal verification preserves the compatibility behavior of freezing the
+    /// first exact, resolvable @main binding. Permission review is deliberately
+    /// separate and always uses the config-derived reviewer binding above.
+    func freezeGoalVerifierInferenceIfPossible() async -> AgentInferenceBinding? {
+        if let frozen = await goalVerifierInference.binding() { return frozen }
         guard let binding = await resolvableMainBinding() else { return nil }
-        return await controlPlaneInference.freeze(binding)
+        return await goalVerifierInference.freeze(binding)
     }
 
     func enableAutomaticReview() async -> AutomaticPermissionReviewResult {
-        guard let binding = await freezeControlPlaneInferenceIfPossible() else {
-            return .failed("@main requires an exact, resolvable inference profile before automatic review can start")
+        guard await orchestrator.agentList().contains(where: {
+            $0.name == Orchestrator.mainAgentID
+        }) else {
+            return .failed("@main must be attached before automatic permission review can start")
         }
         return await orchestrator.enableAutomaticPermissionReview(
-            model: binding.modelID,
-            agentInferenceBinding: binding,
+            model: permissionReviewerBinding.modelID,
+            agentInferenceBinding: permissionReviewerBinding,
             workspaceRoot: workspace)
     }
 
@@ -615,13 +791,9 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
     var mainAttached: Bool
     let autoReviewResult: AutomaticPermissionReviewResult
     var mainBootstrapError: String? = nil
-    if let restoredMain = currentProjection.agentRoster[Orchestrator.mainAgentID] {
+    if currentProjection.agentRoster[Orchestrator.mainAgentID] != nil {
         mainAttached = true
-        if restoredMain.agentInferenceBinding == nil {
-            autoReviewResult = .failed("legacy @main has no exact inference profile; use /agent rebind main <profile-id>")
-        } else {
-            autoReviewResult = await enableAutomaticReview()
-        }
+        autoReviewResult = await enableAutomaticReview()
     } else if restoredEvents.isEmpty {
         // The workspace passed to `intatis cowork` is the user's explicit
         // initial-session authorization. Settings and both local identities
@@ -645,7 +817,9 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
             agentInferenceBinding: defaultProfile,
             profile: .reviewed,
             coordinationDepth: Agent.defaultCoordinationDepth),
-            settings: freshSettings) {
+            settings: freshSettings,
+            permissionReviewerModel: permissionReviewerBinding.modelID,
+            permissionReviewerInferenceBinding: permissionReviewerBinding) {
         case .attached, .alreadyAttached:
             mainAttached = true
             sessionSettings = freshSettings
@@ -666,6 +840,11 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         mainBootstrapError = "recovered session has no @main; use /agent restore-main <path> <profile-id>"
         autoReviewResult = .failed(
             "recovered session has no @main; explicitly restore it before automatic review can start")
+    }
+    // Preserve the Goal verifier's historical first-main freeze without
+    // coupling the independently configured reviewer to that binding.
+    if mainAttached {
+        _ = await freezeGoalVerifierInferenceIfPossible()
     }
 
     func persistDefaultProfile(_ binding: AgentInferenceBinding) async -> Bool {
@@ -708,8 +887,11 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         mode: .cowork,
         model: defaultProfile.modelID.rawValue,
         host: "profile \(defaultProfile.inferenceProfileID.rawValue)")
-    let startupControlPlaneProfileID = await controlPlaneInference.binding()?
-        .inferenceProfileID.rawValue ?? "unresolved"
+    if let knowledgeConfigurationNotice {
+        out("\(S.yellow)\(knowledgeConfigurationNotice)\(S.reset)\n")
+    }
+    let startupPermissionReviewerProfileID =
+        permissionReviewerBinding.inferenceProfileID.rawValue
     var automaticReviewRequired = true
     var automaticReviewReady = false
     switch autoReviewResult {
@@ -718,7 +900,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         if case .some(.degraded(let reason)) = await orchestrator.automaticPermissionReviewHealth() {
             out("\(S.yellow)automatic permission review is degraded but active (@\(id.rawValue)): \(reason)\(S.reset)\n")
         } else {
-            out("\(S.dim)automatic permission review is on (@\(id.rawValue), exact profile \(startupControlPlaneProfileID)); reviewer errors deny only the current tool call.\(S.reset)\n")
+            out("\(S.dim)automatic permission review is on (@\(id.rawValue), exact profile \(startupPermissionReviewerProfileID)); reviewer errors deny only the current tool call.\(S.reset)\n")
         }
     case .alreadyEnabled(let id):
         automaticReviewReady = true
@@ -742,14 +924,14 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         log: log,
         orchestrator: orchestrator,
         verifierProvider: {
-            guard let binding = await controlPlaneInference.binding() else {
+            guard let binding = await goalVerifierInference.binding() else {
                 throw InferenceCatalogError.unresolvedProfile
             }
             return try await registry.agentInference(for: binding).provider
         },
         verifierModel: {
-            await controlPlaneInference.binding()?.modelID
-                ?? ModelID(rawValue: "unresolved-control-plane-profile")
+            await goalVerifierInference.binding()?.modelID
+                ?? ModelID(rawValue: "unresolved-goal-verifier-profile")
         })
     var goalRuntimeStarted = false
     var dataPlaneStartedForNewTasks = false
@@ -760,7 +942,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
             errOut("@main is not attached; a durable Goal cannot run\n")
             return false
         }
-        guard await freezeControlPlaneInferenceIfPossible() != nil else {
+        guard await freezeGoalVerifierInferenceIfPossible() != nil else {
             errOut("@main has no exact, resolvable inference profile; use /profiles then /agent rebind main <profile-id>\n")
             return false
         }
@@ -874,7 +1056,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         case "clear":
             guard await ensureGoalRuntimeStarted() else { return }
             do {
-                try await goalRuntime.clearCurrentGoal(reason: "Cleared from Mopelium CLI")
+                try await goalRuntime.clearCurrentGoal(reason: "Cleared from Intatis CLI")
                 out("current Goal cleared\n")
             } catch {
                 errOut("Goal not cleared: \(error.localizedDescription)\n")
@@ -943,7 +1125,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
                 if !profileID.isEmpty {
                     if let selected = option(profileID: profileID) {
                         if await persistDefaultProfile(selected.binding) {
-                            out("default profile for future agents → \(safeProfileDescription(defaultProfile)); control planes remain frozen\n")
+                            out("default profile for future agents → \(safeProfileDescription(defaultProfile)); configured reviewer and any frozen Goal verifier are unchanged\n")
                         }
                     } else {
                         out("unknown profile '\(profileID)' — use /profiles\n")
@@ -995,7 +1177,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
                     out("default future-agent profile: \(safeProfileDescription(defaultProfile))\n")
                 } else if parts.count == 2, let selected = option(profileID: parts[1]) {
                     if await persistDefaultProfile(selected.binding) {
-                        out("default profile for future agents → \(safeProfileDescription(defaultProfile)); existing agents and control planes are unchanged\n")
+                        out("default profile for future agents → \(safeProfileDescription(defaultProfile)); existing agents, configured reviewer, and any frozen Goal verifier are unchanged\n")
                     }
                 } else if parts.count == 2 {
                     out("unknown profile '\(unbracket(parts[1]))' — use /profiles\n")
@@ -1036,9 +1218,7 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
                     if case .some(.degraded(let reason)) = await orchestrator.automaticPermissionReviewHealth() {
                         out("automatic permission review is degraded but active (@\(id.rawValue)): \(reason)\n")
                     } else {
-                        let frozenID = await controlPlaneInference.binding()?.inferenceProfileID.rawValue
-                            ?? "unresolved"
-                        out("automatic permission review → on (@\(id.rawValue), exact profile \(frozenID))\n")
+                        out("automatic permission review → on (@\(id.rawValue), exact profile \(permissionReviewerBinding.inferenceProfileID.rawValue))\n")
                     }
                 case .alreadyEnabled(let id):
                     automaticReviewRequired = true
@@ -1136,8 +1316,8 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
                     case .attached, .alreadyAttached:
                         mainAttached = true
                         mainBootstrapError = nil
-                        _ = await freezeControlPlaneInferenceIfPossible()
-                        out("restored @main · \(safeProfileDescription(selected.binding)) · \(url.path); use /auto to start the frozen automatic reviewer\n")
+                        _ = await freezeGoalVerifierInferenceIfPossible()
+                        out("restored @main · \(safeProfileDescription(selected.binding)) · \(url.path); use /auto to start the configured automatic reviewer\n")
                     case .failed(let message):
                         out("@main was not restored · \(url.path) · \(message)\n")
                     }
@@ -1194,11 +1374,11 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
                         binding: selected.binding,
                         hostAuthorized: true) {
                     case .rebound(let agentID, let binding):
-                        _ = await freezeControlPlaneInferenceIfPossible()
+                        _ = await freezeGoalVerifierInferenceIfPossible()
                         out("rebound @\(agentID.rawValue) → \(safeProfileDescription(binding))\n")
                         if agentID == Orchestrator.mainAgentID, !automaticReviewReady,
                            automaticReviewRequired {
-                            out("@main is exactly bound; use /auto to start the frozen automatic reviewer\n")
+                            out("@main is exactly bound; use /auto to start the configured automatic reviewer\n")
                         }
                     case .unchanged(let agentID, let binding):
                         out("@\(agentID.rawValue) already uses \(safeProfileDescription(binding))\n")
@@ -1247,23 +1427,49 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
             continue
         }
         guard await ensureGoalRuntimeStarted() else { continue }
-        let explicitGoalIntent = ExplicitGoalIntentClassifier
-            .classify(message)
-            .isExplicit
         for file in pending.textFiles { message += "\n\n[attached file: \(file.name)]\n\(file.content)" }
+        let mainInferenceBinding: AgentInferenceBinding?
+        if target == Orchestrator.mainAgentID {
+            guard let binding = await resolvableMainBinding() else {
+                errOut(
+                    "@main has no exact, resolvable inference profile; rebind it before sending\n")
+                continue
+            }
+            mainInferenceBinding = binding
+        } else {
+            mainInferenceBinding = nil
+        }
         let images = pending.images
-        pending.clear()
+        let attachmentIDs: [ArtifactID]
+        do {
+            attachmentIDs = try await preserveAgentImages(
+                images,
+                in: artifactStore)
+        } catch {
+            errOut(
+                "attachments could not be preserved: \(error.localizedDescription)\n")
+            continue
+        }
         spinner.start()
-        _ = await goalRuntime.sendUserTurn(
+        let sendResult = await goalRuntime.sendUserTurn(
             message,
             to: target,
-            images: images,
             userMessage: UserMessagePayload(
                 text: message,
+                attachments: attachmentIDs.isEmpty
+                    ? nil
+                    : attachmentIDs,
                 to: target,
                 tags: parsedInput.tags.isEmpty ? nil : parsedInput.tags,
-                goal: parsedInput.goal),
-            explicitGoalIntent: explicitGoalIntent)
+                goal: parsedInput.goal,
+                submissionID: SubmissionID.new(),
+                mainAgentInferenceBinding: mainInferenceBinding,
+                turnID: TurnID.new()))
         spinner.stop()
+        if let error = sendResult.errorMessage {
+            errOut("error: \(error)\n")
+        } else {
+            pending.clear()
+        }
     }
 }

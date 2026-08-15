@@ -93,6 +93,32 @@ private struct UntrustedStaleWorkTaskManager: WorkTaskManager {
     }
 }
 
+private struct NamespaceWorkTaskManager: WorkTaskManager {
+    let detail: WorkTaskDetail
+
+    func createWorkTask(_ request: WorkTaskCreateRequest) async throws -> WorkTaskDetail {
+        detail
+    }
+
+    func updateWorkTask(_ request: WorkTaskUpdateRequest) async throws -> WorkTaskDetail {
+        guard request.taskID == detail.task.id else {
+            throw IntatisError.notFound("WorkTask \(request.taskID.rawValue)")
+        }
+        return detail
+    }
+
+    func getWorkTask(_ taskID: WorkTaskID) async throws -> WorkTaskDetail {
+        guard taskID == detail.task.id else {
+            throw IntatisError.notFound("WorkTask \(taskID.rawValue)")
+        }
+        return detail
+    }
+
+    func listWorkTasks(_ request: WorkTaskListRequest) async throws -> [WorkTaskDetail] {
+        [detail]
+    }
+}
+
 private enum WorkTaskRuntimeTestError: Error, Equatable {
     case lostAcknowledgementAfterAppend
 }
@@ -141,6 +167,156 @@ final class WorkTaskRuntimeTests: XCTestCase {
         return (orchestrator, log)
     }
 
+    func testTaskCreateDescriptorIsSessionScopedAndHasNoOwnerField() throws {
+        let descriptor = TaskCreateTool.descriptor
+        XCTAssertTrue(descriptor.description.contains("current Cowork Session"))
+
+        guard case .object(let schema) = descriptor.parameters,
+              case .object(let properties)? = schema["properties"],
+              case .object(let dependencies)? = properties["depends_on"],
+              case .string(let dependencyDescription)? = dependencies["description"],
+              case .array(let rawRequired)? = schema["required"] else {
+            return XCTFail("task_create must expose a documented closed object schema")
+        }
+
+        let required = Set(rawRequired.compactMap { value -> String? in
+            guard case .string(let name) = value else { return nil }
+            return name
+        })
+        XCTAssertNil(properties["owner"])
+        XCTAssertFalse(required.contains("owner"))
+        XCTAssertTrue(dependencyDescription.contains("earlier successful task_create"))
+        XCTAssertTrue(dependencyDescription.contains("same assistant response"))
+    }
+
+    func testMutatingWorkTaskToolsRejectMissingHostManagerAsNotStarted() async throws {
+        let workspace = try workTaskWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let context = ToolContext(workspaceRoot: workspace)
+
+        do {
+            _ = try await TaskCreateTool().execute(
+                ToolArgs(raw: #"{"title":"No manager","description":"Must fail closed"}"#),
+                in: context)
+            XCTFail("task_create must not report success without its host manager")
+        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
+            XCTAssertEqual(rejection.code, "work_task_manager_unavailable")
+            XCTAssertTrue(rejection.message.contains("task_create rejected before WorkTask execution started"))
+        }
+
+        do {
+            _ = try await TaskUpdateTool().execute(
+                ToolArgs(raw: #"{"task_id":"wt_missing","expected_revision":1,"progress_note":"No manager"}"#),
+                in: context)
+            XCTFail("task_update must not report success without its host manager")
+        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
+            XCTAssertEqual(rejection.code, "work_task_manager_unavailable")
+            XCTAssertTrue(rejection.message.contains("task_update rejected before WorkTask execution started"))
+        }
+
+        do {
+            _ = try await BoundWorkTaskUpdateTool().execute(
+                ToolArgs(raw: #"{"task_id":"wt_missing","expected_revision":1,"progress_note":"No manager"}"#),
+                in: context)
+            XCTFail("worker task_update must not report success without its host manager")
+        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
+            XCTAssertEqual(rejection.code, "work_task_manager_unavailable")
+            XCTAssertTrue(rejection.message.contains("task_update rejected before WorkTask execution started"))
+        }
+    }
+
+    func testWorkTaskPermissionPreviewsExposeBoundedSemanticFields() throws {
+        let secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+        let createArgs = ToolArgs(raw: """
+        {
+          "title": "Create \(secret)",
+          "description": "\(String(repeating: "x", count: 1_000))",
+          "acceptance_criteria": ["tests pass"],
+          "expected_artifacts": ["report"],
+          "depends_on": ["wt_dependency"],
+          "priority": "high"
+        }
+        """)
+        let createPreview = try XCTUnwrap(
+            TaskCreateTool().permissionActionPreview(createArgs))
+
+        XCTAssertEqual(createPreview.kind, "task_create")
+        XCTAssertNil(createPreview.fields["owner"])
+        XCTAssertEqual(createPreview.fields["depends_on"], "wt_dependency")
+        XCTAssertTrue(createPreview.redacted)
+        XCTAssertTrue(createPreview.truncated)
+        XCTAssertFalse(createPreview.fields.values.joined().contains(secret))
+
+        let updateArgs = ToolArgs(raw: """
+        {
+          "task_id": "wt_exact",
+          "expected_revision": 7,
+          "status": "completed",
+          "progress_note": "verified",
+          "result": "done",
+          "evidence": [{
+            "kind": "test",
+            "reference": "suite",
+            "summary": "passed"
+          }],
+          "retry": false
+        }
+        """)
+        let updatePreview = try XCTUnwrap(
+            TaskUpdateTool().permissionActionPreview(updateArgs))
+
+        XCTAssertEqual(updatePreview.kind, "task_update")
+        XCTAssertEqual(updatePreview.fields["task_id"], "wt_exact")
+        XCTAssertEqual(updatePreview.fields["expected_revision"], "7")
+        XCTAssertEqual(updatePreview.fields["status"], "completed")
+        XCTAssertEqual(updatePreview.fields["evidence_count"], "1")
+        XCTAssertTrue(updatePreview.fields["changed_fields"]?.contains("progress_note") == true)
+        XCTAssertTrue(updatePreview.fields["changed_fields"]?.contains("evidence") == true)
+    }
+
+    func testWorkTaskToolsExplainAgentInvocationNamespaceOnNotFound() async throws {
+        let workspace = try workTaskWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let currentID = WorkTaskID(rawValue: "wt_current")
+        let detail = WorkTaskDetail(task: WorkTask(
+            id: currentID,
+            title: "Current task",
+            description: "Uses the current WorkTask namespace",
+            status: .inProgress,
+            revision: 4))
+        let context = ToolContext(
+            workspaceRoot: workspace,
+            workTaskManager: NamespaceWorkTaskManager(detail: detail))
+
+        let currentGet = try await TaskGetTool().execute(
+            ToolArgs(raw: #"{"task_id":"wt_current"}"#),
+            in: context)
+        XCTAssertTrue(currentGet.text.contains("wt_current"))
+        _ = try await TaskUpdateTool().execute(
+            ToolArgs(raw: #"{"task_id":"wt_current","expected_revision":4,"progress_note":"still supported"}"#),
+            in: context)
+
+        do {
+            _ = try await TaskGetTool().execute(
+                ToolArgs(raw: #"{"task_id":"task_invocation_only"}"#),
+                in: context)
+            XCTFail("A missing AgentInvocation ID must receive the namespace hint.")
+        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
+            XCTAssertEqual(rejection.code, "work_task_id_required")
+            XCTAssertTrue(rejection.message.contains("AgentInvocation TaskID"))
+            XCTAssertTrue(rejection.message.contains("wt_"))
+        }
+
+        do {
+            _ = try await TaskUpdateTool().execute(
+                ToolArgs(raw: #"{"task_id":"task_invocation_only","expected_revision":1,"status":"completed","result":"wrong namespace"}"#),
+                in: context)
+            XCTFail("A missing AgentInvocation ID update must be proven no-effect.")
+        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
+            XCTAssertEqual(rejection.code, "work_task_id_required")
+        }
+    }
+
     func testTaskUpdateToolDoesNotInventNoEffectForArbitraryManager() async throws {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -165,11 +341,7 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, _) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Authoritative stale boundary",
@@ -178,12 +350,9 @@ final class WorkTaskRuntimeTests: XCTestCase {
 
         let manager = OrchestratorWorkTaskManager(
             orchestrator: orchestrator,
-            requester: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
-            canUpdateOwned: false)
+            canUpdateBound: false)
         let context = ToolContext(
             workspaceRoot: workspace,
             workTaskManager: manager)
@@ -200,50 +369,37 @@ final class WorkTaskRuntimeTests: XCTestCase {
         }
 
         let unchanged = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: created.task.id)
         XCTAssertEqual(unchanged.task, created.task)
     }
 
-    func testWorkerCanCompleteOwnedTaskWhenSnapshotRepeatsFrozenContractFields() async throws {
+    func testWorkerCanCompleteBoundTaskWhenSnapshotRepeatsFrozenContractFields() async throws {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, _) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Count workspace files",
                 description: "Return a verified count by extension",
                 acceptanceCriteria: ["count every regular file"],
                 expectedArtifacts: ["file-count summary"],
-                owner: worker,
                 priority: .normal))
         let started = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: created.task.id,
                 expectedRevision: created.task.revision,
                 status: .inProgress))
         let manager = OrchestratorWorkTaskManager(
             orchestrator: orchestrator,
-            requester: worker,
             currentWorkTaskID: started.task.id,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: false,
-            canUpdateOwned: true)
+            canUpdateBound: true)
         let context = ToolContext(
             workspaceRoot: workspace,
             workTaskManager: manager)
@@ -255,7 +411,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
           "description": "Return a verified count by extension",
           "acceptance_criteria": ["count every regular file"],
           "expected_artifacts": ["file-count summary"],
-          "owner": "worker",
           "depends_on": [],
           "priority": "normal",
           "progress_note": "count reconciled",
@@ -275,10 +430,7 @@ final class WorkTaskRuntimeTests: XCTestCase {
             in: context)
 
         let completed = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: started.task.id)
         XCTAssertEqual(completed.task.status, .completed)
@@ -287,7 +439,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertEqual(completed.task.description, started.task.description)
         XCTAssertEqual(completed.task.acceptanceCriteria, started.task.acceptanceCriteria)
         XCTAssertEqual(completed.task.expectedArtifacts, started.task.expectedArtifacts)
-        XCTAssertEqual(completed.task.owner, worker)
         XCTAssertEqual(completed.task.dependsOn, [])
         XCTAssertEqual(completed.task.priority, .normal)
         XCTAssertEqual(completed.task.revision, started.task.revision + 1)
@@ -297,44 +448,34 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
-                title: "Frozen ownership",
-                description: "Keep the worker binding stable",
-                owner: worker))
+                title: "Frozen contract",
+                description: "Keep the execution contract stable"))
         let started = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: created.task.id,
                 expectedRevision: created.task.revision,
                 status: .inProgress))
         let manager = OrchestratorWorkTaskManager(
             orchestrator: orchestrator,
-            requester: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
-            canUpdateOwned: true)
+            canUpdateBound: true)
         let beforeEvents = await log.replay()
 
         do {
             _ = try await manager.updateWorkTask(WorkTaskUpdateRequest(
                 taskID: started.task.id,
                 expectedRevision: started.task.revision,
-                owner: .agent(main),
+                title: "Changed frozen title",
                 status: .completed,
                 result: "must not commit"))
-            XCTFail("changing a frozen owner must be rejected")
+            XCTFail("changing a frozen contract field must be rejected")
         } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
             XCTAssertEqual(rejection.code, "permission_denied")
             XCTAssertTrue(rejection.message.contains("without applying changes"))
@@ -344,10 +485,7 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let afterEvents = await log.replay()
         XCTAssertEqual(afterEvents, beforeEvents)
         let unchanged = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: started.task.id)
         XCTAssertEqual(unchanged.task, started.task)
@@ -357,11 +495,7 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Lost acknowledgement",
@@ -372,12 +506,9 @@ final class WorkTaskRuntimeTests: XCTestCase {
         }
         let manager = OrchestratorWorkTaskManager(
             orchestrator: orchestrator,
-            requester: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
-            canUpdateOwned: true)
+            canUpdateBound: true)
 
         do {
             _ = try await manager.updateWorkTask(WorkTaskUpdateRequest(
@@ -400,11 +531,42 @@ final class WorkTaskRuntimeTests: XCTestCase {
             "durably appended")
     }
 
+    func testCreatePostAppendFailureIsNotMisclassifiedAsNoEffect() async throws {
+        let workspace = try workTaskWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
+        await orchestrator.setAdmissionEventsAppender { events in
+            try await log.append(events)
+            throw WorkTaskRuntimeTestError.lostAcknowledgementAfterAppend
+        }
+        let manager = OrchestratorWorkTaskManager(
+            orchestrator: orchestrator,
+            currentWorkTaskID: nil,
+            canManage: true,
+            canUpdateBound: true)
+
+        do {
+            _ = try await manager.createWorkTask(WorkTaskCreateRequest(
+                title: "Create lost acknowledgement",
+                description: "Persist before returning an error"))
+            XCTFail("the simulated lost acknowledgement must surface")
+        } catch is ToolExecutionRejectedWithoutSideEffect {
+            XCTFail("a create failure after append must remain side-effect-unknown")
+        } catch let error as WorkTaskRuntimeTestError {
+            XCTAssertEqual(error, .lostAcknowledgementAfterAppend)
+        }
+
+        let replayed = CoworkProjection.build(from: await log.replay())
+        let persisted = replayed.workTasks.values.first {
+            $0.title == "Create lost acknowledgement"
+        }
+        XCTAssertNotNil(persisted)
+    }
+
     func testConcurrentCreatesPreserveBothTasksAcrossPersistenceAwait() async throws {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let gate = WorkTaskPersistenceGate()
         await orchestrator.setAdmissionEventsAppender { events in
             if events.contains(where: { event in
@@ -418,9 +580,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
 
         let first = Task {
             try await orchestrator.createWorkTask(
-                requestedBy: self.main,
-                currentRunID: runID,
-                currentGoalID: nil,
                 canManage: true,
                 request: WorkTaskCreateRequest(
                     title: "First concurrent task",
@@ -429,9 +588,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
         await gate.waitUntilEntered()
         let second = Task {
             try await orchestrator.createWorkTask(
-                requestedBy: self.main,
-                currentRunID: runID,
-                currentGoalID: nil,
                 canManage: true,
                 request: WorkTaskCreateRequest(
                     title: "Second concurrent task",
@@ -445,10 +601,7 @@ final class WorkTaskRuntimeTests: XCTestCase {
         _ = try await second.value
 
         let listed = try await orchestrator.listWorkTasks(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskListRequest())
         XCTAssertEqual(Set(listed.map(\.task.title)), [
@@ -457,15 +610,11 @@ final class WorkTaskRuntimeTests: XCTestCase {
         ])
     }
 
-    func testCandidateSettlementAndManualUpdateShareAdmissionRevisionBoundary() async throws {
+    func testInvocationSettlementDoesNotMutateIndependentWorkTask() async throws {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Settlement race",
@@ -486,19 +635,14 @@ final class WorkTaskRuntimeTests: XCTestCase {
         }
         await gate.waitUntilEntered()
         let settling = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: created.task.id)
         let concurrentUpdate = Task {
             try await orchestrator.updateWorkTask(
-                requestedBy: self.main,
                 currentWorkTaskID: nil,
-                currentRunID: runID,
                 canManage: true,
-                canUpdateOwned: false,
+                canUpdateBound: false,
                 request: WorkTaskUpdateRequest(
                     taskID: settling.task.id,
                     expectedRevision: settling.task.revision,
@@ -510,21 +654,13 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertTrue(updateIsSerialized, "manual update must wait for invocation settlement")
         let response = await delegated.value
         XCTAssertTrue(response.contains("candidate output"))
-        do {
-            _ = try await concurrentUpdate.value
-            XCTFail("the update must reject its now-stale revision")
-        } catch let violation as WorkTaskGraphViolation {
-            XCTAssertEqual(violation.kind, .staleRevision)
-        }
+        _ = try await concurrentUpdate.value
 
         let final = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: created.task.id)
-        XCTAssertTrue(final.task.progressNote?.contains("awaiting explicit task settlement") == true)
+        XCTAssertEqual(final.task.progressNote, "manual update racing settlement")
         XCTAssertEqual(final.candidateResults.map(\.result), ["candidate output"])
     }
 
@@ -540,19 +676,12 @@ final class WorkTaskRuntimeTests: XCTestCase {
             profile: .reviewed,
             coordinationDepth: 0))
         XCTAssertTrue(didAttachSecondWorker)
-        let runID = ContinuationRunID.new()
         let firstWork = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Parallel first",
                 description: "Run on one idle worker"))
         let secondWork = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Parallel second",
@@ -598,12 +727,8 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, _) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
 
         let first = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Implement",
@@ -611,9 +736,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertEqual(first.task.status, .ready)
 
         let dependent = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Verify",
@@ -622,21 +744,17 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertEqual(dependent.task.status, .pending)
 
         let started = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: first.task.id,
                 expectedRevision: first.task.revision,
                 status: .inProgress))
         let completed = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: first.task.id,
                 expectedRevision: started.task.revision,
@@ -645,21 +763,16 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertEqual(completed.task.status, .completed)
 
         let unlocked = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: dependent.task.id)
         XCTAssertEqual(unlocked.task.status, .ready)
 
         do {
             _ = try await orchestrator.updateWorkTask(
-                requestedBy: main,
                 currentWorkTaskID: nil,
-                currentRunID: runID,
                 canManage: true,
-                canUpdateOwned: false,
+                canUpdateBound: false,
                 request: WorkTaskUpdateRequest(
                     taskID: dependent.task.id,
                     expectedRevision: dependent.task.revision,
@@ -674,20 +787,13 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
 
         let prerequisite = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Prerequisite",
                 description: "Remain incomplete while the plan changes"))
         let waiting = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Initially waiting",
@@ -696,11 +802,9 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertEqual(waiting.task.status, .pending)
 
         let unblocked = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: waiting.task.id,
                 expectedRevision: waiting.task.revision,
@@ -708,20 +812,15 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertEqual(unblocked.task.status, .ready)
 
         let initiallyReady = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Initially ready",
                 description: "Gain an incomplete dependency"))
         XCTAssertEqual(initiallyReady.task.status, .ready)
         let nowWaiting = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: initiallyReady.task.id,
                 expectedRevision: initiallyReady.task.revision,
@@ -738,25 +837,18 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, _) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Frozen title",
                 description: "Frozen description",
                 acceptanceCriteria: ["frozen criterion"],
                 expectedArtifacts: ["Sources/Frozen.swift"],
-                owner: main,
                 priority: .normal))
         let started = try await orchestrator.updateWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
             canManage: true,
-            canUpdateOwned: false,
+            canUpdateBound: false,
             request: WorkTaskUpdateRequest(
                 taskID: created.task.id,
                 expectedRevision: created.task.revision,
@@ -778,10 +870,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
                 taskID: started.task.id,
                 expectedRevision: started.task.revision,
                 expectedArtifacts: ["Sources/Changed.swift"])),
-            ("owner", WorkTaskUpdateRequest(
-                taskID: started.task.id,
-                expectedRevision: started.task.revision,
-                owner: .agent(worker))),
             ("dependencies", WorkTaskUpdateRequest(
                 taskID: started.task.id,
                 expectedRevision: started.task.revision,
@@ -795,11 +883,9 @@ final class WorkTaskRuntimeTests: XCTestCase {
         for (field, request) in mutations {
             do {
                 _ = try await orchestrator.updateWorkTask(
-                    requestedBy: main,
                     currentWorkTaskID: nil,
-                    currentRunID: runID,
                     canManage: true,
-                    canUpdateOwned: false,
+                    canUpdateBound: false,
                     request: request)
                 XCTFail("in-progress mutation unexpectedly changed \(field)")
             } catch let error as IntatisError {
@@ -813,17 +899,13 @@ final class WorkTaskRuntimeTests: XCTestCase {
         }
 
         let final = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: started.task.id)
         XCTAssertEqual(final.task.title, "Frozen title")
         XCTAssertEqual(final.task.description, "Frozen description")
         XCTAssertEqual(final.task.acceptanceCriteria, ["frozen criterion"])
         XCTAssertEqual(final.task.expectedArtifacts, ["Sources/Frozen.swift"])
-        XCTAssertEqual(final.task.owner, main)
         XCTAssertEqual(final.task.dependsOn, [])
         XCTAssertEqual(final.task.priority, .normal)
         XCTAssertEqual(final.task.revision, started.task.revision)
@@ -833,16 +915,11 @@ final class WorkTaskRuntimeTests: XCTestCase {
         let workspace = try workTaskWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let runID = ContinuationRunID.new()
         let created = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Candidate",
-                description: "Return a candidate result",
-                owner: main))
+                description: "Return a candidate result"))
 
         let response = await orchestrator.delegateTask(
             from: main,
@@ -852,16 +929,13 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertTrue(response.contains("candidate output"))
 
         let detail = try await orchestrator.getWorkTask(
-            requestedBy: main,
             currentWorkTaskID: nil,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             taskID: created.task.id)
         XCTAssertEqual(detail.task.status, .inProgress)
         XCTAssertNil(detail.task.result)
         XCTAssertEqual(detail.candidateResults.map(\.result), ["candidate output"])
-        XCTAssertTrue(detail.task.progressNote?.contains("awaiting explicit task settlement") == true)
+        XCTAssertEqual(detail.task.progressNote, "delegated to @worker")
 
         let events = await log.replay()
         XCTAssertTrue(events.contains {
@@ -873,6 +947,34 @@ final class WorkTaskRuntimeTests: XCTestCase {
             guard case .workTaskCompleted(let payload) = $0.event else { return false }
             return payload.task.id == created.task.id
         })
+    }
+
+    func testDelegationPreflightFailureWritesNoPartialFacts() async throws {
+        let workspace = try workTaskWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
+        let prerequisite = try await orchestrator.createWorkTask(
+            canManage: true,
+            request: WorkTaskCreateRequest(
+                title: "Unfinished prerequisite",
+                description: "Remain incomplete"))
+        let waiting = try await orchestrator.createWorkTask(
+            canManage: true,
+            request: WorkTaskCreateRequest(
+                title: "Waiting task",
+                description: "Must not be admitted early",
+                dependsOn: [prerequisite.task.id]))
+        XCTAssertEqual(waiting.task.status, .pending)
+        let before = await log.replay()
+
+        let response = await orchestrator.delegateTask(
+            from: main,
+            to: worker.rawValue,
+            workTaskID: waiting.task.id)
+
+        XCTAssertTrue(response.contains("not delegatable"))
+        let after = await log.replay()
+        XCTAssertEqual(after, before)
     }
 
     func testOverlappingWriteArtifactsRejectSecondConcurrentInvocation() async throws {
@@ -889,20 +991,13 @@ final class WorkTaskRuntimeTests: XCTestCase {
             profile: .reviewed,
             coordinationDepth: Agent.defaultCoordinationDepth))
         XCTAssertTrue(secondWorkerAttached)
-        let runID = ContinuationRunID.new()
         let first = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "First writer",
                 description: "Edit the feature",
                 expectedArtifacts: ["Sources/Feature"]))
         let second = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Second writer",
@@ -940,20 +1035,13 @@ final class WorkTaskRuntimeTests: XCTestCase {
             profile: .reviewed,
             coordinationDepth: Agent.defaultCoordinationDepth))
         XCTAssertTrue(secondWorkerAttached)
-        let runID = ContinuationRunID.new()
         let globWriter = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Glob writer",
                 description: "Edit Swift sources selected by a glob",
                 expectedArtifacts: ["Sources/**/*.swift"]))
         let otherwiseDisjoint = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: runID,
-            currentGoalID: nil,
             canManage: true,
             request: WorkTaskCreateRequest(
                 title: "Disjoint writer",
@@ -978,244 +1066,10 @@ final class WorkTaskRuntimeTests: XCTestCase {
         XCTAssertTrue(rejected.message.contains(globWriter.task.id.rawValue))
     }
 
-    func testHostCarryForwardClonesDAGTerminatesSourcesReplaysAndIsIdempotent() async throws {
-        let workspace = try workTaskWorkspace()
-        defer { try? FileManager.default.removeItem(at: workspace) }
-        let (orchestrator, log) = try await makeOrchestrator(workspace: workspace)
-        let goalID = GoalID.new()
-        let sourceRunID = ContinuationRunID.new()
-        let targetRunID = ContinuationRunID.new()
-        let sessionID = await log.sessionID
-        let goal = Goal(
-            id: goalID,
-            sessionID: sessionID,
-            objective: "Carry unfinished durable work")
-        try await log.append(.goalCreated(GoalCreatedPayload(goal: goal)))
-        let sourceCreated = ContinuationRun(
-            id: sourceRunID,
-            sessionID: sessionID,
-            goalID: goalID,
-            ordinal: 1)
-        try await log.append(.continuationRunCreated(
-            ContinuationRunCreatedPayload(run: sourceCreated)))
-        let sourceRunning = try sourceCreated.transitioning(to: .running).get()
-        try await log.append(.continuationRunStarted(
-            ContinuationRunStartedPayload(run: sourceRunning)))
-        let sourceCompleted = try sourceRunning.transitioning(to: .completed).get()
-        try await log.append(.continuationRunCompleted(
-            ContinuationRunCompletedPayload(run: sourceCompleted)))
-        let targetCreated = ContinuationRun(
-            id: targetRunID,
-            sessionID: sessionID,
-            goalID: goalID,
-            ordinal: 2)
-        try await log.append(.continuationRunCreated(
-            ContinuationRunCreatedPayload(run: targetCreated)))
-        let targetRunning = try targetCreated.transitioning(to: .running).get()
-        try await log.append(.continuationRunStarted(
-            ContinuationRunStartedPayload(run: targetRunning)))
-
-        let completedDependency = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: sourceRunID,
-            currentGoalID: goalID,
-            canManage: true,
-            request: WorkTaskCreateRequest(
-                title: "Completed prerequisite",
-                description: "Durable work that does not need carrying"))
-        let startedDependency = try await orchestrator.updateWorkTask(
-            requestedBy: main,
-            currentWorkTaskID: nil,
-            currentRunID: sourceRunID,
-            canManage: true,
-            canUpdateOwned: false,
-            request: WorkTaskUpdateRequest(
-                taskID: completedDependency.task.id,
-                expectedRevision: completedDependency.task.revision,
-                status: .inProgress))
-        _ = try await orchestrator.updateWorkTask(
-            requestedBy: main,
-            currentWorkTaskID: nil,
-            currentRunID: sourceRunID,
-            canManage: true,
-            canUpdateOwned: false,
-            request: WorkTaskUpdateRequest(
-                taskID: startedDependency.task.id,
-                expectedRevision: startedDependency.task.revision,
-                status: .completed,
-                result: "prerequisite completed"))
-
-        let rootSource = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: sourceRunID,
-            currentGoalID: goalID,
-            canManage: true,
-            request: WorkTaskCreateRequest(
-                title: "Carry root",
-                description: "Preserve this execution contract",
-                acceptanceCriteria: ["root criterion"],
-                expectedArtifacts: ["Sources/CarryRoot.swift"],
-                dependsOn: [completedDependency.task.id],
-                owner: main,
-                priority: .critical))
-        let delegation = await orchestrator.delegateTask(
-            from: main,
-            to: worker.rawValue,
-            workTaskID: rootSource.task.id)
-        XCTAssertTrue(delegation.contains("candidate output"))
-        let delegatedRoot = try await orchestrator.getWorkTask(
-            requestedBy: main,
-            currentWorkTaskID: nil,
-            currentRunID: sourceRunID,
-            currentGoalID: goalID,
-            canManage: true,
-            taskID: rootSource.task.id)
-        XCTAssertEqual(delegatedRoot.task.status, .inProgress)
-        XCTAssertFalse(delegatedRoot.task.latestInvocationIDs.isEmpty)
-        let enrichedRoot = try await orchestrator.updateWorkTask(
-            requestedBy: main,
-            currentWorkTaskID: nil,
-            currentRunID: sourceRunID,
-            canManage: true,
-            canUpdateOwned: false,
-            request: WorkTaskUpdateRequest(
-                taskID: delegatedRoot.task.id,
-                expectedRevision: delegatedRoot.task.revision,
-                progressNote: "source progress must be cleared",
-                result: "source candidate must be cleared",
-                evidence: [WorkTaskEvidenceInput(
-                    kind: "test",
-                    reference: "source-only",
-                    summary: "source evidence must be cleared")]))
-
-        let dependentSource = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: sourceRunID,
-            currentGoalID: goalID,
-            canManage: true,
-            request: WorkTaskCreateRequest(
-                title: "Carry dependent",
-                description: "Retain the mapped DAG edge",
-                dependsOn: [enrichedRoot.task.id]))
-
-        let cancelledDependency = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: sourceRunID,
-            currentGoalID: goalID,
-            canManage: true,
-            request: WorkTaskCreateRequest(
-                title: "Cancelled prerequisite",
-                description: "Forces a conservative carry blocker"))
-        _ = try await orchestrator.updateWorkTask(
-            requestedBy: main,
-            currentWorkTaskID: nil,
-            currentRunID: sourceRunID,
-            canManage: true,
-            canUpdateOwned: false,
-            request: WorkTaskUpdateRequest(
-                taskID: cancelledDependency.task.id,
-                expectedRevision: cancelledDependency.task.revision,
-                progressNote: "cancelled before continuation",
-                status: .cancelled))
-        let blockedSource = try await orchestrator.createWorkTask(
-            requestedBy: main,
-            currentRunID: sourceRunID,
-            currentGoalID: goalID,
-            canManage: true,
-            request: WorkTaskCreateRequest(
-                title: "Carry blocked",
-                description: "Stay blocked after carry-forward",
-                dependsOn: [cancelledDependency.task.id]))
-        XCTAssertEqual(blockedSource.task.status, .blocked)
-
-        let carried = try await orchestrator.carryForwardNonterminalWorkTasks(
-            goalID: goalID,
-            toRunID: targetRunID)
-        XCTAssertEqual(carried.map(\.title), [
-            "Carry root",
-            "Carry dependent",
-            "Carry blocked",
-        ])
-        let carriedByTitle = Dictionary(uniqueKeysWithValues: carried.map { ($0.title, $0) })
-        let rootClone = try XCTUnwrap(carriedByTitle["Carry root"])
-        let dependentClone = try XCTUnwrap(carriedByTitle["Carry dependent"])
-        let blockedClone = try XCTUnwrap(carriedByTitle["Carry blocked"])
-
-        XCTAssertEqual(rootClone.runID, targetRunID)
-        XCTAssertEqual(rootClone.goalID, goalID)
-        XCTAssertEqual(rootClone.description, enrichedRoot.task.description)
-        XCTAssertEqual(rootClone.acceptanceCriteria, ["root criterion"])
-        XCTAssertEqual(rootClone.expectedArtifacts, ["Sources/CarryRoot.swift"])
-        XCTAssertEqual(rootClone.priority, .critical)
-        XCTAssertNil(rootClone.owner)
-        XCTAssertNil(rootClone.progressNote)
-        XCTAssertNil(rootClone.result)
-        XCTAssertTrue(rootClone.evidence.isEmpty)
-        XCTAssertTrue(rootClone.latestInvocationIDs.isEmpty)
-        XCTAssertTrue(rootClone.dependsOn.isEmpty, "completed dependency must be removed")
-        XCTAssertEqual(rootClone.status, .ready)
-        XCTAssertEqual(dependentClone.dependsOn, [rootClone.id])
-        XCTAssertEqual(dependentClone.status, .pending)
-        XCTAssertTrue(blockedClone.dependsOn.isEmpty)
-        XCTAssertEqual(blockedClone.status, .blocked)
-        XCTAssertTrue(blockedClone.progressNote?.contains(cancelledDependency.task.id.rawValue) == true)
-        XCTAssertTrue(blockedClone.progressNote?.contains("cancelled") == true)
-
-        let sourceToClone: [WorkTaskID: WorkTaskID] = [
-            enrichedRoot.task.id: rootClone.id,
-            dependentSource.task.id: dependentClone.id,
-            blockedSource.task.id: blockedClone.id,
-        ]
-        for (sourceID, cloneID) in sourceToClone {
-            let source = try await orchestrator.getWorkTask(
-                requestedBy: main,
-                currentWorkTaskID: nil,
-                currentRunID: sourceRunID,
-                currentGoalID: goalID,
-                canManage: true,
-                taskID: sourceID)
-            XCTAssertEqual(source.task.status, .cancelled)
-            XCTAssertTrue(source.task.progressNote?.contains(cloneID.rawValue) == true)
-        }
-
-        let eventsAfterFirstCarry = await log.replay()
-        let carriedEvents = eventsAfterFirstCarry.compactMap { envelope -> WorkTaskCarriedForwardPayload? in
-            guard case .workTaskCarriedForward(let payload) = envelope.event else { return nil }
-            return sourceToClone[payload.sourceTaskID] == payload.task.id ? payload : nil
-        }
-        XCTAssertEqual(carriedEvents.count, sourceToClone.count)
-        let carryCancellationIDs = Set(eventsAfterFirstCarry.compactMap { envelope -> WorkTaskID? in
-            guard case .workTaskCancelled(let payload) = envelope.event,
-                  sourceToClone[payload.task.id] != nil else { return nil }
-            return payload.task.id
-        })
-        XCTAssertEqual(carryCancellationIDs, Set(sourceToClone.keys))
-
-        let replayed = CoworkProjection.build(from: eventsAfterFirstCarry)
-        XCTAssertEqual(replayed.workTasks[rootClone.id]?.status, .ready)
-        XCTAssertEqual(replayed.workTasks[rootClone.id]?.dependsOn, [])
-        XCTAssertEqual(replayed.workTasks[dependentClone.id]?.status, .pending)
-        XCTAssertEqual(replayed.workTasks[dependentClone.id]?.dependsOn, [rootClone.id])
-        XCTAssertEqual(replayed.workTasks[blockedClone.id]?.status, .blocked)
-        XCTAssertTrue(replayed.workTasks[blockedClone.id]?.progressNote?
-            .contains(cancelledDependency.task.id.rawValue) == true)
-        for sourceID in sourceToClone.keys {
-            XCTAssertEqual(replayed.workTasks[sourceID]?.status, .cancelled)
-        }
-
-        let secondCarry = try await orchestrator.carryForwardNonterminalWorkTasks(
-            goalID: goalID,
-            toRunID: targetRunID)
-        XCTAssertTrue(secondCarry.isEmpty)
-        let eventsAfterSecondCarry = await log.replay()
-        XCTAssertEqual(eventsAfterSecondCarry.count, eventsAfterFirstCarry.count)
-    }
 
     func testRestoreRejectsInvalidWorkTaskGraphAndFailsClosed() async throws {
         let log = try workTaskLog()
-        let runID = ContinuationRunID.new()
         let invalid = WorkTask(
-            runID: runID,
             title: "Invalid recovered task",
             description: "References a dependency absent from the durable graph",
             dependsOn: [WorkTaskID.new()])
@@ -1229,9 +1083,6 @@ final class WorkTaskRuntimeTests: XCTestCase {
 
         do {
             _ = try await orchestrator.createWorkTask(
-                requestedBy: main,
-                currentRunID: runID,
-                currentGoalID: nil,
                 canManage: true,
                 request: WorkTaskCreateRequest(
                     title: "Must not be admitted",

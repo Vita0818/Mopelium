@@ -47,7 +47,6 @@ private actor RuntimeSendRecorder {
         var goalID: GoalID?
         var runID: ContinuationRunID?
         var recordUserMessage: Bool
-        var explicitGoalIntent: Bool
     }
 
     private var values: [Call] = []
@@ -55,14 +54,12 @@ private actor RuntimeSendRecorder {
     func record(target: AgentID?,
                 goalID: GoalID?,
                 runID: ContinuationRunID?,
-                recordUserMessage: Bool,
-                explicitGoalIntent: Bool) {
+                recordUserMessage: Bool) {
         values.append(Call(
             target: target,
             goalID: goalID,
             runID: runID,
-            recordUserMessage: recordUserMessage,
-            explicitGoalIntent: explicitGoalIntent))
+            recordUserMessage: recordUserMessage))
     }
 
     func calls() -> [Call] { values }
@@ -76,7 +73,6 @@ private actor RuntimeCancellationRecorder {
 
 private actor RuntimeGoalHookRecorder {
     enum Event: Equatable, Sendable {
-        case carryForward(GoalID, ContinuationRunID)
         case send(GoalID, ContinuationRunID)
         case wait(GoalID, ContinuationRunID?)
         case consumeUsageLimit(GoalID, ContinuationRunID)
@@ -276,64 +272,18 @@ private func waitForRuntimeProjection(
     throw GoalRuntimeTestFailure.timedOut(label)
 }
 
-private func appendCompletedRuntimeWorkTask(
+private func appendCompletedRuntimeValidationEvidence(
     log: EventLog,
     goalID: GoalID,
     runID: ContinuationRunID
 ) async -> Bool {
-    let evidence = TaskEvidence(
-        kind: "test",
-        reference: "test://pass",
-        summary: "Focused verification passed.")
     let invocationID = TaskID.new()
-    var graph = WorkTaskGraph()
-    let initial = WorkTask(
-        runID: runID,
-        goalID: goalID,
-        title: "Verify feature",
-        description: "Run focused verification",
-        acceptanceCriteria: ["Tests pass"],
-        expectedArtifacts: ["Tests"],
-        status: .ready)
-    let admitted: WorkTask
-    switch graph.add(initial) {
-    case .success(let value): admitted = value
-    case .failure: return false
-    }
-    let started: WorkTask
-    switch graph.transition(
-        taskID: admitted.id,
-        to: .inProgress,
-        expectedRevision: admitted.revision,
-        owner: Orchestrator.mainAgentID) {
-    case .success(let value): started = value
-    case .failure: return false
-    }
-    let linked: WorkTask
-    switch graph.linkInvocation(
-        taskID: started.id,
-        invocationID: invocationID,
-        expectedRevision: started.revision) {
-    case .success(let value): linked = value
-    case .failure: return false
-    }
-    let completed: WorkTask
-    switch graph.transition(
-        taskID: linked.id,
-        to: .completed,
-        expectedRevision: linked.revision,
-        result: "Focused verification passed",
-        evidence: [evidence]) {
-    case .success(let value): completed = value
-    case .failure: return false
-    }
     do {
         let contract = TaskContract(
             id: invocationID,
             kind: .root,
             issuer: nil,
             assignee: Orchestrator.mainAgentID,
-            workTaskID: completed.id,
             continuationRunID: runID,
             goalID: goalID,
             objective: "Run focused verification",
@@ -356,12 +306,6 @@ private func appendCompletedRuntimeWorkTask(
             tool: "git_status",
             sideEffect: .readOnly)
         try await log.append([
-            .workTaskCreated(WorkTaskCreatedPayload(task: admitted)),
-            .workTaskStarted(WorkTaskStartedPayload(task: started)),
-            .workTaskInvocationLinked(WorkTaskInvocationLinkedPayload(
-                task: linked,
-                invocationID: invocationID)),
-            .workTaskCompleted(WorkTaskCompletedPayload(task: completed)),
             .taskCreated(TaskCreatedPayload(contract: contract, metadata: metadata)),
             .taskAssigned(TaskAssignedPayload(contract: contract, metadata: metadata)),
             .taskQueued(TaskQueuedPayload(
@@ -413,7 +357,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
@@ -464,7 +408,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             })
@@ -495,7 +439,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             },
@@ -520,7 +464,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
         await controller.shutdown()
     }
 
-    func testPausedInterruptedRunIsCancelledAndRecoveredWithoutExecuting() async throws {
+    func testPausedInterruptedRunBecomesInterruptedWithoutExecuting() async throws {
         let log = try runtimeLog("paused-interrupted-recovery")
         let sessionID = await log.sessionID
         let activeGoal = Goal(sessionID: sessionID, objective: "Remain paused after restart")
@@ -536,8 +480,6 @@ final class GoalRuntimeControllerTests: XCTestCase {
             .goalCreated(GoalCreatedPayload(goal: activeGoal)),
             .continuationRunCreated(ContinuationRunCreatedPayload(run: createdRun)),
             .continuationRunStarted(ContinuationRunStartedPayload(run: runningRun)),
-            // Legacy crash window: paused was durable before the run reached a
-            // safe checkpoint.
             .goalPaused(GoalPausedPayload(goal: pausedGoal)),
         ])
 
@@ -551,11 +493,11 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             },
-            cancelGoalInvocations: { goalID, runID, _ in
+            cancelGoalInvocations: { goalID, runID, _, _ in
                 XCTAssertEqual(goalID, activeGoal.id)
                 XCTAssertEqual(runID, createdRun.id)
                 await cancellationCalls.increment()
@@ -567,7 +509,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
 
         let projection = CoworkProjection.build(from: await log.replay())
         XCTAssertEqual(projection.goals[activeGoal.id]?.status, .paused)
-        XCTAssertEqual(projection.continuationRuns[createdRun.id]?.status, .checkpointed)
+        XCTAssertEqual(projection.continuationRuns[createdRun.id]?.status, .interrupted)
         let cancellationCallCount = await cancellationCalls.value()
         let sendCallCount = await sendCalls.value()
         XCTAssertEqual(cancellationCallCount, 1)
@@ -605,11 +547,11 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             },
-            cancelGoalInvocations: { goalID, runID, _ in
+            cancelGoalInvocations: { goalID, runID, _, _ in
                 XCTAssertEqual(goalID, activeGoal.id)
                 XCTAssertEqual(runID, createdRun.id)
                 await cancellationCalls.increment()
@@ -664,8 +606,8 @@ final class GoalRuntimeControllerTests: XCTestCase {
             policy: GoalRuntimePolicy(noProgressRunThreshold: 1),
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in .sent },
-            cancelGoalInvocations: { _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in .sent },
+            cancelGoalInvocations: { _, _, _, _ in
                 await cancellationCalls.increment()
                 await schedulerBarrier.wait()
                 return true
@@ -719,44 +661,6 @@ final class GoalRuntimeControllerTests: XCTestCase {
         await controller.shutdown()
     }
 
-    func testPauseDuringCarryForwardCannotAdmitRootInvocation() async throws {
-        let log = try runtimeLog("pause-before-root-admission")
-        let sessionID = await log.sessionID
-        let carryForwardBarrier = RuntimeAsyncBarrier()
-        let sendCalls = RuntimeCallCounter()
-        let verifier = RuntimeVerifierProvider([
-            continuingRuntimeAudit(objective: "Pause before admission"),
-        ])
-        let controller = GoalRuntimeController(
-            sessionID: sessionID,
-            log: log,
-            verifierProvider: { verifier },
-            verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
-                await sendCalls.increment()
-                return .sent
-            },
-            carryForwardWorkTasks: { _, _ in
-                await carryForwardBarrier.wait()
-                return []
-            })
-
-        let goal = try await controller.createGoal(objective: "Pause before admission")
-        await carryForwardBarrier.waitUntilEntered()
-        let pauseTask = Task { try await controller.pauseCurrentGoal() }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        await carryForwardBarrier.release()
-        let paused = try await pauseTask.value
-
-        XCTAssertEqual(paused.status, .paused)
-        let sendCallCount = await sendCalls.value()
-        XCTAssertEqual(sendCallCount, 0)
-        let projection = CoworkProjection.build(from: await log.replay())
-        XCTAssertEqual(projection.goals[goal.id]?.status, .paused)
-        XCTAssertEqual(projection.continuationRuns.values.filter {
-            $0.goalID == goal.id && $0.status == .checkpointed
-        }.count, 1)
-    }
 
     func testPauseRacingDurableRootAdmissionCancelsBeforeProviderExecution() async throws {
         let log = try runtimeLog("pause-during-root-admission")
@@ -843,7 +747,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
                     return .sent
@@ -915,7 +819,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
                     return .sent
@@ -999,7 +903,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
@@ -1063,7 +967,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
@@ -1129,7 +1033,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             })
@@ -1164,7 +1068,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
                     return .sent
@@ -1175,7 +1079,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             resumePendingInvocations: {
                 await resumeCalls.increment()
             },
-            cancelGoalInvocations: { _, _, _ in
+            cancelGoalInvocations: { _, _, _, _ in
                 await cancellationBarrier.wait()
                 return true
             })
@@ -1217,85 +1121,6 @@ final class GoalRuntimeControllerTests: XCTestCase {
         })
     }
 
-    func testOrdinaryTurnSettlementFailureStillLaunchesDurablyCreatedGoal() async throws {
-        let log = try runtimeLog("ordinary-settlement-goal-recovery")
-        let sessionID = await log.sessionID
-        let durableGoal = Goal(
-            sessionID: sessionID,
-            objective: "Continue the durably created Goal")
-        let recorder = RuntimeSendRecorder()
-        let goalSendBarrier = RuntimeAsyncBarrier()
-        let verifier = RuntimeVerifierProvider([
-            continuingRuntimeAudit(objective: durableGoal.objective),
-        ])
-        let controller = GoalRuntimeController(
-            sessionID: sessionID,
-            log: log,
-            verifierProvider: { verifier },
-            verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage,
-                explicitGoalIntent in
-                await recorder.record(
-                    target: target,
-                    goalID: goalID,
-                    runID: runID,
-                    recordUserMessage: recordUserMessage,
-                    explicitGoalIntent: explicitGoalIntent)
-                if goalID == nil {
-                    do {
-                        try await log.append(.goalCreated(GoalCreatedPayload(goal: durableGoal)))
-                    } catch {
-                        return .failed("fixture could not persist Goal")
-                    }
-                    return .sent
-                }
-                await goalSendBarrier.wait()
-                return .sent
-            },
-            eventAppender: { events in
-                if events.contains(where: { event in
-                    guard case .continuationRunCompleted(let payload) = event else {
-                        return false
-                    }
-                    return payload.run.goalID == nil
-                }) {
-                    throw GoalRuntimeTestFailure.injectedCheckpointFailure
-                }
-                try await log.append(events)
-            })
-
-        let startupSafe = await controller.start()
-        XCTAssertTrue(startupSafe)
-        let result = await controller.sendUserTurn(
-            "Create and continue a durable Goal",
-            explicitGoalIntent: true)
-        guard case .failed(let message) = result else {
-            return XCTFail("The enclosing ordinary run settlement must surface its failure")
-        }
-        XCTAssertTrue(message.contains("persistence failed"))
-
-        await goalSendBarrier.waitUntilEntered()
-        let calls = await recorder.calls()
-        XCTAssertEqual(calls.count, 2)
-        XCTAssertNil(calls[0].goalID)
-        XCTAssertTrue(calls[0].recordUserMessage)
-        XCTAssertTrue(calls[0].explicitGoalIntent)
-        XCTAssertEqual(calls[1].target, Orchestrator.mainAgentID)
-        XCTAssertEqual(calls[1].goalID, durableGoal.id)
-        XCTAssertFalse(calls[1].recordUserMessage)
-        XCTAssertFalse(calls[1].explicitGoalIntent)
-        let projection = CoworkProjection.build(from: await log.replay())
-        XCTAssertEqual(projection.goals[durableGoal.id]?.status, .active)
-        XCTAssertTrue(projection.continuationRuns.values.contains {
-            $0.goalID == durableGoal.id && $0.status == .running
-        })
-
-        let shutdownTask = Task { await controller.shutdown() }
-        await Task.yield()
-        await goalSendBarrier.release()
-        await shutdownTask.value
-    }
-
     func testStartCancelsInterruptedActiveRunWithoutWakingSchedulerBeforeRecovery() async throws {
         let log = try runtimeLog("recovery-cancel-without-resume")
         let sessionID = await log.sessionID
@@ -1318,14 +1143,14 @@ final class GoalRuntimeControllerTests: XCTestCase {
             policy: GoalRuntimePolicy(noProgressRunThreshold: 1),
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in .sent },
+            sendOperation: { _, _, _, _, _, _, _ in .sent },
             resumePendingInvocations: {
                 await resumeCalls.increment()
             },
             waitForGoalSchedulerIdle: { goalID, runID in
                 await hookRecorder.record(.wait(goalID, runID))
             },
-            cancelGoalInvocations: { goalID, runID, _ in
+            cancelGoalInvocations: { goalID, runID, _, _ in
                 XCTAssertEqual(goalID, goal.id)
                 XCTAssertEqual(runID, createdRun.id)
                 await cancellationCalls.increment()
@@ -1343,18 +1168,18 @@ final class GoalRuntimeControllerTests: XCTestCase {
 
         let afterRelease = await log.replay()
         let afterProjection = CoworkProjection.build(from: afterRelease)
-        XCTAssertEqual(afterProjection.continuationRuns[createdRun.id]?.status, .completed)
+        XCTAssertEqual(afterProjection.continuationRuns[createdRun.id]?.status, .interrupted)
         XCTAssertEqual(afterProjection.goals[goal.id]?.status, .paused)
         XCTAssertEqual(afterProjection.continuationRuns.count, 1)
         XCTAssertEqual(verifier.callCount(), 0)
         XCTAssertTrue(afterRelease.contains { envelope in
-            guard case .continuationRunRecovered(let payload) = envelope.event else { return false }
+            guard case .continuationRunInterrupted(let payload) = envelope.event else { return false }
             return payload.run.id == createdRun.id
                 && payload.run.progressSummary == "Recovered after runtime interruption"
         })
-        XCTAssertTrue(afterRelease.contains { envelope in
-            guard case .goalAuditCompleted(let payload) = envelope.event else { return false }
-            return payload.runID == createdRun.id
+        XCTAssertFalse(afterRelease.contains { envelope in
+            if case .goalAuditCompleted = envelope.event { return true }
+            return false
         })
         await controller.shutdown()
     }
@@ -1378,11 +1203,11 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             },
-            cancelGoalInvocations: { cancelledGoalID, _, _ in
+            cancelGoalInvocations: { cancelledGoalID, _, _, _ in
                 XCTAssertEqual(cancelledGoalID, goal.id)
                 await cancellationCalls.increment()
                 return true
@@ -1416,7 +1241,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
         await controller.shutdown()
     }
 
-    func testEachNewGoalRunCarriesTasksBeforeSendAndUsesMatchingScopedBarrier() async throws {
+    func testEachNewGoalRunUsesMatchingScopedBarrier() async throws {
         let log = try runtimeLog("run-hook-order")
         let sessionID = await log.sessionID
         let hookRecorder = RuntimeGoalHookRecorder()
@@ -1430,17 +1255,13 @@ final class GoalRuntimeControllerTests: XCTestCase {
             policy: GoalRuntimePolicy(noProgressRunThreshold: 2),
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, goalID, runID, _, _ in
+            sendOperation: { _, _, _, _, goalID, runID, _ in
                 guard let goalID, let runID else { return .failed("missing Goal run scope") }
                 await hookRecorder.record(.send(goalID, runID))
                 return .sent
             },
             waitForGoalSchedulerIdle: { goalID, runID in
                 await hookRecorder.record(.wait(goalID, runID))
-            },
-            carryForwardWorkTasks: { goalID, runID in
-                await hookRecorder.record(.carryForward(goalID, runID))
-                return []
             })
 
         let created = try await controller.createGoal(
@@ -1457,7 +1278,6 @@ final class GoalRuntimeControllerTests: XCTestCase {
 
         let expectedEvents: [RuntimeGoalHookRecorder.Event] = runs.flatMap { run in
             [
-                .carryForward(created.id, run.id),
                 .send(created.id, run.id),
                 .wait(created.id, run.id),
             ]
@@ -1484,7 +1304,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 return verifier
             },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, goalID, runID, _, _ in
+            sendOperation: { _, _, _, _, goalID, runID, _ in
                 guard goalID != nil, runID != nil else {
                     return .failed("missing Goal run scope")
                 }
@@ -1751,7 +1571,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             policy: GoalRuntimePolicy(noProgressRunThreshold: 1),
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in .sent },
+            sendOperation: { _, _, _, _, _, _, _ in .sent },
             waitForSchedulerIdle: { await schedulerBarrier.wait() })
 
         let goal = try await controller.createGoal(objective: "Keep the Goal run active")
@@ -1792,13 +1612,12 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage, explicitGoalIntent in
+            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage in
                 await recorder.record(
                     target: target,
                     goalID: goalID,
                     runID: runID,
-                    recordUserMessage: recordUserMessage,
-                    explicitGoalIntent: explicitGoalIntent)
+                    recordUserMessage: recordUserMessage)
                 return .sent
             })
 
@@ -1816,7 +1635,6 @@ final class GoalRuntimeControllerTests: XCTestCase {
         XCTAssertNil(calls[0].goalID)
         XCTAssertEqual(calls[0].runID, run.id)
         XCTAssertTrue(calls[0].recordUserMessage)
-        XCTAssertFalse(calls[0].explicitGoalIntent)
     }
 
     func testCreateGoalRunsAndCompletesOnlyAfterEvidenceBackedVerifierAudit() async throws {
@@ -1829,15 +1647,14 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage, explicitGoalIntent in
+            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage in
                 await recorder.record(
                     target: target,
                     goalID: goalID,
                     runID: runID,
-                    recordUserMessage: recordUserMessage,
-                    explicitGoalIntent: explicitGoalIntent)
+                    recordUserMessage: recordUserMessage)
                 guard let goalID, let runID,
-                      await appendCompletedRuntimeWorkTask(
+                      await appendCompletedRuntimeValidationEvidence(
                         log: log,
                         goalID: goalID,
                         runID: runID) else {
@@ -1857,13 +1674,12 @@ final class GoalRuntimeControllerTests: XCTestCase {
         let completed = try XCTUnwrap(projection.goals[created.id])
         XCTAssertTrue(completed.latestAudit?.isCompletionProof == true)
         XCTAssertEqual(projection.continuationRuns.values.filter { $0.goalID == created.id }.count, 1)
-        XCTAssertTrue(projection.workTasks.values.allSatisfy { $0.status == .completed })
+        XCTAssertTrue(projection.workTasks.isEmpty)
         let calls = await recorder.calls()
         XCTAssertEqual(calls.count, 1)
         XCTAssertEqual(calls[0].target, Orchestrator.mainAgentID)
         XCTAssertEqual(calls[0].goalID, created.id)
         XCTAssertFalse(calls[0].recordUserMessage)
-        XCTAssertFalse(calls[0].explicitGoalIntent)
     }
 
     func testMissingEvidenceDowngradesCompletionAndNoProgressGuardStopsAfterTwoRuns() async throws {
@@ -1879,7 +1695,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             policy: GoalRuntimePolicy(noProgressRunThreshold: 2),
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in .sent })
+            sendOperation: { _, _, _, _, _, _, _ in .sent })
 
         let created = try await controller.createGoal(objective: "Need proof")
         let projection = try await waitForRuntimeProjection(
@@ -1918,7 +1734,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             policy: GoalRuntimePolicy(blockedRunThreshold: 3, noProgressRunThreshold: 2),
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in .sent })
+            sendOperation: { _, _, _, _, _, _, _ in .sent })
 
         let created = try await controller.createGoal(objective: "Wait for external approval")
         let projection = try await waitForRuntimeProjection(
@@ -1949,7 +1765,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
                     return .sent
@@ -1957,7 +1773,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                     return .failed("cancelled by host control")
                 }
             },
-            cancelActiveInvocations: { reason in
+            cancelActiveInvocations: { reason, _ in
                 await cancellations.record(reason)
             })
 
@@ -2006,7 +1822,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, goalID, runID, _, _ in
+            sendOperation: { _, _, _, _, goalID, runID, _ in
                 guard let goalID, let runID else { return .failed("missing scope") }
                 _ = try? await log.append(.turnStats(TurnStatsPayload(
                     totalTokens: 5,
@@ -2076,7 +1892,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 agent: Orchestrator.mainAgentID,
                 tool: "write_file",
                 sideEffect: .write,
-                replayPolicy: .requiresManualReconciliation)
+                replayPolicy: .doNotReplay)
             var events: [Event] = []
             if scenario.recordsTask {
                 events.append(.taskCreated(TaskCreatedPayload(contract: contract)))
@@ -2085,7 +1901,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 ? .taskFailed(TaskFailedPayload(
                     taskID: taskID,
                     agent: Orchestrator.mainAgentID,
-                    error: "manual reconciliation required",
+                    error: "interrupted non-replayable tool call",
                     attempt: scenario.terminalAttempt))
                 : nil
             if scenario.terminalBeforePrepare, let terminalEvent {
@@ -2106,7 +1922,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 log: log,
                 verifierProvider: { verifier },
                 verifierModel: { ModelID(rawValue: "verifier") },
-                sendOperation: { _, _, _, _, _, _, _, _ in
+                sendOperation: { _, _, _, _, _, _, _ in
                     await sendCalls.increment()
                     return .sent
                 })
@@ -2152,7 +1968,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 agent: Orchestrator.mainAgentID,
                 tool: "write_file",
                 sideEffect: .write,
-                replayPolicy: .requiresManualReconciliation)
+                replayPolicy: .doNotReplay)
             try await log.append([
                 .goalCreated(GoalCreatedPayload(goal: goal)),
                 .toolExecutionPrepared(prepared),
@@ -2172,7 +1988,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 log: log,
                 verifierProvider: { verifier },
                 verifierModel: { ModelID(rawValue: "verifier") },
-                sendOperation: { _, _, _, _, _, _, _, _ in
+                sendOperation: { _, _, _, _, _, _, _ in
                     await sendCalls.increment()
                     return .sent
                 })
@@ -2197,7 +2013,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             })
@@ -2213,7 +2029,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             agent: Orchestrator.mainAgentID,
             tool: "write_file",
             sideEffect: .write,
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
         try await log.append([
             .goalCreated(GoalCreatedPayload(goal: goal)),
             .toolExecutionPrepared(prepared),
@@ -2252,7 +2068,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: log,
             verifierProvider: { verifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 await sendCalls.increment()
                 return .sent
             })
@@ -2306,7 +2122,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
                 log: log,
                 verifierProvider: { verifier },
                 verifierModel: { ModelID(rawValue: "verifier") },
-                sendOperation: { _, _, _, _, _, _, _, _ in
+                sendOperation: { _, _, _, _, _, _, _ in
                     await sendCalls.increment()
                     return .sent
                 })
@@ -2319,7 +2135,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
         }
     }
 
-    func testRecoveryCheckpointsActiveRunButUnresolvedNonReplayableToolStopsRecovery() async throws {
+    func testRecoveryInterruptsActiveRunButUnresolvedNonReplayableToolStopsRecovery() async throws {
         let activeLog = try runtimeLog("recover-active")
         let activeSession = await activeLog.sessionID
         let activeGoal = Goal(sessionID: activeSession, objective: "Recover active Goal")
@@ -2341,7 +2157,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: activeLog,
             verifierProvider: { activeVerifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, _, _, _, _, _, _, _ in
+            sendOperation: { _, _, _, _, _, _, _ in
                 do {
                     try await Task.sleep(nanoseconds: 5_000_000_000)
                     return .sent
@@ -2351,15 +2167,16 @@ final class GoalRuntimeControllerTests: XCTestCase {
             })
         let activeStartupSafe = await activeController.start()
         XCTAssertTrue(activeStartupSafe)
-        let recoveredProjection = try await waitForRuntimeProjection(
+        let interruptedProjection = try await waitForRuntimeProjection(
             activeLog,
             label: "active recovery") {
-                $0.continuationRuns[createdRun.id]?.status == .completed
+                $0.continuationRuns[createdRun.id]?.status == .interrupted
                     && $0.goals[activeGoal.id]?.status == .paused
             }
-        XCTAssertTrue(recoveredProjection.continuationRuns[createdRun.id]?.progressSummary?
-            .contains("Recovered checkpoint had no durable Goal audit") == true)
-        XCTAssertEqual(recoveredProjection.continuationRuns.count, 1)
+        XCTAssertEqual(
+            interruptedProjection.continuationRuns[createdRun.id]?.progressSummary,
+            "Recovered after runtime interruption")
+        XCTAssertEqual(interruptedProjection.continuationRuns.count, 1)
         XCTAssertEqual(activeVerifier.callCount(), 0)
 
         _ = try await activeController.resumeCurrentGoal()
@@ -2388,7 +2205,7 @@ final class GoalRuntimeControllerTests: XCTestCase {
             agent: Orchestrator.mainAgentID,
             tool: "write_file",
             sideEffect: .write,
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
         try await unsafeLog.append([
             .goalCreated(GoalCreatedPayload(goal: unsafeGoal)),
             .continuationRunCreated(ContinuationRunCreatedPayload(run: unsafeCreatedRun)),
@@ -2404,20 +2221,19 @@ final class GoalRuntimeControllerTests: XCTestCase {
             log: unsafeLog,
             verifierProvider: { unsafeVerifier },
             verifierModel: { ModelID(rawValue: "verifier") },
-            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage, explicitGoalIntent in
+            sendOperation: { _, target, _, _, goalID, runID, recordUserMessage in
                 await unsafeRecorder.record(
                     target: target,
                     goalID: goalID,
                     runID: runID,
-                    recordUserMessage: recordUserMessage,
-                    explicitGoalIntent: explicitGoalIntent)
+                    recordUserMessage: recordUserMessage)
                 return .sent
             })
         let unsafeStartupSafe = await unsafeController.start()
         XCTAssertFalse(unsafeStartupSafe)
         try await Task.sleep(nanoseconds: 100_000_000)
         let unsafeProjection = CoworkProjection.build(from: await unsafeLog.replay())
-        XCTAssertEqual(unsafeProjection.continuationRuns[unsafeCreatedRun.id]?.status, .running)
+        XCTAssertEqual(unsafeProjection.continuationRuns[unsafeCreatedRun.id]?.status, .interrupted)
         XCTAssertEqual(unsafeProjection.continuationRuns.count, 1)
         XCTAssertTrue(unsafeProjection.unresolvedNonReplayableToolExecutions.count == 1)
         let unsafeCalls = await unsafeRecorder.calls()

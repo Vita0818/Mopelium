@@ -140,8 +140,8 @@ private func delegateArgs(to: String,
                           roleHint: String? = nil,
                           expectedDeliverable: String? = nil) -> String {
     var object: [String: String] = ["to": to, "objective": objective]
-    if let roleHint { object["roleHint"] = roleHint }
-    if let expectedDeliverable { object["expectedDeliverable"] = expectedDeliverable }
+    if let roleHint { object["role_hint"] = roleHint }
+    if let expectedDeliverable { object["expected_deliverable"] = expectedDeliverable }
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
 }
 
@@ -149,8 +149,8 @@ private func automaticDelegateArgs(objective: String,
                                    roleHint: String? = nil,
                                    expectedDeliverable: String? = nil) -> String {
     var object: [String: String] = ["objective": objective]
-    if let roleHint { object["roleHint"] = roleHint }
-    if let expectedDeliverable { object["expectedDeliverable"] = expectedDeliverable }
+    if let roleHint { object["role_hint"] = roleHint }
+    if let expectedDeliverable { object["expected_deliverable"] = expectedDeliverable }
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
 }
 
@@ -163,10 +163,8 @@ private func askArgs(to: String, question: String) -> String {
 
 private func spawnArgs(name: String,
                        path: String,
-                       model: String? = nil,
                        canCoordinate: Bool? = nil) -> String {
     var object: [String: Any] = ["name": name, "path": path]
-    if let model { object["model"] = model }
     if let canCoordinate { object["canCoordinate"] = canCoordinate }
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
 }
@@ -175,14 +173,10 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
     private let main = AgentID(rawValue: "main")
     private let worker = AgentID(rawValue: "worker")
 
-    func testDelegateTaskWithoutTargetAtomicallyCreatesWorkerAndReturnsStableIdentity() async throws {
+    func testDelegateTaskWithoutAttachedWorkerFailsBeforeReviewOrAdmission() async throws {
         let log = try nonRecursiveLog()
-        let workspace = try nonRecursiveWorkspace("automatic-worker-\(UUID().uuidString)")
+        let workspace = try nonRecursiveWorkspace("no-attached-worker-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: workspace) }
-        let generatedWorker = AgentID(rawValue: "worker-1")
-        let workerProvider = NonRecursiveProvider([
-            [.textDelta("automatic worker result"), .done(finishReason: "stop")],
-        ])
         let mainProvider = NonRecursiveProvider([
             [.toolCalls([
                 ToolCall(
@@ -193,11 +187,11 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
                         roleHint: "automatic worker",
                         expectedDeliverable: "Return the bounded result."))
             ]), .done(finishReason: "tool_calls")],
-            [.textDelta("main synthesized automatic worker result"), .done(finishReason: "stop")],
+            [.textDelta("delegation unavailable"), .done(finishReason: "stop")],
         ])
         let responder = CapturingNonRecursiveResponder(.allow)
-        let orch = Orchestrator(log: log, allowsShell: true, responder: responder) { agent in
-            agent.name == generatedWorker ? workerProvider : mainProvider
+        let orch = Orchestrator(log: log, allowsShell: true, responder: responder) { _ in
+            mainProvider
         }
         let mainAttached = await orch.attach(Agent(
             name: main,
@@ -210,62 +204,28 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
         let sent = await orch.send("Delegate without naming a worker.", to: main)
         XCTAssertEqual(sent, .sent)
 
-        XCTAssertEqual(workerProvider.requests.count, 1)
         let mainFollowup = try XCTUnwrap(mainProvider.requests.last)
         let delegateResult = try XCTUnwrap(mainFollowup.messages.first {
             $0.role == .tool && $0.toolCallId == "delegate-auto"
         }?.content)
-        XCTAssertTrue(delegateResult.contains("task_id="))
-        XCTAssertTrue(delegateResult.contains("agent_id=@worker-1"))
-        XCTAssertTrue(delegateResult.contains("automatic worker result"))
+        XCTAssertTrue(delegateResult.contains("no available attached delegation worker"))
         let approvals = await responder.requests()
-        XCTAssertEqual(approvals.filter { $0.tool == "delegate_task" }.count, 1)
-        let delegateApproval = try XCTUnwrap(approvals.first { $0.tool == "delegate_task" })
-        let reviewedAuthorization = try XCTUnwrap(delegateApproval.context?.authorization)
-        XCTAssertEqual(
-            reviewedAuthorization.intent.resources.first { $0.kind == .agent }?.value,
-            generatedWorker.rawValue)
-        XCTAssertEqual(
-            delegateApproval.context?.intent?.resources.first { $0.kind == .agent }?.value,
-            generatedWorker.rawValue)
-        XCTAssertEqual(
-            reviewedAuthorization.intent.metadata["targetResolution"],
-            .string("create_proposed"))
-        XCTAssertEqual(reviewedAuthorization.actionPreview?.fields["to"], nil)
-        XCTAssertTrue(delegateApproval.args.hasPrefix("digest="))
-        XCTAssertFalse(delegateApproval.args.contains("Perform one bounded worker task."))
-        XCTAssertFalse(approvals.contains { $0.tool == "agent.attach" && $0.agent == generatedWorker })
+        XCTAssertFalse(approvals.contains { $0.tool == "delegate_task" })
         let events = await log.replay()
-        let delegateRequestSequence = try XCTUnwrap(events.first { envelope in
-            if case .permissionRequest(let payload) = envelope.event {
-                return payload.tool == "delegate_task"
+        XCTAssertFalse(events.contains { envelope in
+            switch envelope.event {
+            case .agentSpawnRequested, .agentSpawned, .delegationApproved, .taskDelegated:
+                return true
+            default:
+                return false
             }
-            return false
-        }?.seq)
-        let workerSpawnSequence = try XCTUnwrap(events.first { envelope in
-            if case .agentSpawnRequested(let payload) = envelope.event {
-                return payload.agent == generatedWorker
-            }
-            return false
-        }?.seq)
-        XCTAssertGreaterThan(workerSpawnSequence, delegateRequestSequence)
-        XCTAssertTrue(events.contains {
-            if case .agentSpawned(let payload) = $0.event { return payload.agent == generatedWorker }
-            return false
-        })
-        XCTAssertTrue(events.contains {
-            if case .taskCompleted(let payload) = $0.event {
-                return payload.report?.summary == "automatic worker result"
-            }
-            return false
         })
     }
 
-    func testDeniedAutomaticDelegateReviewsConcreteTargetWithoutCreatingWorker() async throws {
+    func testDeniedAutomaticDelegateReviewsExistingAttachedTargetWithoutAdmission() async throws {
         let log = try nonRecursiveLog()
         let workspace = try nonRecursiveWorkspace("automatic-worker-denied-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: workspace) }
-        let generatedWorker = AgentID(rawValue: "worker-1")
         let mainProvider = NonRecursiveProvider([
             [.toolCalls([
                 ToolCall(
@@ -287,30 +247,32 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
             profile: .reviewed,
             coordinationDepth: Agent.defaultCoordinationDepth))
         XCTAssertTrue(attached)
+        let workerAttached = await orch.attach(Agent(
+            name: worker,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed))
+        XCTAssertTrue(workerAttached)
 
         let result = await orch.send("Try a reviewed automatic delegation.", to: main)
-        guard case .failed = result else {
-            return XCTFail("A denied required delegation must fail its calling task.")
-        }
+        XCTAssertEqual(result, .sent)
         let approvals = await responder.requests()
         let delegateApproval = try XCTUnwrap(approvals.first { $0.tool == "delegate_task" })
         XCTAssertEqual(
             delegateApproval.context?.authorization?.intent.resources.first {
                 $0.kind == .agent
             }?.value,
-            generatedWorker.rawValue)
+            worker.rawValue)
         let agentNames = await orch.agentNames()
-        XCTAssertFalse(agentNames.contains(generatedWorker))
+        XCTAssertEqual(Set(agentNames), [main, worker])
         let events = await log.replay()
         XCTAssertFalse(events.contains { envelope in
-            if case .agentSpawnRequested(let payload) = envelope.event {
-                return payload.agent == generatedWorker
-            }
-            return false
+            guard case .taskDelegated(let payload) = envelope.event else { return false }
+            return payload.contract.assignee == worker
         })
     }
 
-    func testAutomaticDelegateRollsBackNewWorkerWhenTaskAdmissionIsBlocked() async throws {
+    func testMediatorBlockedDelegationWritesNoPartialAdmissionFacts() async throws {
         let log = try nonRecursiveLog()
         let workspace = try nonRecursiveWorkspace("automatic-worker-rollback-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -325,28 +287,24 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
             profile: .reviewed,
             coordinationDepth: Agent.defaultCoordinationDepth))
         XCTAssertTrue(mainAttached)
+        let workerAttached = await orch.attach(Agent(
+            name: worker,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed))
+        XCTAssertTrue(workerAttached)
+        let before = await log.replay()
 
         let result = await orch.delegateTask(
             from: main,
             to: nil,
             objective: "Do not forward this secret marker ghp_abcdef1234567890")
 
-        XCTAssertEqual(result, "your delegated task was blocked by the mediator")
+        XCTAssertTrue(result.contains("blocked by the mediator"))
         let remainingAgents = await orch.agentNames()
-        XCTAssertFalse(remainingAgents.contains(AgentID(rawValue: "worker-1")))
-        let events = await log.replay()
-        XCTAssertTrue(events.contains {
-            if case .agentSpawned(let payload) = $0.event {
-                return payload.agent == AgentID(rawValue: "worker-1")
-            }
-            return false
-        })
-        XCTAssertTrue(events.contains {
-            if case .agentDetached(let payload) = $0.event {
-                return payload.agent == AgentID(rawValue: "worker-1")
-            }
-            return false
-        })
+        XCTAssertEqual(Set(remainingAgents), [main, worker])
+        let after = await log.replay()
+        XCTAssertEqual(after, before)
         XCTAssertTrue(provider.requests.isEmpty)
     }
 
@@ -451,8 +409,7 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
                          name: "spawn_agent",
                          arguments: spawnArgs(
                             name: worker.rawValue,
-                            path: wsWorker.path,
-                            model: "m"))
+                            path: wsWorker.path))
             ]), .done(finishReason: "tool_calls")],
             [.toolCalls([
                 ToolCall(id: "delegate",
@@ -666,7 +623,7 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
         })
     }
 
-    func testAskAgentMediatorFailureCannotSettleSucceededOrCompleteCallingTask() async throws {
+    func testAskAgentMediatorFailureStaysFailedObservationWhileCallerCompletes() async throws {
         let log = try nonRecursiveLog()
         let wsMain = try nonRecursiveWorkspace("main-\(UUID().uuidString)")
         let wsWorker = try nonRecursiveWorkspace("worker-\(UUID().uuidString)")
@@ -686,6 +643,8 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
                         to: recipient.rawValue,
                         question: "Do not forward this secret marker ghp_abcdef1234567890"))
             ]), .done(finishReason: "tool_calls")],
+            [.textDelta("The requested message could not be delivered."),
+             .done(finishReason: "stop")],
         ])
         let unusedProvider = NonRecursiveProvider([
             [.textDelta("must not run"), .done(finishReason: "stop")],
@@ -722,19 +681,25 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
             to: worker.rawValue,
             objective: "Ask the recipient the supplied question.")
 
-        XCTAssertTrue(result.contains("status=failed") || result.contains("error:"), result)
-        XCTAssertEqual(workerProvider.requests.count, 1)
+        XCTAssertTrue(result.contains("status: completed"), result)
+        XCTAssertTrue(
+            result.contains("The requested message could not be delivered."),
+            result)
+        XCTAssertEqual(workerProvider.requests.count, 2)
         XCTAssertTrue(unusedProvider.requests.isEmpty)
 
         let events = await log.replay()
-        let failedTask = try XCTUnwrap(events.compactMap { envelope -> TaskFailedPayload? in
-            guard case .taskFailed(let payload) = envelope.event,
+        let completedTask = try XCTUnwrap(events.compactMap {
+            envelope -> TaskCompletedPayload? in
+            guard case .taskCompleted(let payload) = envelope.event,
                   payload.agent == self.worker else { return nil }
             return payload
         }.last)
         XCTAssertFalse(events.contains { envelope in
-            guard case .taskCompleted(let payload) = envelope.event else { return false }
-            return payload.taskID == failedTask.taskID
+            guard case .taskFailed(let payload) = envelope.event else {
+                return false
+            }
+            return payload.taskID == completedTask.taskID
         })
 
         let prepared = events.compactMap { envelope -> ToolExecutionPreparedPayload? in
@@ -743,8 +708,8 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
             return payload
         }
         XCTAssertEqual(prepared.count, 1)
-        XCTAssertEqual(prepared.first?.taskID, failedTask.taskID)
-        XCTAssertEqual(prepared.first?.replayPolicy, .requiresManualReconciliation)
+        XCTAssertEqual(prepared.first?.taskID, completedTask.taskID)
+        XCTAssertEqual(prepared.first?.replayPolicy, .doNotReplay)
         XCTAssertFalse(events.contains { envelope in
             guard case .toolExecutionSettled(let payload) = envelope.event else { return false }
             return payload.toolCallID == "ask-blocked" && payload.outcome == .succeeded
@@ -771,6 +736,8 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
                         to: recipient.rawValue,
                         question: "Return one concise status line."))
             ]), .done(finishReason: "tool_calls")],
+            [.textDelta("The requested answer could not be delivered."),
+             .done(finishReason: "stop")],
         ])
         let recipientProvider = NonRecursiveProvider([
             [.textDelta("secret answer ghp_abcdef1234567890"), .done(finishReason: "stop")],
@@ -814,8 +781,11 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
             to: worker.rawValue,
             objective: "Ask the recipient for the status line.")
 
-        XCTAssertTrue(result.contains("status=failed") || result.contains("error:"), result)
-        XCTAssertEqual(workerProvider.requests.count, 1)
+        XCTAssertTrue(result.contains("status: completed"), result)
+        XCTAssertTrue(
+            result.contains("The requested answer could not be delivered."),
+            result)
+        XCTAssertEqual(workerProvider.requests.count, 2)
         XCTAssertEqual(recipientProvider.requests.count, 1)
         XCTAssertTrue(unusedProvider.requests.isEmpty)
 
@@ -831,7 +801,7 @@ final class AgentInvocationNonRecursiveTests: XCTestCase {
             guard case .toolExecutionSettled(let payload) = envelope.event else { return false }
             return payload.toolCallID == "ask-blocked-answer" && payload.outcome == .succeeded
         })
-        XCTAssertFalse(events.contains { envelope in
+        XCTAssertTrue(events.contains { envelope in
             guard case .taskCompleted(let payload) = envelope.event else { return false }
             return payload.agent == self.worker
         })

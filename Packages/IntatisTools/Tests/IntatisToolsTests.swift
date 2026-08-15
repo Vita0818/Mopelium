@@ -17,6 +17,15 @@ private struct FakeShell: ShellRunner {
     func run(_ command: String, cwd: URL) async throws -> ShellResult { result }
 }
 
+private actor InternalToolDrainProbe {
+    private var closes = 0
+    func close() -> Bool {
+        closes += 1
+        return false
+    }
+    func count() -> Int { closes }
+}
+
 private actor ShellResultQueue {
     private var results: [ShellResult]
 
@@ -230,6 +239,29 @@ private struct FakeImageGenerator: ImageGenerationToolService {
 }
 
 final class IntatisToolsTests: XCTestCase {
+    func testCheckedInternalToolCloseFailsAndRemainsSingleFlight() async {
+        let probe = InternalToolDrainProbe()
+        let lease = HostToolRegistryAugmentationLease(
+            registry: ToolRegistry([]),
+            close: { await probe.close() })
+
+        do {
+            try await lease.closeRequiringDrain()
+            XCTFail("a failed internal resource drain must not become success")
+        } catch let error as IntatisError {
+            guard case .io(let message) = error else {
+                return XCTFail("unexpected checked-close error: \(error)")
+            }
+            XCTAssertTrue(message.contains("did not drain"))
+        } catch {
+            XCTFail("unexpected checked-close error type: \(error)")
+        }
+        let repeated = await lease.close()
+        let closes = await probe.count()
+        XCTAssertFalse(repeated)
+        XCTAssertEqual(closes, 1)
+    }
+
 
     private func tempWorkspace() throws -> URL {
         let ws = FileManager.default.temporaryDirectory
@@ -467,6 +499,105 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertEqual(read.text, "a\nB\nc")
     }
 
+    func testOrdinaryFileToolsCannotBypassManagedKnowledgePublication()
+        async throws {
+        let ws = try tempWorkspace()
+        defer { try? FileManager.default.removeItem(at: ws) }
+        let store = ws.appendingPathComponent("knowledge", isDirectory: true)
+        let snapshots = store.appendingPathComponent(
+            ".intatis-rag-snapshots",
+            isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: snapshots,
+            withIntermediateDirectories: true)
+        let pointer = store.appendingPathComponent(".intatis-rag-store.json")
+        let snapshotFile = snapshots.appendingPathComponent("profile.json")
+        try Data("pointer-original".utf8).write(to: pointer)
+        try Data("snapshot-original".utf8).write(to: snapshotFile)
+
+        // Even a legacy/decoded lease with an empty deny list cannot remove
+        // the host-owned publication floor at the executor boundary.
+        let context = ToolContext(
+            workspaceRoot: ws,
+            workspaceLease: WorkspaceLease(
+                rootPath: ws.path,
+                access: .readWrite,
+                deniedPatterns: []))
+
+        do {
+            _ = try await ReadFileTool().execute(
+                ToolArgs(raw: #"{"path":"knowledge/.intatis-rag-store.json"}"#),
+                in: context)
+            XCTFail("read_file unexpectedly read the Knowledge pointer")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains(
+                    "denied by the workspace lease"),
+                "\(error)")
+        }
+
+        do {
+            _ = try await ListFilesTool().execute(
+                ToolArgs(raw: #"{"path":"knowledge/.intatis-rag-snapshots"}"#),
+                in: context)
+            XCTFail("list_files unexpectedly traversed Knowledge snapshots")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains(
+                    "denied by the workspace lease"),
+                "\(error)")
+        }
+
+        do {
+            _ = try await SearchTextTool().execute(
+                ToolArgs(raw: #"{"query":"snapshot","path":"knowledge/.intatis-rag-snapshots"}"#),
+                in: context)
+            XCTFail("search_text unexpectedly traversed Knowledge snapshots")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains(
+                    "denied by the workspace lease"),
+                "\(error)")
+        }
+
+        do {
+            _ = try await WriteFileTool().execute(
+                ToolArgs(raw: #"{"path":"knowledge/.intatis-rag-store.json","content":"changed"}"#),
+                in: context)
+            XCTFail("write_file unexpectedly modified the Knowledge pointer")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains(
+                    "denied by the workspace lease"),
+                "\(error)")
+        }
+
+        let diff = [
+            "--- a/knowledge/.intatis-rag-snapshots/profile.json",
+            "+++ b/knowledge/.intatis-rag-snapshots/profile.json",
+            "@@ -1 +1 @@",
+            "-snapshot-original",
+            "+changed",
+        ].joined(separator: "\n")
+        let patchData = try JSONSerialization.data(withJSONObject: [
+            "diff": diff,
+        ])
+        do {
+            _ = try await ApplyPatchTool().execute(
+                ToolArgs(raw: String(decoding: patchData, as: UTF8.self)),
+                in: context)
+            XCTFail("apply_patch unexpectedly modified a Knowledge snapshot")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains(
+                    "denied by the workspace lease"),
+                "\(error)")
+        }
+
+        XCTAssertEqual(try String(contentsOf: pointer), "pointer-original")
+        XCTAssertEqual(try String(contentsOf: snapshotFile), "snapshot-original")
+    }
+
     // MARK: Shell + git tools (injected fakes)
 
     func testRunShellUsesInjectedRunner() async throws {
@@ -488,8 +619,7 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertTrue(production.shell is ProcessShellRunner)
         XCTAssertTrue(production.structuredShell is StructuredProcessShellRunner)
         XCTAssertTrue(production.networkStructuredShell is StructuredProcessShellRunner)
-        XCTAssertTrue(production.browserSession is ProcessBrowserSessionManager)
-        XCTAssertFalse(production.browserBackend is InjectedShellBrowserBackendRunner)
+        XCTAssertTrue(production.browserBackend is BrowserBackendProcessRunner)
 
         let fake = FakeShell(result: ShellResult(stdout: "ok", stderr: "", exitCode: 0))
         let injected = ToolContext(workspaceRoot: ws, shell: fake)
@@ -504,8 +634,7 @@ final class IntatisToolsTests: XCTestCase {
             networkStructuredShell: fake)
         XCTAssertTrue(customStructured.structuredShell is FakeShell)
         XCTAssertTrue(customStructured.networkStructuredShell is FakeShell)
-        XCTAssertTrue(customStructured.browserSession is ProcessBrowserSessionManager)
-        XCTAssertFalse(customStructured.browserBackend is InjectedShellBrowserBackendRunner)
+        XCTAssertTrue(customStructured.browserBackend is BrowserBackendProcessRunner)
     }
 
     func testStructuredProcessShellRunnerStillSupportsToolBackendCommands() async throws {
@@ -602,22 +731,6 @@ final class IntatisToolsTests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, 0, result.stderr)
         XCTAssertEqual(result.stdout, "|1")
-    }
-
-    func testManagedProcessStateBroadcastsOneSettlementToAllWaiters() async throws {
-        let state = ManagedProcessState(terminationGraceSeconds: 0.05)
-        let first = Task { await state.wait() }
-        let second = Task { await state.wait() }
-        try await Task.sleep(for: .milliseconds(20))
-
-        state.processExited(0)
-
-        for outcome in [await first.value, await second.value] {
-            guard case .exited(let status) = outcome else {
-                return XCTFail("managed process waiter did not receive the shared exit settlement")
-            }
-            XCTAssertEqual(status, 0)
-        }
     }
 
     func testBrowserBackendProcessRunnerRejectsWorkspaceRootReplacement() async throws {
@@ -1496,36 +1609,6 @@ final class IntatisToolsTests: XCTestCase {
 
     // MARK: Document/media tools
 
-    func testPDFReadExtractAndSplitTools() async throws {
-        #if canImport(PDFKit) && canImport(AppKit)
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        let pdfURL = ws.appendingPathComponent("input.pdf")
-        try makeBlankPDF(pageCount: 3, at: pdfURL)
-        let ctx = ToolContext(workspaceRoot: ws)
-
-        let read = try await ReadPDFTool().execute(ToolArgs(raw: #"{"path":"input.pdf","pages":"1-2"}"#), in: ctx)
-        XCTAssertTrue(read.text.contains("Pages: 3"))
-        XCTAssertTrue(read.text.contains("--- page 1 ---"))
-        XCTAssertTrue(read.text.contains("use read_document"))
-        XCTAssertTrue(read.text.contains("backend omitted or set to 'auto'"))
-        XCTAssertFalse(read.text.contains("use reconstruct_document_image with"))
-
-        let extractArgs = #"{"mode":"extract","inputPath":"input.pdf","pages":"2-3","outputPath":"out/extract.pdf"}"#
-        let extracted = try await EditPDFPagesTool().execute(ToolArgs(raw: extractArgs), in: ctx)
-        XCTAssertEqual(extracted.changedFiles, ["out/extract.pdf"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: ws.appendingPathComponent("out/extract.pdf").path))
-
-        let splitArgs = #"{"mode":"split","inputPath":"input.pdf","pages":"1,3","outputDir":"split","outputPrefix":"doc"}"#
-        let split = try await EditPDFPagesTool().execute(ToolArgs(raw: splitArgs), in: ctx)
-        XCTAssertEqual(split.changedFiles?.count, 2)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: ws.appendingPathComponent("split/doc-page-001.pdf").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: ws.appendingPathComponent("split/doc-page-003.pdf").path))
-        #else
-        throw XCTSkip("PDFKit/AppKit unavailable")
-        #endif
-    }
-
     func testCompileLatexUsesInjectedShellAndReportsPDF() async throws {
         let ws = try tempWorkspace()
         defer { try? FileManager.default.removeItem(at: ws) }
@@ -1606,87 +1689,38 @@ final class IntatisToolsTests: XCTestCase {
     }
     #endif
 
-    func testReconstructDocumentImageUsesInjectedShellAndReportsOutput() async throws {
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        try Data("image".utf8).write(to: ws.appendingPathComponent("scan.png"))
-        try FileManager.default.createDirectory(at: ws.appendingPathComponent("docs"), withIntermediateDirectories: true)
-        try Data("# Scan".utf8).write(to: ws.appendingPathComponent("docs/scan.md"))
-        let ctx = ToolContext(
-            workspaceRoot: ws,
-            shell: FakeShell(result: ShellResult(stdout: "docling ok", stderr: "", exitCode: 0)),
-            git: FakeGit(statusText: "", diffText: ""))
-
-        let obs = try await ReconstructDocumentImageTool().execute(
-            ToolArgs(raw: #"{"imagePath":"scan.png","outputPath":"docs/scan.md","format":"markdown","backend":"docling"}"#),
-            in: ctx)
-
-        XCTAssertEqual(obs.changedFiles, ["docs/scan.md"])
-        XCTAssertTrue(obs.text.contains("reconstructed scan.png"))
-    }
-
     func testDocumentToolDescriptionsDefineNonOverlappingSelectionContract() {
         let pdf = ReadPDFTool.descriptor.description
-        XCTAssertTrue(pdf.contains("does not perform OCR"))
-        XCTAssertTrue(pdf.contains("use read_document"))
+        XCTAssertTrue(pdf.contains("never performs OCR"))
+        XCTAssertTrue(pdf.contains("document_ocr"))
 
-        let document = ReadDocumentTool.descriptor.description
-        XCTAssertTrue(document.contains("up to 512 MiB"))
-        XCTAssertTrue(document.contains("preferred reading tool"))
-        XCTAssertTrue(document.contains("omit backend or use 'auto'"))
-        XCTAssertTrue(document.contains("does not create an output artifact"))
-
-        let reconstruction = ReconstructDocumentImageTool.descriptor.description
-        XCTAssertTrue(reconstruction.contains("explicitly requests conversion or reconstruction"))
-        XCTAssertTrue(reconstruction.contains("do not use it for ordinary reading or summarization"))
-        XCTAssertTrue(reconstruction.contains("do not pass a PDF as imagePath"))
-    }
-
-    func testReadDocumentAccepts314MiBSparsePDF() async throws {
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        let inputURL = ws.appendingPathComponent("textbook-scan.pdf")
-        XCTAssertTrue(FileManager.default.createFile(atPath: inputURL.path, contents: nil))
-        let handle = try FileHandle(forWritingTo: inputURL)
-        try handle.truncate(atOffset: 329_384_679)
-        try handle.close()
-        let shell = FakeShell(result: ShellResult(
-            stdout: "__INTATIS_DOCUMENT_BACKEND__=docling\n# Table of Contents\n",
-            stderr: "",
-            exitCode: 0))
-
-        let observation = try await ReadDocumentTool().execute(
-            ToolArgs(raw: #"{"path":"textbook-scan.pdf"}"#),
-            in: ToolContext(workspaceRoot: ws, shell: shell))
-
-        XCTAssertTrue(observation.text.contains("Backend: docling"))
-        XCTAssertTrue(observation.text.contains("# Table of Contents"))
-    }
-
-    func testReadDocumentOversizePreflightRejectsWithoutSideEffect() async throws {
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        let inputURL = ws.appendingPathComponent("oversize.pdf")
-        XCTAssertTrue(FileManager.default.createFile(atPath: inputURL.path, contents: nil))
-        let handle = try FileHandle(forWritingTo: inputURL)
-        try handle.truncate(atOffset: UInt64(ReadDocumentTool.maximumInputBytes + 1))
-        try handle.close()
-        let recorder = CommandRecorder()
-        let shell = RecordingShell(
-            recorder: recorder,
-            result: ShellResult(stdout: "unexpected", stderr: "", exitCode: 0))
-
-        do {
-            _ = try await ReadDocumentTool().execute(
-                ToolArgs(raw: #"{"path":"oversize.pdf"}"#),
-                in: ToolContext(workspaceRoot: ws, shell: shell))
-            XCTFail("oversize input unexpectedly reached the document backend")
-        } catch let error as ToolExecutionRejectedWithoutSideEffect {
-            XCTAssertEqual(error.code, "read_document_input_too_large")
-            XCTAssertTrue(error.message.contains("512 MiB"))
+        let readers = [
+            ReadDOCXTool.descriptor,
+            ReadPPTXTool.descriptor,
+            ReadXLSXTool.descriptor,
+            ReadHTMLTool.descriptor,
+            ReadEPUBTool.descriptor,
+        ]
+        for reader in readers {
+            XCTAssertTrue(reader.description.contains("fixed local Docling"), reader.name)
+            XCTAssertTrue(reader.description.contains("no fallback"), reader.name)
         }
-        let recordedCommands = await recorder.all()
-        XCTAssertTrue(recordedCommands.isEmpty)
+
+        let ocr = DocumentOCRTool.descriptor.description
+        XCTAssertTrue(ocr.contains("explicit offline OCR"))
+        XCTAssertTrue(ocr.contains("never chooses an OCR engine automatically"))
+
+        let render = DocumentRenderTool.descriptor.description
+        XCTAssertTrue(render.contains("deterministic PNG"))
+        XCTAssertTrue(render.contains("committed atomically"))
+
+        let export = DocumentExportPDFTool.descriptor.description
+        XCTAssertTrue(export.contains("PDF input is rejected"))
+        XCTAssertTrue(export.contains("pdfcpu strict validation"))
+
+        let write = DocumentWriteTool.descriptor.description
+        XCTAssertTrue(write.contains("PDF mutation is unsupported"))
+        XCTAssertTrue(write.contains("atomically committed"))
     }
 
     func testGenerateImageUsesInjectedService() async throws {
@@ -1746,7 +1780,7 @@ final class IntatisToolsTests: XCTestCase {
 
         XCTAssertEqual(intent.action, "media.edit")
         XCTAssertEqual(intent.dataEffects, [.read, .mutate, .network])
-        XCTAssertEqual(intent.replayPolicy, .requiresManualReconciliation)
+        XCTAssertEqual(intent.replayPolicy, .doNotReplay)
         XCTAssertEqual(intent.resources, [
             PermissionResource(kind: .workspacePath,
                                value: "source.webp",
@@ -1800,55 +1834,6 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertTrue(obs.text.contains(#"textbox "Email" selector=#email type=email"#), obs.text)
         XCTAssertTrue(obs.text.contains(#"combobox "Priority" selector=#priority options=[Low, High]"#), obs.text)
         XCTAssertTrue(obs.text.contains(#"button "Submit request" selector=#submit"#), obs.text)
-    }
-
-    func testBrowserTargetMissIsRejectedWithoutSideEffect() async throws {
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        let stdout = #"{"marker":"intatis_browser_backend_error_v1","code":"browser_action_target_not_found","effectDisposition":"not_started"}"#
-        let ctx = ToolContext(
-            workspaceRoot: ws,
-            shell: FakeShell(result: ShellResult(
-                stdout: stdout,
-                stderr: "BrowserActionNotStartedError: browser_action_target_not_found",
-                exitCode: 1)),
-            git: FakeGit(statusText: "", diffText: ""))
-
-        do {
-            _ = try await BrowserTypeTool().execute(
-                ToolArgs(raw: ##"{"selector":"#missing","value":"query","profile":"work"}"##),
-                in: ctx)
-            XCTFail("a trusted pre-action target miss must reject without side effects")
-        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
-            XCTAssertEqual(rejection.code, "browser_action_target_not_found")
-            XCTAssertTrue(rejection.message.contains("before the action started"))
-            XCTAssertTrue(rejection.message.contains("fresh browser_snapshot"))
-            XCTAssertFalse(rejection.message.contains("query"))
-        }
-    }
-
-    func testBrowserOrdinaryBackendFailureRemainsUncertain() async throws {
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        let ctx = ToolContext(
-            workspaceRoot: ws,
-            shell: FakeShell(result: ShellResult(
-                stdout: "",
-                stderr: "Input.dispatchMouseEvent timed out",
-                exitCode: 1)),
-            git: FakeGit(statusText: "", diffText: ""))
-
-        do {
-            _ = try await BrowserClickTool().execute(
-                ToolArgs(raw: ##"{"selector":"#submit","profile":"work"}"##),
-                in: ctx)
-            XCTFail("an ordinary backend failure must not be marked not_started")
-        } catch is ToolExecutionRejectedWithoutSideEffect {
-            XCTFail("an unstructured backend failure cannot prove that no side effect occurred")
-        } catch {
-            XCTAssertTrue(String(describing: error).contains("browser backend failed"), "\(error)")
-            XCTAssertTrue(String(describing: error).contains("Input.dispatchMouseEvent timed out"), "\(error)")
-        }
     }
 
     func testBrowserNavigateFallsBackToCDPWhenPlaywrightMissing() async throws {
@@ -2001,88 +1986,6 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertTrue(obs.text.contains("backend: cdp") || obs.text.contains("backend: playwright"))
         XCTAssertTrue(obs.text.contains("Example Domain"))
         XCTAssertTrue(obs.text.contains("Persistent browser profile: .intatis/browser/profiles/smoke"))
-    }
-
-    func testRealCDPBrowserSnapshotReportsInteractiveElementsWhenEnabled() async throws {
-        guard ProcessInfo.processInfo.environment["INTATIS_REAL_BROWSER_SMOKE"] == "1" else {
-            throw XCTSkip("set INTATIS_REAL_BROWSER_SMOKE=1 to run the real CDP form snapshot smoke")
-        }
-
-        #if canImport(Darwin)
-        let ws = try tempWorkspace()
-        defer { try? FileManager.default.removeItem(at: ws) }
-        let diagnostics = try await BrowserDiagnosticsTool().execute(
-            ToolArgs(raw: #"{"profile":"form-snapshot-smoke","channel":"msedge"}"#),
-            in: ToolContext(workspaceRoot: ws))
-        if diagnostics.text.contains("playwright available: yes") {
-            throw XCTSkip("CDP form snapshot smoke requires the CDP fallback")
-        }
-        guard diagnostics.text.contains("cdp fallback available: yes") else {
-            throw XCTSkip("CDP form snapshot smoke requires a Chromium-family browser")
-        }
-
-        let site = ws.appendingPathComponent("form-snapshot-site", isDirectory: true)
-        try FileManager.default.createDirectory(at: site, withIntermediateDirectories: true)
-        try Data("""
-        <!doctype html>
-        <title>Research Search</title>
-        <main>
-          <label for="paper-search">Search papers</label>
-          <input id="paper-search" name="query" type="search"
-                 placeholder="Search papers by title, author, abstract, or ID...">
-          <button type="submit">Find papers</button>
-        </main>
-        """.utf8).write(to: site.appendingPathComponent("index.html"))
-        let port = try freeLoopbackPort()
-        let server = try startStaticHTTPServer(directory: site, port: port)
-        defer {
-            if server.isRunning {
-                server.terminate()
-            }
-        }
-        try await waitForHTTPServer(port: port, path: "/index.html")
-
-        let ctx = ToolContext(workspaceRoot: ws)
-        _ = try await BrowserNavigateTool().execute(
-            ToolArgs(raw: #"{"url":"http://127.0.0.1:\#(port)/index.html","profile":"form-snapshot-smoke","channel":"msedge","headless":true,"waitMillis":100,"maxCharacters":4000}"#),
-            in: ctx)
-        let snapshot = try await BrowserSnapshotTool().execute(
-            ToolArgs(raw: #"{"profile":"form-snapshot-smoke","channel":"msedge","headless":true,"waitMillis":100,"maxCharacters":4000}"#),
-            in: ctx)
-
-        XCTAssertTrue(snapshot.text.contains("backend: cdp"), snapshot.text)
-        XCTAssertTrue(snapshot.text.contains("interactive elements:"), snapshot.text)
-        XCTAssertTrue(
-            snapshot.text.contains(#"textbox "Search papers" selector=#paper-search type=search"#),
-            snapshot.text)
-        XCTAssertTrue(
-            snapshot.text.contains(#"button "Find papers" selector=button type=submit"#),
-            snapshot.text)
-
-        do {
-            _ = try await BrowserTypeTool().execute(
-                ToolArgs(raw: #"{"role":"textbox","name":"Search or Article ID","value":"wrong target","profile":"form-snapshot-smoke","channel":"msedge","headless":true,"waitMillis":100,"maxCharacters":4000}"#),
-                in: ctx)
-            XCTFail("a stale role+name target should be rejected before typing")
-        } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
-            XCTAssertEqual(rejection.code, "browser_action_target_not_found")
-            XCTAssertTrue(rejection.message.contains("fresh browser_snapshot"))
-        }
-
-        let typedByName = try await BrowserTypeTool().execute(
-            ToolArgs(raw: #"{"role":"textbox","name":"Search papers","exact":true,"value":"causal inference","profile":"form-snapshot-smoke","channel":"msedge","headless":true,"waitMillis":100,"maxCharacters":4000}"#),
-            in: ctx)
-        XCTAssertTrue(typedByName.text.contains("browser action: type"), typedByName.text)
-        XCTAssertFalse(typedByName.text.contains("causal inference"), typedByName.text)
-
-        let typed = try await BrowserTypeTool().execute(
-            ToolArgs(raw: ##"{"selector":"#paper-search","value":"graph neural networks","profile":"form-snapshot-smoke","channel":"msedge","headless":true,"waitMillis":100,"maxCharacters":4000}"##),
-            in: ctx)
-        XCTAssertTrue(typed.text.contains("browser action: type"), typed.text)
-        XCTAssertFalse(typed.text.contains("graph neural networks"), typed.text)
-        #else
-        throw XCTSkip("real CDP form snapshot smoke requires Darwin")
-        #endif
     }
 
     func testRealCDPBrowserIgnoresStaleDevToolsActivePortWhenEnabled() async throws {
@@ -2498,17 +2401,10 @@ final class IntatisToolsTests: XCTestCase {
         <label for="file">Upload file</label>
         <input id="file" type="file">
         <pre id="status">waiting</pre>
-        <button id="menu" type="button" aria-expanded="false">Code</button>
-        <div id="download-menu" hidden>
-          <a id="download" href="#" download="report.txt">Download ZIP</a>
-        </div>
+        <a id="download" href="#" download="report.txt">Download report</a>
         <script>
         const blob = new Blob(["download-body-secret"], { type: "text/plain" });
         document.getElementById("download").href = URL.createObjectURL(blob);
-        document.getElementById("menu").addEventListener("click", () => {
-          document.getElementById("download-menu").hidden = false;
-          document.getElementById("menu").setAttribute("aria-expanded", "true");
-        });
         document.getElementById("file").addEventListener("change", () => {
           const file = document.getElementById("file").files[0];
           document.getElementById("status").innerText = file ? "uploaded " + file.name : "no file";
@@ -2549,13 +2445,8 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertTrue(upload.text.contains("upload/report.txt"), upload.text)
         XCTAssertTrue(upload.text.contains("uploaded report.txt"), upload.text)
 
-        let openMenu = try await BrowserClickTool().execute(
-            ToolArgs(raw: ##"{"text":"Code","exact":true,"profile":"io-smoke","channel":"msedge","headless":true,"waitMillis":250,"maxCharacters":2000}"##),
-            in: ctx)
-        XCTAssertTrue(openMenu.text.contains("Download ZIP"), openMenu.text)
-
         let download = try await BrowserDownloadTool().execute(
-            ToolArgs(raw: ##"{"text":"Download ZIP","exact":true,"profile":"io-smoke","channel":"msedge","headless":true,"downloadTimeoutMillis":10000,"waitMillis":1000,"maxCharacters":2000}"##),
+            ToolArgs(raw: ##"{"selector":"#download","profile":"io-smoke","channel":"msedge","headless":true,"downloadTimeoutMillis":10000,"waitMillis":1000,"maxCharacters":2000}"##),
             in: ctx)
 
         let changed = try XCTUnwrap(download.changedFiles)
@@ -2579,15 +2470,7 @@ final class IntatisToolsTests: XCTestCase {
         let historyURL = ws.appendingPathComponent(".intatis/browser/history.jsonl")
         let historyText = try String(contentsOf: historyURL, encoding: .utf8)
         XCTAssertTrue(historyText.contains(#""action":"upload""#))
-        XCTAssertTrue(historyText.contains(#""action":"click""#))
         XCTAssertTrue(historyText.contains(#""action":"download""#))
-        let browserSession = try XCTUnwrap(
-            ctx.browserSession as? ProcessBrowserSessionManager)
-        let activeBrowserSessions = await browserSession.activeSessionCount()
-        XCTAssertEqual(activeBrowserSessions, 1)
-        await browserSession.shutdown(reason: "real browser smoke completed")
-        let remainingBrowserSessions = await browserSession.activeSessionCount()
-        XCTAssertEqual(remainingBrowserSessions, 0)
         #else
         throw XCTSkip("real browser upload/download smoke requires Darwin")
         #endif
@@ -2778,12 +2661,6 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertTrue(click.text.contains("popup page marker reached"), click.text)
         XCTAssertTrue(click.text.contains("selected new page:"), click.text)
         XCTAssertTrue(click.text.contains("/popup.html"), click.text)
-
-        let snapshot = try await BrowserSnapshotTool().execute(
-            ToolArgs(raw: ##"{"profile":"popup-smoke","channel":"msedge","headless":true,"waitMillis":250,"maxCharacters":2000}"##),
-            in: ctx)
-        XCTAssertTrue(snapshot.text.contains("popup page marker reached"), snapshot.text)
-        XCTAssertTrue(snapshot.text.contains("/popup.html"), snapshot.text)
 
         let historyURL = ws.appendingPathComponent(".intatis/browser/history.jsonl")
         let historyText = try String(contentsOf: historyURL, encoding: .utf8)
@@ -3503,89 +3380,6 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertTrue(obs.text.contains("/opt/homebrew/lib/node_modules/playwright"))
     }
 
-    func testEveryBrowserToolProvidesAReviewerActionPreview() throws {
-        let registry = ToolRegistry.standard()
-        let invocations: [(String, String)] = [
-            ("browser_diagnostics", #"{"profile":"review","channel":"msedge"}"#),
-            ("browser_profiles", #"{"profile":"review","limit":5}"#),
-            ("browser_profile_delete", #"{"profile":"review","confirmProfile":"review"}"#),
-            ("browser_history", #"{"profile":"review","limit":5}"#),
-            ("browser_navigate", #"{"url":"https://example.com","profile":"review"}"#),
-            ("browser_snapshot", #"{"profile":"review"}"#),
-            ("browser_handoff", #"{"profile":"review","handoffSeconds":30}"#),
-            ("browser_reload", #"{"profile":"review"}"#),
-            ("browser_back", #"{"profile":"review"}"#),
-            ("browser_forward", #"{"profile":"review"}"#),
-            ("browser_click", #"{"profile":"review","text":"Code","nth":0}"#),
-            ("browser_type", ##"{"profile":"review","selector":"#query","value":"research phrase"}"##),
-            ("browser_submit", #"{"profile":"review","role":"button","name":"Search"}"#),
-            ("browser_select_option", ##"{"profile":"review","selector":"#year","optionLabel":"2026"}"##),
-            ("browser_press_key", #"{"profile":"review","key":"Enter"}"#),
-            ("browser_scroll", #"{"profile":"review","direction":"down","amount":500}"#),
-            ("browser_wait", #"{"profile":"review","text":"Results","state":"visible"}"#),
-            ("browser_screenshot", #"{"profile":"review","outputPath":"shots/page.png"}"#),
-            ("browser_upload_file", ##"{"profile":"review","selector":"#file","filePath":"upload/paper.pdf"}"##),
-            ("browser_download", #"{"profile":"review","text":"Download ZIP"}"#),
-            ("browser_downloads", #"{"profile":"review","limit":5}"#),
-            ("browser_search", #"{"profile":"review","query":"browser permission preview"}"#),
-        ]
-
-        XCTAssertEqual(
-            Set(invocations.map(\.0)),
-            Set(registry.descriptors().map(\.name).filter { $0.hasPrefix("browser_") }),
-            "every registered browser tool must have a representative preview assertion")
-
-        for (name, rawArguments) in invocations {
-            let registration = try XCTUnwrap(
-                registry.registration(named: name),
-                "missing registration for \(name)")
-            let preview = try XCTUnwrap(
-                registration.permissionActionPreview(ToolArgs(raw: rawArguments)),
-                "missing reviewer action preview for \(name)")
-            XCTAssertEqual(preview.kind, name)
-            XCTAssertFalse(preview.fields.isEmpty, name)
-            XCTAssertLessThanOrEqual(preview.fields.count, 8, name)
-        }
-    }
-
-    func testBrowserClickAndDownloadPreviewsExposeExactSafeTargets() throws {
-        let registry = ToolRegistry.standard()
-        let click = try XCTUnwrap(
-            registry.registration(named: "browser_click")?.permissionActionPreview(
-                ToolArgs(raw: #"{"profile":"continuity-proof","text":"Code","exact":true,"nth":0}"#)))
-        XCTAssertEqual(click.fields["profile"], "continuity-proof")
-        XCTAssertEqual(click.fields["target_kind"], "text")
-        XCTAssertEqual(click.fields["target"], "Code")
-        XCTAssertEqual(click.fields["exact"], "true")
-        XCTAssertEqual(click.fields["nth"], "0")
-
-        let download = try XCTUnwrap(
-            registry.registration(named: "browser_download")?.permissionActionPreview(
-                ToolArgs(raw: #"{"profile":"continuity-proof","text":"Download ZIP","downloadTimeoutMillis":20000}"#)))
-        XCTAssertEqual(download.fields["target_kind"], "text")
-        XCTAssertEqual(download.fields["target"], "Download ZIP")
-        XCTAssertEqual(
-            download.fields["download_scope"],
-            ".intatis/browser/downloads/continuity-proof")
-        XCTAssertEqual(download.fields["timeout_millis"], "20000")
-    }
-
-    func testBrowserTypePreviewNeverContainsTheTypedValue() throws {
-        let typedValue = "private-not-for-reviewer-7429"
-        let raw = ##"{"profile":"research","selector":"#query","value":"\##(typedValue)","clear":true,"submit":false}"##
-        let preview = try XCTUnwrap(
-            ToolRegistry.standard()
-                .registration(named: "browser_type")?
-                .permissionActionPreview(ToolArgs(raw: raw)))
-
-        XCTAssertEqual(preview.fields["profile"], "research")
-        XCTAssertEqual(preview.fields["target_kind"], "selector")
-        XCTAssertEqual(preview.fields["target"], "#query")
-        XCTAssertEqual(preview.fields["input_characters"], String(typedValue.count))
-        XCTAssertNil(preview.fields["value"])
-        XCTAssertFalse(preview.fields.values.contains { $0.contains(typedValue) })
-    }
-
     func testBrowserActionsUseDedicatedBrowserBackendRunner() async throws {
         let ws = try tempWorkspace()
         defer { try? FileManager.default.removeItem(at: ws) }
@@ -3652,12 +3446,8 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertEqual(commands.count, 2)
         guard commands.count == 2 else { return }
         let cdpCommand = commands[1]
-        XCTAssertTrue(cdpCommand.contains("evaluationExceptionMessage"))
-        XCTAssertTrue(cdpCommand.contains("exception.description || exception.value"))
-        XCTAssertTrue(cdpCommand.contains("ensureCurrentPage"))
-        XCTAssertTrue(cdpCommand.contains("visible element not found for browser action"))
         guard let functionStart = cdpCommand.range(
-            of: "async function pageTarget(port, preferredURL) {"),
+            of: "async function pageTarget(port) {"),
               let functionEnd = cdpCommand.range(
                 of: "class CDPClient",
                 range: functionStart.upperBound..<cdpCommand.endIndex) else {
@@ -3666,7 +3456,6 @@ final class IntatisToolsTests: XCTestCase {
         let pageTargetSource = String(
             cdpCommand[functionStart.lowerBound..<functionEnd.lowerBound])
         XCTAssertTrue(pageTargetSource.contains("/json/new?about:blank"))
-        XCTAssertTrue(pageTargetSource.contains("item.url === preferredURL"))
 
         let forgedEndpoint =
             "ws://198.51.100.77:43123/devtools/page/forged-external-target"
@@ -3689,7 +3478,7 @@ final class IntatisToolsTests: XCTestCase {
           let accepted = false;
           let error = "";
           try {
-            await pageTarget(43123, "https://example.com/");
+            await pageTarget(43123);
             accepted = true;
           } catch (caught) {
             error = String(caught && caught.message ? caught.message : caught);
@@ -4147,7 +3936,8 @@ final class IntatisToolsTests: XCTestCase {
 
     func testStandardRegistry() {
         let reg = ToolRegistry.standard()
-        XCTAssertEqual(reg.descriptors().count, 60)
+        XCTAssertEqual(reg.registryVersion, "intatis.standard.v4")
+        XCTAssertEqual(reg.descriptors().count, 66)
         XCTAssertNotNil(reg.tool(named: "read_file"))
         XCTAssertNotNil(reg.tool(named: "apply_patch"))
         XCTAssertNil(reg.tool(named: "run_shell"))
@@ -4176,9 +3966,19 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertNotNil(reg.tool(named: "git_push"))
         XCTAssertNotNil(reg.tool(named: "git_switch"))
         XCTAssertNotNil(reg.tool(named: "read_pdf"))
-        XCTAssertNotNil(reg.tool(named: "read_document"))
-        XCTAssertNotNil(reg.tool(named: "edit_pdf_pages"))
-        XCTAssertNotNil(reg.tool(named: "reconstruct_document_image"))
+        XCTAssertNotNil(reg.tool(named: "read_docx"))
+        XCTAssertNotNil(reg.tool(named: "read_pptx"))
+        XCTAssertNotNil(reg.tool(named: "read_xlsx"))
+        XCTAssertNotNil(reg.tool(named: "read_html"))
+        XCTAssertNotNil(reg.tool(named: "read_epub"))
+        XCTAssertNil(reg.tool(named: "document_read"))
+        XCTAssertNotNil(reg.tool(named: "document_ocr"))
+        XCTAssertNotNil(reg.tool(named: "document_render"))
+        XCTAssertNotNil(reg.tool(named: "document_export_pdf"))
+        XCTAssertNotNil(reg.tool(named: "document_write"))
+        XCTAssertNil(reg.tool(named: "read_document"))
+        XCTAssertNil(reg.tool(named: "edit_pdf_pages"))
+        XCTAssertNil(reg.tool(named: "reconstruct_document_image"))
         XCTAssertNotNil(reg.tool(named: "compile_latex"))
         XCTAssertNotNil(reg.tool(named: "generate_image"))
         XCTAssertNotNil(reg.tool(named: "edit_image"))
@@ -4259,7 +4059,7 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertEqual(write.metadata["byteCount"], .number(5))
         XCTAssertEqual(write.resources.first?.kind, .workspacePath)
         XCTAssertEqual(write.resources.first?.access, .readWrite)
-        XCTAssertEqual(write.replayPolicy, .requiresManualReconciliation)
+        XCTAssertEqual(write.replayPolicy, .doNotReplay)
 
         let git = GitFetchTool().permissionIntent(
             ToolArgs(raw: #"{"remote":"origin","branch":"main","prune":false}"#),

@@ -114,9 +114,8 @@ private func askArgs(to: String, question: String) -> String {
     String(decoding: try! JSONSerialization.data(withJSONObject: ["to": to, "question": question]), as: UTF8.self)
 }
 
-private func spawnArgs(name: String, path: String, model: String? = nil, canCoordinate: Bool? = nil) -> String {
+private func spawnArgs(name: String, path: String, canCoordinate: Bool? = nil) -> String {
     var object: [String: Any] = ["name": name, "path": path]
-    if let model { object["model"] = model }
     if let canCoordinate { object["canCoordinate"] = canCoordinate }
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
 }
@@ -623,7 +622,7 @@ final class IntatisCoworkTests: XCTestCase {
         XCTAssertFalse(systemPrompt.lowercased().contains("you can delegate freely"))
     }
 
-    func testSecretQuestionIsBlockedBeforeReachingPeer() async throws {
+    func testSecretQuestionIsBlockedBeforeReachingPeerWithoutPartialMessageFacts() async throws {
         let log = try tempLog()
         let wsA = try tempWorkspace(), wsB = try tempWorkspace()
         let provA = ScriptedProvider([
@@ -644,10 +643,18 @@ final class IntatisCoworkTests: XCTestCase {
         let events = await log.replay()
         let a2a = events.filter { if case .agentToAgentMessage = $0.event { return true } else { return false } }
         XCTAssertTrue(a2a.isEmpty, "secret content must not be forwarded")
-        let denies = events.compactMap { e -> PermissionReviewPayload? in
-            if case .permissionReview(let p) = e.event, p.decision == .deny { return p } else { return nil }
+        let mediationAudits = events.compactMap { e -> PermissionReviewPayload? in
+            if case .permissionReview(let payload) = e.event { return payload }
+            return nil
         }
-        XCTAssertFalse(denies.isEmpty)
+        let results = events.compactMap { event -> ToolResultPayload? in
+            if case .toolResult(let payload) = event.event { return payload }
+            return nil
+        }
+        XCTAssertTrue(mediationAudits.isEmpty, "Mediator rejection must not append communication audit facts")
+        XCTAssertTrue(results.contains {
+            $0.observation.contains("blocked by the mediator")
+        })
     }
 
     func testMainCanSpawnWorkerButSpawnedWorkerHasNoCoordinatorTools() async throws {
@@ -662,7 +669,7 @@ final class IntatisCoworkTests: XCTestCase {
         }
         let mainProvider = ScriptedProvider([
             [.toolCalls([ToolCall(id: "spawn", name: "spawn_agent",
-                                  arguments: spawnArgs(name: worker.rawValue, path: wsWorker.path, model: "m"))]),
+                                  arguments: spawnArgs(name: worker.rawValue, path: wsWorker.path))]),
              .done(finishReason: "tool_calls")],
             [.textDelta("worker ready"), .done(finishReason: "stop")],
         ])
@@ -700,7 +707,7 @@ final class IntatisCoworkTests: XCTestCase {
         XCTAssertTrue(systemPrompt.contains("only after receiving its ToolResult"))
         XCTAssertTrue(systemPrompt.contains("You are executing the assigned task as a worker agent."))
         XCTAssertTrue(systemPrompt.contains("Do not create, remove, or coordinate other agents."))
-        XCTAssertTrue(systemPrompt.contains("Only reply to task-related messages when reply_message is available."))
+        XCTAssertTrue(systemPrompt.contains("Use reply_message only once for the exact frozen information"))
         XCTAssertTrue(systemPrompt.contains("Do not re-run the global task decomposition."))
         XCTAssertFalse(systemPrompt.contains("spawn_agent"))
         XCTAssertFalse(systemPrompt.contains("ask_agent"))
@@ -724,7 +731,6 @@ final class IntatisCoworkTests: XCTestCase {
             [.toolCalls([ToolCall(id: "spawn", name: "spawn_agent",
                                   arguments: spawnArgs(name: lead.rawValue,
                                                        path: wsLead.path,
-                                                       model: "m",
                                                        canCoordinate: true))]),
              .done(finishReason: "tool_calls")],
             [.textDelta("lead ready"), .done(finishReason: "stop")],
@@ -824,7 +830,7 @@ final class IntatisCoworkTests: XCTestCase {
 
     func testSpawnAgentIntentIsControlPlaneAndDefaultsToReadOnly() throws {
         let root = URL(fileURLWithPath: "/workspace")
-        let args = ToolArgs(raw: #"{"name":"counter","path":"/workspace","model":"m","canCoordinate":false}"#)
+        let args = ToolArgs(raw: #"{"name":"counter","path":"/workspace","canCoordinate":false}"#)
         let tool = SpawnAgentTool()
         let intent = tool.permissionIntent(args, workspaceRoot: root)
 

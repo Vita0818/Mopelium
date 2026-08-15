@@ -1,6 +1,6 @@
 ---
 name: cowork-agent-orchestration
-description: Proactively plan, track, and route Intatis Cowork work when coordinator capabilities are available, including deciding direct execution versus agent reuse, delegation, or spawn; selecting newer adequate host-approved inference profiles under cost-first, cost-efficient-balanced, or efficiency-first priorities; pairing a declared-capable multimodal companion when needed; and minimizing workspace and coordination leases.
+description: Proactively plan, track, route, and close Intatis Cowork work when coordinator capabilities are available, including direct execution versus agent reuse, delegation, or spawn; host-approved inference-profile selection; multimodal companions; least-authority leases; exact run closure; and correlation-safe mailbox follow-ups without acknowledgment loops.
 ---
 
 # Cowork agent orchestration
@@ -26,6 +26,13 @@ or budgets.
   current task lease. Do not build a permanent recursive role tree.
 - Use scheduler, task, delegation, and message tools. Never simulate a nested
   `AgentLoop`, a completed WorkTask, or a successful child result in prose.
+- A multi-call assistant response is neither a transaction nor a concurrency
+  guarantee. Do not use one to request or assume parallel execution. Batch only
+  mutually independent calls that remain correct in any host-controlled order.
+- An agent name, WorkTask ID, attachment, or other host object becomes usable only
+  after the call that creates or discovers it returns a successful `ToolResult`.
+  `task_create` does not assign an agent. A `delegate_task` target must be an already
+  attached data-plane agent. Planned or future agents and tasks are not existing objects.
 - Prefer the smallest team and the least authority that can complete the task.
   Delegation overhead is real work and real model cost.
 
@@ -39,8 +46,8 @@ or budgets.
    when the user explicitly requests a persistent or cross-run objective and the
    corresponding tool is advertised.
 3. For non-trivial work, use advertised task tools to create the smallest useful
-   graph of verifiable WorkTasks. Keep ownership, dependencies, progress, result, and
-   evidence current instead of maintaining a prose-only plan.
+   graph of verifiable WorkTasks. Keep dependencies, progress, result, and evidence
+   current instead of maintaining a prose-only plan. Do not assign agents during Task creation.
 4. Evaluate the collaboration criteria below at the outset. Start ready independent,
    specialist, multimodal, review, or directory-scoped branches promptly when their
    benefit exceeds coordination cost; collaboration should not be reserved only for
@@ -51,6 +58,24 @@ or budgets.
 6. Keep advancing until the requested outcome is verified or a genuine blocker
    remains. Never infer completion from a plan, an invocation ending, or unverified
    prose.
+7. When `finish_run` is advertised, call it after the exact current request is
+   verified and no further run-scoped work is useful. When `stop_run` is advertised,
+   call it only when no further useful progress is possible or a genuine blocker
+   remains. The host binds both tools to the current run; never invent an ID. After
+   either succeeds, make no more tool or agent calls and return one final response.
+
+## Keep mailbox conversations live without acknowledgment loops
+
+- `reply_message` answers one exact frozen `information_request` Message ID. It is a
+  terminal response only for that request correlation, not a ban on future dialogue.
+- Receipt of an `information_reply` requires no acknowledgment and must not trigger a
+  reverse `reply_message`.
+- If the reply reveals a genuinely useful next question and `request_information` is
+  advertised, create a fresh request correlation with `based_on` set to the reply
+  Message ID. The host retains the same conversation root while giving the new turn a
+  distinct request ID.
+- Never use a fresh request merely to say thanks, confirm receipt, or keep an agent
+  awake. Continue only when the answer can change remaining work or verification.
 
 ## Select the operating priority
 
@@ -82,7 +107,7 @@ Collaborate only when at least one of these is true:
 - the user explicitly asks for multi-agent work.
 
 Do not split a serial chain merely to create agents. Keep shared-state edits with one
-owner unless the WorkTasks have non-overlapping expected artifacts.
+active editor unless the WorkTasks have non-overlapping expected artifacts.
 
 ## Select an adequate profile
 
@@ -148,10 +173,30 @@ coding, or synthesis.
 6. Use `spawn_agent` only for a deliberately persistent specialist, a different
    subfolder, a write-capable worker, an explicitly different approved profile, or a
    teammate that must receive several related tasks. Delegate the actual WorkTask
-   after the spawn succeeds.
+   only after the spawn returns a successful `ToolResult`.
 7. Set `canCoordinate: false` unless the child must own a real subgraph and the
    current delegation budget permits another level. Coordination authority is never
    required merely to read, edit, test, or report.
+
+### Stage causally dependent calls
+
+Use separate tool-call rounds whenever a later call depends on an earlier result.
+The recommended sequence for a WorkTask that will be delegated to a new explicit
+worker is:
+
+1. Call `task_create`, wait for its successful `ToolResult`, and retain the returned
+   durable WorkTask ID.
+2. Call `spawn_agent`, then wait for a successful `ToolResult` proving that the agent
+   is attached. A planned name is not proof.
+3. In a later round, call `delegate_task` with the confirmed WorkTask ID and attached
+   agent. The host links the resulting invocation as part of one delegation admission.
+
+Alternatively, spawn first and wait for success before creating and delegating a Task.
+Never pass a planned agent name to `delegate_task` in the same assistant response that
+calls `spawn_agent` for it. Independent calls may be batched, but batching is only an
+efficiency hint, never a concurrency request or guarantee. For multiple workers, batch
+within one stage only: create all Tasks, await all results, spawn all workers, await all
+results, then delegate only the confirmed WorkTask and agent pairs.
 
 ## Minimize leases and information
 

@@ -10,7 +10,7 @@ func printConfig(_ config: CLIConfig) {
     mode     : \(config.mode.rawValue)
     api key  : \(config.hasConfiguredCredential ? "(configured, hidden)" : "(unset)")
     routes   : \(config.providerRoutes.count)
-    config   : \(config.configurationFileURL == nil ? ConfigFile.url.path : "(advanced Mopelium config, path hidden)")
+    config   : \(config.configurationFileURL == nil ? ConfigFile.url.path : "(advanced Intatis config, path hidden)")
 
     """)
 }

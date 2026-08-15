@@ -41,7 +41,9 @@ final class IntatisPermissionTests: XCTestCase {
 
     func testContainsSecret() {
         XCTAssertTrue(SecretScanner.containsSecret("token=ghp_abcdef123456"))
+        XCTAssertTrue(SecretScanner.containsSecret("api_key=sk-supersecretvalue"))
         XCTAssertTrue(SecretScanner.containsSecret("-----BEGIN OPENSSH PRIVATE KEY-----"))
+        XCTAssertFalse(SecretScanner.containsSecret("ask-user or automatic-review"))
         XCTAssertFalse(SecretScanner.containsSecret("just some normal source code"))
     }
 
@@ -58,6 +60,26 @@ final class IntatisPermissionTests: XCTestCase {
         guard case .allow = gate.evaluate(call("read_file", .readOnly, paths: ["a.swift"]), ctx()) else {
             return XCTFail("read should allow")
         }
+    }
+
+    func testGateLocalKnowledgeSearchPassesToReviewerInsteadOfGenericReadAllow() {
+        let intent = PermissionIntent(
+            action: "knowledge.search.local",
+            resources: [PermissionResource(
+                kind: .tool,
+                value: "knowledge_base:host-bound")],
+            dataEffects: [.read],
+            replayPolicy: .safeToReplay)
+        guard case .pass(let reason, let risk) = gate.evaluate(
+            call(
+                "search_knowledge",
+                .readOnly,
+                intent: intent),
+            ctx(profile: .reviewed)) else {
+            return XCTFail("local knowledge search should reach the reviewer route")
+        }
+        XCTAssertEqual(reason, "search host-mounted untrusted knowledge evidence")
+        XCTAssertEqual(risk, .low)
     }
 
     func testGateWriteReviewedPassesToReviewer() {
@@ -115,6 +137,60 @@ final class IntatisPermissionTests: XCTestCase {
         }
     }
 
+    func testGateStructuredDocumentReaderPassesUnderReadOnlyWithoutShellAuthority() {
+        let intent = PermissionIntent(
+            action: "document.read",
+            resources: [PermissionResource(
+                kind: .workspacePath,
+                value: "report.docx",
+                access: .readOnly)],
+            metadata: [
+                "execution_class": .string(
+                    PermissionIntent.structuredReadOnlyExecutionClass),
+            ],
+            dataEffects: [.read, .execute],
+            risks: [.processExecution],
+            replayPolicy: .doNotReplay)
+
+        XCTAssertTrue(intent.isReadOnlyWorkspaceCompatible)
+        XCTAssertTrue(intent.isStructuredReadOnlyExecution)
+        guard case .pass(let reason, let risk) = gate.evaluate(
+            call(
+                "read_docx",
+                .exec,
+                paths: ["report.docx"],
+                intent: intent),
+            ctx(profile: .readOnly, allowsShell: false)) else {
+            return XCTFail("fixed structured read-only execution should reach review")
+        }
+        XCTAssertEqual(reason, "run fixed structured read-only document backend")
+        XCTAssertEqual(risk, .medium)
+    }
+
+    func testStructuredReadOnlyMarkerCannotAuthorizeMutationOrGenericShell() {
+        let mutating = PermissionIntent(
+            action: "document.read",
+            resources: [PermissionResource(
+                kind: .workspacePath,
+                value: "report.docx",
+                access: .readWrite)],
+            metadata: [
+                "execution_class": .string(
+                    PermissionIntent.structuredReadOnlyExecutionClass),
+            ],
+            dataEffects: [.read, .execute, .mutate],
+            risks: [.processExecution, .workspaceMutation],
+            replayPolicy: .doNotReplay)
+        XCTAssertFalse(mutating.isReadOnlyWorkspaceCompatible)
+        XCTAssertFalse(mutating.isStructuredReadOnlyExecution)
+
+        guard case .deny = gate.evaluate(
+            call("run_shell", .exec, args: #"{"command":"ls"}"#),
+            ctx(profile: .readOnly, allowsShell: true)) else {
+            return XCTFail("generic shell must remain denied in read_only")
+        }
+    }
+
     func testGateDestructiveNetworkPassesHighRisk() {
         guard case .pass(let reason, let risk) = gate.evaluate(call("git_push", .destructive, paths: [".git"], network: true),
                                                              ctx(profile: .reviewed, allowsShell: true)) else {
@@ -151,7 +227,7 @@ final class IntatisPermissionTests: XCTestCase {
             dataEffects: [.none],
             controlEffects: [],
             risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
         guard case .allow(_, let risk) = gate.evaluate(
             call("rename_session", .write, intent: intent),
             ctx(profile: .reviewed)) else {
@@ -167,7 +243,7 @@ final class IntatisPermissionTests: XCTestCase {
             dataEffects: [.none],
             controlEffects: [],
             risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
         guard case .pass = gate.evaluate(
             call("rename_session", .write, intent: intent),
             ctx(profile: .reviewed)) else {
@@ -182,7 +258,7 @@ final class IntatisPermissionTests: XCTestCase {
             dataEffects: [.none],
             controlEffects: [],
             risks: [.controlPlaneMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
         guard case .deny = gate.evaluate(
             call("rename_session", .write, intent: intent),
             ctx(profile: .locked)) else {
@@ -235,7 +311,7 @@ final class IntatisPermissionTests: XCTestCase {
                 dataEffects: [.none],
                 controlEffects: [.createAgent, .grantCapability],
                 risks: [.controlPlaneMutation, .capabilityGrant],
-                replayPolicy: .requiresManualReconciliation)
+                replayPolicy: .doNotReplay)
         }
         guard case .pass(let reason, _) = gate.evaluate(
             call("spawn_agent", .write, intent: spawnIntent(.readOnly)),
@@ -256,12 +332,12 @@ final class IntatisPermissionTests: XCTestCase {
             ("task.update", .updateTask, PermissionResource(kind: .task, value: "wt_test")),
             ("task.cancel", .cancelTask, PermissionResource(kind: .task, value: "wt_test")),
             ("task.delegate", .delegateTask, PermissionResource(kind: .task, value: "wt_test")),
-            ("goal.create", .createGoal, PermissionResource(kind: .goal, value: "current")),
             ("goal.edit", .editGoal, PermissionResource(kind: .goal, value: "goal_test")),
             ("goal.pause", .pauseGoal, PermissionResource(kind: .goal, value: "goal_test")),
             ("goal.resume", .resumeGoal, PermissionResource(kind: .goal, value: "goal_test")),
             ("goal.clear", .clearGoal, PermissionResource(kind: .goal, value: "goal_test")),
             ("goal.submit_verdict", .submitGoalVerdict, PermissionResource(kind: .goal, value: "goal_test")),
+            ("run.close.completed", .closeRun, PermissionResource(kind: .task, value: "current_run")),
         ]
 
         for (action, controlEffect, resource) in cases {
@@ -271,7 +347,7 @@ final class IntatisPermissionTests: XCTestCase {
                 dataEffects: [.none],
                 controlEffects: [controlEffect],
                 risks: [.controlPlaneMutation],
-                replayPolicy: .requiresManualReconciliation)
+                replayPolicy: .doNotReplay)
             guard case .pass(let reason, _) = gate.evaluate(
                 call(action, .write, intent: intent),
                 ctx(profile: .readOnly)) else {

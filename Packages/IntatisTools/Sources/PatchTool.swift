@@ -124,13 +124,19 @@ public struct ApplyPatchTool: Tool {
             ],
             dataEffects: [.mutate],
             risks: [.workspaceMutation],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
         let a = try args.decode(Args.self)
         let patches = UnifiedDiff.parse(a.diff)
         guard !patches.isEmpty else { throw IntatisError.io("no file sections found in diff") }
+        _ = try validateManagedWorkspaceAccess(
+            readablePaths: patches.map(\.path),
+            writablePaths: patches.map(\.path),
+            cwd: context.workspaceRoot,
+            workspaceLease: context.workspaceLease,
+            subject: "apply_patch")
 
         var changed: [String] = []
         for patch in patches {

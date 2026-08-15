@@ -2,17 +2,10 @@
 
 文档状态：当前发行合同
 生效日期：2026-07-28
-最近核对：2026-08-06
-产品基线：v0.36（build 36）
+最近核对：2026-08-11
+产品基线：v0.48（build 48）
 
 ## 产品决策
-
-Mopelium 的显示品牌不改变内部发行身份：默认继续使用 `IntatisMac` target、现有 Bundle ID、
-scheme、entitlements、`INTATIS_*` 参数和发行脚本。未来把 App/UI 显示为 Mopelium 时，不得顺带
-机械重命名这些后端标识。精确品牌边界见 `MOPELIUM_PRODUCT_DIRECTION.md`。
-
-本文件描述现有直接分发能力和安全门槛，不代表当前存在 active 发布目标。快照原有的 v0.36
-公证事项已经从 `NEXT_TARGET.md` 撤下；只有用户另行明确发布任务后才可执行签名、上传或公证。
 
 Intatis 的 macOS 产品只通过 Developer ID 签名、公证和直接下载分发。项目不再
 规划、发布或验收 Mac App Store 版本，也不再把 Mac App Store 的 App Sandbox

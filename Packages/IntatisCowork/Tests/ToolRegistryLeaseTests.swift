@@ -31,6 +31,191 @@ private final class LeaseCapturingProvider: ToolCallingProvider, @unchecked Send
     }
 }
 
+private struct LeaseHostedWebSearchService:
+    HostedWebSearchToolService
+{
+    func search(query: String) async throws -> ToolObservation {
+        ToolObservation(text: "hosted: \(query)")
+    }
+}
+
+private final class LeaseKnowledgeCallingProvider: ToolCallingProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturedRequests: [AgentRequest] = []
+
+    var requests: [AgentRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests
+    }
+
+    func stream(_ request: AgentRequest) -> AsyncThrowingStream<AgentChunk, Error> {
+        lock.lock()
+        capturedRequests.append(request)
+        let requestNumber = capturedRequests.count
+        lock.unlock()
+        return AsyncThrowingStream { continuation in
+            if requestNumber == 1 {
+                continuation.yield(.toolCalls([ToolCall(
+                    id: "host-search-call",
+                    name: "search_knowledge",
+                    arguments: "{}")]))
+                continuation.yield(.done(finishReason: "tool_calls"))
+            } else {
+                continuation.yield(.textDelta(
+                    "grounded [[evidence:ev_host_bound]]"))
+                continuation.yield(.done(finishReason: "stop"))
+            }
+            continuation.finish()
+        }
+    }
+}
+
+private final class LeaseKnowledgeDelegatingProvider: ToolCallingProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturedRequests: [AgentRequest] = []
+    private let delegatedArguments: String?
+
+    init(delegatedArguments: String? = nil) {
+        self.delegatedArguments = delegatedArguments
+    }
+
+    var requests: [AgentRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests
+    }
+
+    func stream(_ request: AgentRequest) -> AsyncThrowingStream<AgentChunk, Error> {
+        lock.lock()
+        capturedRequests.append(request)
+        let requestNumber = capturedRequests.count
+        lock.unlock()
+        return AsyncThrowingStream { continuation in
+            if requestNumber == 1, let delegatedArguments {
+                continuation.yield(.toolCalls([ToolCall(
+                    id: "delegate-knowledge-worker",
+                    name: "delegate_task",
+                    arguments: delegatedArguments)]))
+                continuation.yield(.done(finishReason: "tool_calls"))
+            } else {
+                continuation.yield(.textDelta("done"))
+                continuation.yield(.done(finishReason: "stop"))
+            }
+            continuation.finish()
+        }
+    }
+}
+
+private struct LeaseInternalKnowledgeProbeTool: Tool {
+    static let canonicalPermission: String? = "knowledge.search"
+    static let descriptor = ToolDescriptor(
+        name: "search_knowledge",
+        description: "Bound local internal knowledge probe.",
+        sideEffect: .readOnly,
+        parameters: .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+        ]))
+
+    func risksNetwork(_ args: ToolArgs) -> Bool { false }
+
+    func permissionIntent(
+        _ args: ToolArgs,
+        workspaceRoot: URL
+    ) -> PermissionIntent {
+        PermissionIntent(
+            action: "knowledge.search.local",
+            resources: [
+                PermissionResource(
+                    kind: .tool,
+                    value: "knowledge_base:host-bound"),
+            ],
+            dataEffects: [.read],
+            replayPolicy: .safeToReplay)
+    }
+
+    func permissionIntent(
+        _ args: ToolArgs,
+        descriptor: ToolDescriptor,
+        workspaceRoot: URL
+    ) -> PermissionIntent {
+        permissionIntent(args, workspaceRoot: workspaceRoot)
+    }
+
+    func execute(_ args: ToolArgs,
+                 in context: ToolContext) async throws -> ToolObservation {
+        let revision = "sha256:" + String(repeating: "a", count: 64)
+        let response: JSONValue = .object([
+            "status": .string("ok"),
+            "knowledge_base": .string(
+                "kb_0123456789abcdef0123456789abcdef"),
+            "knowledge_base_revision": .string(revision),
+            "retrieval_snapshot": .string("snap_host_bound"),
+            "retrieval_snapshot_revision": .string(revision),
+            "evidence": .array([
+                .object([
+                    "evidence_id": .string("ev_host_bound"),
+                    "rank": .number(1),
+                    "text": .string("verified evidence"),
+                    "text_sha256": .string(
+                        "sha256:e67c6d223f7cc6495f0c65e9adb1aefc235742969c4f537449b2583c2fc71f14"),
+                    "evidence_uri": .string(
+                        "knowledge://kb_0123456789abcdef0123456789abcdef/snap_host_bound/ev_host_bound"),
+                    "source_ids": .array([.string("source-host-bound")]),
+                ]),
+            ]),
+        ])
+        return ToolObservation(
+            text: "bounded knowledge evidence",
+            structuredResult: MCPStructuredToolResult(
+                content: [
+                    MCPContentBlock(
+                        kind: .structuredJSON,
+                        structuredJSON: response),
+                ],
+                structuredContent: response))
+    }
+}
+
+private struct LeaseInternalKnowledgeBuildProbeTool: Tool {
+    static let canonicalPermission: String? = "build_knowledge"
+    static let descriptor = ToolDescriptor(
+        name: "build_knowledge",
+        description: "Bound internal knowledge build probe.",
+        sideEffect: .write,
+        parameters: .object([
+            "type": .string("object"),
+            "additionalProperties": .bool(false),
+        ]))
+
+    func execute(_ args: ToolArgs,
+                 in context: ToolContext) async throws -> ToolObservation {
+        ToolObservation(text: "built")
+    }
+}
+
+private actor LeaseAugmentationCloseProbe {
+    private var closed = false
+    private var mountCount = 0
+    private var revalidatedEvidence: [ToolGroundingEvidence] = []
+
+    func markClosed() { closed = true }
+    func markMounted() { mountCount += 1 }
+    func markRevalidated(_ evidence: ToolGroundingEvidence) {
+        revalidatedEvidence.append(evidence)
+    }
+    func wasClosed() -> Bool { closed }
+    func mountedCount() -> Int { mountCount }
+    func revalidated() -> [ToolGroundingEvidence] {
+        revalidatedEvidence
+    }
+}
+
+private enum LeaseAugmentationError: Error {
+    case invalidAuthority
+}
+
 private func leaseTempLog() throws -> EventLog {
     let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("intatis-lease-\(UUID().uuidString)", isDirectory: true)
@@ -52,6 +237,505 @@ private func leaseTaskCreatedContracts(_ events: [Envelope]) -> [TaskContract] {
 }
 
 final class ToolRegistryLeaseTests: XCTestCase {
+    private func delegatedKnowledgeAugmenter(
+        probe: LeaseAugmentationCloseProbe
+    ) -> HostToolRegistryAugmenter {
+        HostToolRegistryAugmenter(
+            additionalCapabilities: [.buildKnowledge, .searchKnowledge]
+        ) { input in
+            var registrations: [ToolRegistration] = []
+            if input.capabilityLease.tools.contains(.searchKnowledge) {
+                registrations.append(ToolRegistration(
+                    descriptor: LeaseInternalKnowledgeProbeTool.descriptor,
+                    tool: LeaseInternalKnowledgeProbeTool(),
+                    canonicalPermission:
+                        LeaseInternalKnowledgeProbeTool.canonicalPermission,
+                    grantingCapabilities: [.searchKnowledge],
+                    groundingEvidenceRevalidator: { _ in }))
+            }
+            if input.capabilityLease.tools.contains(.buildKnowledge) {
+                registrations.append(ToolRegistration(
+                    descriptor:
+                        LeaseInternalKnowledgeBuildProbeTool.descriptor,
+                    tool: LeaseInternalKnowledgeBuildProbeTool(),
+                    canonicalPermission:
+                        LeaseInternalKnowledgeBuildProbeTool
+                            .canonicalPermission,
+                    grantingCapabilities: [.buildKnowledge]))
+            }
+            guard !registrations.isEmpty else {
+                throw LeaseAugmentationError.invalidAuthority
+            }
+            await probe.markMounted()
+            return HostToolRegistryAugmentationLease(
+                registry: input.baseRegistry.adding(
+                    registrations: registrations,
+                    registryVersion: "cowork-worker-knowledge-probe.v1"),
+                close: { true })
+        }
+    }
+
+    func testDefaultCoworkRegistryDoesNotExposeInternalKnowledgeTool() {
+        let ordinary = Orchestrator.toolRegistry(
+            for: CapabilityLease.coordinator(
+                workspaceAccess: .readWrite),
+            agentID: Orchestrator.mainAgentID)
+        XCTAssertNil(ordinary.tool(named: "search_knowledge"))
+        XCTAssertNil(ordinary.registration(named: "search_knowledge"))
+
+        // A capability name alone cannot manufacture the concrete host tool;
+        // only the optional runtime augmenter can add its bound registration.
+        let capabilityOnly = Orchestrator.toolRegistry(
+            for: CapabilityLease(tools: [.searchKnowledge]),
+            agentID: Orchestrator.mainAgentID)
+        XCTAssertNil(capabilityOnly.tool(named: "search_knowledge"))
+        XCTAssertNil(capabilityOnly.registration(named: "search_knowledge"))
+    }
+
+    func testHostedSearchRequiresSeparateLeaseCapabilityAndBoundService() {
+        let service = LeaseHostedWebSearchService()
+        let hostedOnly = Orchestrator.toolRegistry(
+            for: CapabilityLease(tools: [.hostedWebSearch]),
+            hostedWebSearch: service)
+
+        XCTAssertEqual(hostedOnly.registryVersion, "intatis.cowork.v4")
+        XCTAssertEqual(
+            hostedOnly.descriptors().map(\.name),
+            ["hosted_web_search"])
+        XCTAssertEqual(
+            hostedOnly.registration(named: "hosted_web_search")?
+                .grantingCapabilities,
+            [.hostedWebSearch])
+        XCTAssertNil(hostedOnly.tool(named: "browser_search"))
+        XCTAssertNil(hostedOnly.tool(named: "web_fetch"))
+
+        let browserOnly = Orchestrator.toolRegistry(
+            for: CapabilityLease(tools: [.browseWeb]),
+            hostedWebSearch: service)
+        XCTAssertNil(browserOnly.tool(named: "hosted_web_search"))
+        XCTAssertNotNil(browserOnly.tool(named: "browser_search"))
+
+        let unbound = Orchestrator.toolRegistry(
+            for: CapabilityLease(tools: [.hostedWebSearch]))
+        XCTAssertNil(unbound.tool(named: "hosted_web_search"))
+
+        let readOnlyWorker = Orchestrator.toolRegistry(
+            for: .worker(workspaceAccess: .readOnly),
+            hostedWebSearch: service)
+        XCTAssertNil(readOnlyWorker.tool(named: "hosted_web_search"))
+    }
+
+    func testOptInCoworkAugmenterAddsExactDurableCapabilityAndDrainsAfterRun() async throws {
+        let log = try leaseTempLog()
+        let workspace = try leaseTempWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let provider = LeaseKnowledgeCallingProvider()
+        let closeProbe = LeaseAugmentationCloseProbe()
+        let augmenter = HostToolRegistryAugmenter(
+            additionalCapabilities: [.searchKnowledge]) { input in
+                guard input.agentID == Orchestrator.mainAgentID,
+                      input.capabilityLease.tools.contains(.searchKnowledge),
+                      input.capabilityLease.taskID == nil
+                        || input.capabilityLease.taskID == input.taskID,
+                      input.workspaceLease.taskID == nil
+                        || input.workspaceLease.taskID == input.taskID,
+                      input.workspaceLease.rootIdentity?.matchesCurrentDirectory(
+                        rootPath: input.workspaceLease.rootPath) == true else {
+                    throw LeaseAugmentationError.invalidAuthority
+                }
+                let registration = ToolRegistration(
+                    descriptor: LeaseInternalKnowledgeProbeTool.descriptor,
+                    tool: LeaseInternalKnowledgeProbeTool(),
+                    canonicalPermission:
+                        LeaseInternalKnowledgeProbeTool.canonicalPermission,
+                    grantingCapabilities: [.searchKnowledge],
+                    groundingEvidenceRevalidator: { evidence in
+                        await closeProbe.markRevalidated(evidence)
+                    })
+                let registry = input.baseRegistry.adding(
+                    registrations: [registration],
+                    registryVersion: "cowork-internal-probe.v1")
+                return HostToolRegistryAugmentationLease(
+                    registry: registry,
+                    close: {
+                        await closeProbe.markClosed()
+                        return true
+                    })
+            }
+        let orchestrator = Orchestrator(
+            log: log,
+            allowsShell: false,
+            responder: FixedResponder(.allow),
+            internalToolRegistryAugmenter: augmenter) { _ in
+                provider
+            }
+        let attached = await orchestrator.attach(Agent(
+            name: Orchestrator.mainAgentID,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed,
+            coordinationDepth: Agent.defaultCoordinationDepth))
+        XCTAssertTrue(attached)
+
+        let replayed = await log.replay()
+        let defaultLease = try XCTUnwrap(
+            replayed.compactMap { envelope -> CapabilityLease? in
+                guard case .capabilityLeaseCreated(let payload) = envelope.event,
+                      payload.agent == Orchestrator.mainAgentID,
+                      payload.lease.taskID == nil else {
+                    return nil
+                }
+                return payload.lease
+            }.last)
+        XCTAssertTrue(defaultLease.tools.contains(.searchKnowledge))
+
+        let result = await orchestrator.send(
+            "Search the mounted knowledge base.",
+            to: Orchestrator.mainAgentID)
+        XCTAssertEqual(result, .sent)
+        let request = try XCTUnwrap(provider.requests.last)
+        XCTAssertTrue(request.tools.contains {
+            $0.name == "search_knowledge"
+        })
+        let wasClosed = await closeProbe.wasClosed()
+        XCTAssertTrue(wasClosed)
+        let revalidated = await closeProbe.revalidated()
+        XCTAssertEqual(revalidated.map(\.evidenceID), ["ev_host_bound"])
+        XCTAssertEqual(revalidated.first?.retrievalSnapshot, "snap_host_bound")
+
+        let events = await log.replay()
+        let permissionRequest = try XCTUnwrap(
+            events.compactMap { envelope -> PermissionRequestPayload? in
+                guard case .permissionRequest(let payload) = envelope.event,
+                      payload.tool == "search_knowledge" else {
+                    return nil
+                }
+                return payload
+            }.first)
+        XCTAssertEqual(permissionRequest.context?.toolCallID, "host-search-call")
+        XCTAssertEqual(
+            permissionRequest.context?.authorization?.requiredCapabilities,
+            [.searchKnowledge])
+        let permissionSettlement = try XCTUnwrap(
+            events.compactMap { envelope -> PermissionResolvedPayload? in
+                guard case .permissionResolved(let payload) = envelope.event,
+                      payload.tool == "search_knowledge" else {
+                    return nil
+                }
+                return payload
+            }.first)
+        XCTAssertEqual(permissionSettlement.requestId, permissionRequest.requestId)
+        XCTAssertEqual(permissionSettlement.decision, .allow)
+
+        let prepared = try XCTUnwrap(
+            events.compactMap { envelope -> ToolExecutionPreparedPayload? in
+                guard case .toolExecutionPrepared(let payload) = envelope.event,
+                      payload.toolCallID == "host-search-call" else {
+                    return nil
+                }
+                return payload
+            }.first)
+        XCTAssertEqual(prepared.tool, "search_knowledge")
+        XCTAssertEqual(prepared.authorization?.requiredCapabilities, [.searchKnowledge])
+        XCTAssertEqual(
+            prepared.authorization?.registryVersion,
+            "cowork-internal-probe.v1")
+
+        let toolResult = try XCTUnwrap(
+            events.compactMap { envelope -> ToolResultPayload? in
+                guard case .toolResult(let payload) = envelope.event,
+                      payload.toolCallId == "host-search-call" else {
+                    return nil
+                }
+                return payload
+            }.first)
+        XCTAssertEqual(toolResult.outcome, .succeeded)
+        XCTAssertEqual(
+            toolResult.structuredResult?.structuredContent,
+            .object([
+                "status": .string("ok"),
+                "knowledge_base": .string(
+                    "kb_0123456789abcdef0123456789abcdef"),
+                "knowledge_base_revision": .string(
+                    "sha256:" + String(repeating: "a", count: 64)),
+                "retrieval_snapshot": .string("snap_host_bound"),
+                "retrieval_snapshot_revision": .string(
+                    "sha256:" + String(repeating: "a", count: 64)),
+                "evidence": .array([
+                    .object([
+                        "evidence_id": .string("ev_host_bound"),
+                        "rank": .number(1),
+                        "text": .string("verified evidence"),
+                        "text_sha256": .string(
+                            "sha256:e67c6d223f7cc6495f0c65e9adb1aefc235742969c4f537449b2583c2fc71f14"),
+                        "evidence_uri": .string(
+                            "knowledge://kb_0123456789abcdef0123456789abcdef/snap_host_bound/ev_host_bound"),
+                        "source_ids": .array([.string("source-host-bound")]),
+                    ]),
+                ]),
+            ]))
+
+        let settled = try XCTUnwrap(
+            events.compactMap { envelope -> ToolExecutionSettledPayload? in
+                guard case .toolExecutionSettled(let payload) = envelope.event,
+                      payload.toolCallID == "host-search-call" else {
+                    return nil
+                }
+                return payload
+            }.first)
+        XCTAssertEqual(settled.executionID, prepared.executionID)
+        XCTAssertEqual(settled.tool, "search_knowledge")
+        XCTAssertEqual(settled.outcome, .succeeded)
+        XCTAssertEqual(settled.authorization, prepared.authorization)
+    }
+
+    func testOptInCoworkAugmenterStaysAbsentFromNarrowMailboxCapability() async throws {
+        let log = try leaseTempLog()
+        let mainWorkspace = try leaseTempWorkspace()
+        let workerWorkspace = try leaseTempWorkspace()
+        defer {
+            try? FileManager.default.removeItem(at: mainWorkspace)
+            try? FileManager.default.removeItem(at: workerWorkspace)
+        }
+        let main = Orchestrator.mainAgentID
+        let worker = AgentID(rawValue: "mailbox-worker")
+        let mainProvider = LeaseCapturingProvider()
+        let workerProvider = LeaseCapturingProvider()
+        let probe = LeaseAugmentationCloseProbe()
+        let augmenter = HostToolRegistryAugmenter(
+            additionalCapabilities: [.searchKnowledge]) { input in
+                await probe.markMounted()
+                return HostToolRegistryAugmentationLease(
+                    registry: input.baseRegistry.adding(
+                        registrations: [ToolRegistration(
+                            descriptor:
+                                LeaseInternalKnowledgeProbeTool.descriptor,
+                            tool: LeaseInternalKnowledgeProbeTool(),
+                            canonicalPermission:
+                                LeaseInternalKnowledgeProbeTool
+                                    .canonicalPermission,
+                            grantingCapabilities: [.searchKnowledge],
+                            groundingEvidenceRevalidator: { _ in })],
+                        registryVersion: "cowork-mailbox-probe.v1"),
+                    close: { true })
+            }
+        let orchestrator = Orchestrator(
+            log: log,
+            allowsShell: false,
+            responder: FixedResponder(.allow),
+            internalToolRegistryAugmenter: augmenter) { agent in
+                agent.name == worker ? workerProvider : mainProvider
+            }
+        let mainAttached = await orchestrator.attach(Agent(
+            name: main,
+            workspaceRoot: mainWorkspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed,
+            coordinationDepth: Agent.defaultCoordinationDepth))
+        let workerAttached = await orchestrator.attach(Agent(
+            name: worker,
+            workspaceRoot: workerWorkspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed))
+        XCTAssertTrue(mainAttached)
+        XCTAssertTrue(workerAttached)
+
+        let sent = await orchestrator.sendMessage(
+            from: main,
+            to: worker.rawValue,
+            content: "bounded mailbox message")
+        XCTAssertEqual(sent, "sent message to @mailbox-worker")
+        await orchestrator.runSchedulerUntilIdle()
+
+        let request = try XCTUnwrap(workerProvider.requests.last)
+        XCTAssertFalse(request.tools.contains {
+            $0.name == "search_knowledge"
+        })
+        let events = await log.replay()
+        let mailboxTask = try XCTUnwrap(
+            leaseTaskCreatedContracts(events).first {
+                $0.kind == .mailboxDelivery && $0.assignee == worker
+            })
+        let mailboxCapability = try XCTUnwrap(
+            events.compactMap { envelope -> CapabilityLease? in
+                guard case .capabilityLeaseCreated(let payload) = envelope.event,
+                      payload.lease.taskID == mailboxTask.id else {
+                    return nil
+                }
+                return payload.lease
+            }.first)
+        XCTAssertFalse(mailboxCapability.tools.contains(.searchKnowledge))
+        let mountedCount = await probe.mountedCount()
+        XCTAssertEqual(mountedCount, 0)
+    }
+
+    func testDelegatedWorkerCanReceiveExplicitSearchOnlyKnowledgeLease() async throws {
+        let log = try leaseTempLog()
+        let workspace = try leaseTempWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let worker = AgentID(rawValue: "knowledge-search-worker")
+        let mainProvider = LeaseKnowledgeDelegatingProvider(
+            delegatedArguments: #"{"to":"knowledge-search-worker","objective":"Search one exact knowledge store.","knowledge_access":"search"}"#)
+        let workerProvider = LeaseKnowledgeDelegatingProvider()
+        let probe = LeaseAugmentationCloseProbe()
+        let orchestrator = Orchestrator(
+            log: log,
+            allowsShell: false,
+            responder: FixedResponder(.allow),
+            internalToolRegistryAugmenter:
+                delegatedKnowledgeAugmenter(probe: probe)) { agent in
+                    agent.name == worker ? workerProvider : mainProvider
+                }
+        let mainAttached = await orchestrator.attach(Agent(
+            name: Orchestrator.mainAgentID,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed,
+            coordinationDepth: Agent.defaultCoordinationDepth))
+        let workerAttached = await orchestrator.attach(Agent(
+            name: worker,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed))
+        XCTAssertTrue(mainAttached)
+        XCTAssertTrue(workerAttached)
+
+        let sendResult = await orchestrator.send(
+            "Delegate an exact search.",
+            to: .init(rawValue: "main"))
+        XCTAssertEqual(sendResult, .sent)
+        let workerRequest = try XCTUnwrap(workerProvider.requests.last)
+        XCTAssertTrue(workerRequest.tools.contains { $0.name == "search_knowledge" })
+        XCTAssertFalse(workerRequest.tools.contains { $0.name == "build_knowledge" })
+
+        let events = await log.replay()
+        let task = try XCTUnwrap(leaseTaskCreatedContracts(events).first {
+            $0.assignee == worker && $0.kind == .agentInvocation
+        })
+        let capability = try XCTUnwrap(events.compactMap {
+            envelope -> CapabilityLease? in
+            guard case .capabilityLeaseCreated(let payload) = envelope.event,
+                  payload.lease.taskID == task.id else { return nil }
+            return payload.lease
+        }.first)
+        let workspaceLease = try XCTUnwrap(events.compactMap {
+            envelope -> WorkspaceLease? in
+            guard case .workspaceLeaseGranted(let payload) = envelope.event,
+                  payload.lease.taskID == task.id else { return nil }
+            return payload.lease
+        }.first)
+        XCTAssertTrue(capability.tools.contains(.searchKnowledge))
+        XCTAssertFalse(capability.tools.contains(.buildKnowledge))
+        XCTAssertEqual(workspaceLease.access, .readOnly)
+    }
+
+    func testDelegatedWorkerBuildAndSearchGrantIsTaskScopedAndReadWrite() async throws {
+        let log = try leaseTempLog()
+        let workspace = try leaseTempWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let worker = AgentID(rawValue: "knowledge-build-worker")
+        let mainProvider = LeaseKnowledgeDelegatingProvider(
+            delegatedArguments: #"{"to":"knowledge-build-worker","objective":"Build and verify one knowledge store.","knowledge_access":"build_and_search"}"#)
+        let workerProvider = LeaseKnowledgeDelegatingProvider()
+        let probe = LeaseAugmentationCloseProbe()
+        let orchestrator = Orchestrator(
+            log: log,
+            allowsShell: false,
+            responder: FixedResponder(.allow),
+            internalToolRegistryAugmenter:
+                delegatedKnowledgeAugmenter(probe: probe)) { agent in
+                    agent.name == worker ? workerProvider : mainProvider
+                }
+        let mainAttached = await orchestrator.attach(Agent(
+            name: Orchestrator.mainAgentID,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed,
+            coordinationDepth: Agent.defaultCoordinationDepth))
+        let workerAttached = await orchestrator.attach(Agent(
+            name: worker,
+            workspaceRoot: workspace,
+            model: ModelID(rawValue: "m"),
+            profile: .reviewed))
+        XCTAssertTrue(mainAttached)
+        XCTAssertTrue(workerAttached)
+
+        let sendResult = await orchestrator.send(
+            "Delegate an exact build.",
+            to: .init(rawValue: "main"))
+        XCTAssertEqual(sendResult, .sent)
+        let workerRequest = try XCTUnwrap(workerProvider.requests.last)
+        XCTAssertTrue(workerRequest.tools.contains { $0.name == "search_knowledge" })
+        XCTAssertTrue(workerRequest.tools.contains { $0.name == "build_knowledge" })
+
+        let events = await log.replay()
+        let task = try XCTUnwrap(leaseTaskCreatedContracts(events).first {
+            $0.assignee == worker && $0.kind == .agentInvocation
+        })
+        let taskCapabilities = try XCTUnwrap(events.compactMap {
+            envelope -> CapabilityLease? in
+            guard case .capabilityLeaseCreated(let payload) = envelope.event,
+                  payload.lease.taskID == task.id else { return nil }
+            return payload.lease
+        }.first)
+        let taskWorkspace = try XCTUnwrap(events.compactMap {
+            envelope -> WorkspaceLease? in
+            guard case .workspaceLeaseGranted(let payload) = envelope.event,
+                  payload.lease.taskID == task.id else { return nil }
+            return payload.lease
+        }.first)
+        XCTAssertTrue(taskCapabilities.tools.contains(.buildKnowledge))
+        XCTAssertTrue(taskCapabilities.tools.contains(.searchKnowledge))
+        XCTAssertEqual(taskWorkspace.access, .readWrite)
+
+        let workerDefaults = events.compactMap {
+            envelope -> CapabilityLease? in
+            guard case .capabilityLeaseCreated(let payload) = envelope.event,
+                  payload.agent == worker,
+                  payload.lease.taskID == nil else { return nil }
+            return payload.lease
+        }
+        XCTAssertTrue(workerDefaults.allSatisfy {
+            !$0.tools.contains(.buildKnowledge)
+                && !$0.tools.contains(.searchKnowledge)
+        })
+    }
+
+    func testRunControlRegistryRequiresExactMainRootInvocationAndCapability() throws {
+        let granted = CapabilityLease(tools: [.controlRun])
+        let exactMainRoot = Orchestrator.toolRegistry(
+            for: granted,
+            agentID: Orchestrator.mainAgentID,
+            canControlRun: true)
+        XCTAssertNotNil(exactMainRoot.tool(named: "finish_run"))
+        XCTAssertNotNil(exactMainRoot.tool(named: "stop_run"))
+        XCTAssertEqual(
+            exactMainRoot.registration(named: "finish_run")?.grantingCapabilities,
+            [.controlRun])
+
+        XCTAssertNil(Orchestrator.toolRegistry(
+            for: granted,
+            agentID: Orchestrator.mainAgentID).tool(named: "finish_run"))
+        XCTAssertNil(Orchestrator.toolRegistry(
+            for: granted,
+            agentID: AgentID(rawValue: "worker"),
+            canControlRun: true).tool(named: "finish_run"))
+        XCTAssertNil(Orchestrator.toolRegistry(
+            for: CapabilityLease(tools: []),
+            agentID: Orchestrator.mainAgentID,
+            canControlRun: true).tool(named: "finish_run"))
+
+        for descriptor in [FinishRunTool.descriptor, StopRunTool.descriptor] {
+            let data = try JSONEncoder().encode(descriptor.parameters)
+            let schema = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+            XCTAssertEqual(Set(properties.keys), ["reason"])
+            XCTAssertEqual(schema["required"] as? [String], ["reason"])
+            XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
+        }
+    }
+
     func testRenameSessionRegistryRequiresBothMainIdentityAndDedicatedCapability() {
         let granted = CapabilityLease(tools: [.renameSession])
         let mainRegistry = Orchestrator.toolRegistry(
@@ -114,6 +798,8 @@ final class ToolRegistryLeaseTests: XCTestCase {
         XCTAssertEqual(upgraded.count, 1)
         let upgradedLease = try XCTUnwrap(upgraded.first)
         XCTAssertTrue(upgradedLease.tools.contains(.renameSession))
+        XCTAssertTrue(upgradedLease.tools.contains(.submitGoalVerdict))
+        XCTAssertTrue(upgradedLease.tools.contains(.controlRun))
         let firstEvents = await log.replay()
         let firstCreatedCount = firstEvents.filter {
             if case .capabilityLeaseCreated(let payload) = $0.event,
@@ -130,6 +816,69 @@ final class ToolRegistryLeaseTests: XCTestCase {
         let secondCreatedCount = secondEvents.filter {
             if case .capabilityLeaseCreated(let payload) = $0.event,
                payload.agent == main { return true }
+            return false
+        }.count
+        XCTAssertEqual(secondCreatedCount, firstCreatedCount)
+    }
+
+    func testRestoreDurablyUpgradesLegacyWorkerForCorrelationSafeFollowupOnce() async throws {
+        let log = try leaseTempLog()
+        let workspace = try leaseTempWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let worker = AgentID(rawValue: "legacy-worker")
+        var legacyCapability = CapabilityLease.worker()
+        legacyCapability.tools.remove(.requestInformation)
+        legacyCapability.expiresAtTaskCompletion = false
+        let workspaceLease = WorkspaceLease(
+            rootPath: workspace.path,
+            access: .readOnly,
+            expiresAtTaskCompletion: false)
+        try await log.append([
+            .workspaceLeaseGranted(WorkspaceLeaseGrantedPayload(
+                agent: worker,
+                lease: workspaceLease)),
+            .capabilityLeaseCreated(CapabilityLeaseCreatedPayload(
+                agent: worker,
+                lease: legacyCapability)),
+            .agentAttached(AgentAttachedPayload(
+                agent: worker,
+                path: workspace.path,
+                model: ModelID(rawValue: "m"),
+                profile: PermissionProfile.reviewed.rawValue)),
+        ])
+
+        let first = Orchestrator(
+            log: log,
+            allowsShell: false,
+            responder: FixedResponder(.deny)) { _ in LeaseCapturingProvider() }
+        await first.restore(from: CoworkProjection.build(from: await log.replay()))
+
+        let afterFirst = CoworkProjection.build(from: await log.replay())
+        XCTAssertNil(afterFirst.capabilityLeases[legacyCapability.id])
+        let upgraded = afterFirst.capabilityLeaseAgents.compactMap { leaseID, agent in
+            agent == worker ? afterFirst.capabilityLeases[leaseID] : nil
+        }
+        XCTAssertEqual(upgraded.count, 1)
+        let upgradedLease = try XCTUnwrap(upgraded.first)
+        XCTAssertEqual(upgradedLease.communication, .replyOnly)
+        XCTAssertTrue(upgradedLease.tools.contains(.requestInformation))
+        XCTAssertNil(Orchestrator.toolRegistry(
+            for: upgradedLease,
+            agentID: worker).tool(named: "request_information"))
+        let firstCreatedCount = (await log.replay()).filter {
+            if case .capabilityLeaseCreated(let payload) = $0.event,
+               payload.agent == worker { return true }
+            return false
+        }.count
+
+        let second = Orchestrator(
+            log: log,
+            allowsShell: false,
+            responder: FixedResponder(.deny)) { _ in LeaseCapturingProvider() }
+        await second.restore(from: afterFirst)
+        let secondCreatedCount = (await log.replay()).filter {
+            if case .capabilityLeaseCreated(let payload) = $0.event,
+               payload.agent == worker { return true }
             return false
         }.count
         XCTAssertEqual(secondCreatedCount, firstCreatedCount)
@@ -203,11 +952,96 @@ final class ToolRegistryLeaseTests: XCTestCase {
         XCTAssertEqual(patchAuthorization.canonicalPermission, "filesystem.edit")
         XCTAssertEqual(writeAuthorization.actionPreview?.fields["content"], "a")
         XCTAssertTrue(patchAuthorization.actionPreview?.fields["diff"]?.contains("Add File: b.txt") == true)
-        XCTAssertEqual(writeAuthorization.concreteToolID, "intatis.cowork.v1/write_file")
-        XCTAssertEqual(patchAuthorization.concreteToolID, "intatis.cowork.v1/apply_patch")
+        XCTAssertEqual(writeAuthorization.concreteToolID, "intatis.cowork.v4/write_file")
+        XCTAssertEqual(patchAuthorization.concreteToolID, "intatis.cowork.v4/apply_patch")
         XCTAssertNotEqual(writeAuthorization.concreteToolID, patchAuthorization.concreteToolID)
         XCTAssertFalse(writeAuthorization.descriptorFingerprint.isEmpty)
         XCTAssertFalse(patchAuthorization.descriptorFingerprint.isEmpty)
+    }
+
+    func testDocumentCapabilitiesRegisterOnlyTheirExactReplacementTools() {
+        let expected: [(ToolCapability, String)] = [
+            (.readPDF, "read_pdf"),
+            (.readDOCX, "read_docx"),
+            (.readPPTX, "read_pptx"),
+            (.readXLSX, "read_xlsx"),
+            (.readHTML, "read_html"),
+            (.readEPUB, "read_epub"),
+            (.documentOCR, "document_ocr"),
+            (.documentRender, "document_render"),
+            (.documentExportPDF, "document_export_pdf"),
+            (.documentWrite, "document_write"),
+        ]
+        let registry = Orchestrator.toolRegistry(
+            for: CapabilityLease(tools: Set(expected.map { $0.0 })))
+
+        XCTAssertEqual(registry.registryVersion, "intatis.cowork.v4")
+        XCTAssertEqual(Set(registry.descriptors().map(\.name)), Set(expected.map { $0.1 }))
+        for (capability, name) in expected {
+            XCTAssertEqual(
+                registry.registration(named: name)?.grantingCapabilities,
+                [capability])
+        }
+
+        let legacyRead = Orchestrator.toolRegistry(for: CapabilityLease(tools: [
+            .documentRead,
+        ]))
+        let splitReaderNames = Set([
+            "read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub",
+        ])
+        XCTAssertEqual(Set(legacyRead.descriptors().map(\.name)), splitReaderNames)
+        for name in splitReaderNames {
+            XCTAssertEqual(
+                legacyRead.registration(named: name)?.grantingCapabilities,
+                [.documentRead])
+        }
+        XCTAssertNil(legacyRead.tool(named: "document_read"))
+
+        let retiredLegacy = Orchestrator.toolRegistry(for: CapabilityLease(tools: [
+            .readDocument,
+            .editPDF,
+            .reconstructDocument,
+        ]))
+        XCTAssertTrue(retiredLegacy.descriptors().isEmpty)
+
+        let mixed = Orchestrator.toolRegistry(for: CapabilityLease(tools: [
+            .documentRead,
+            .readDOCX,
+        ]))
+        XCTAssertEqual(
+            mixed.registration(named: "read_docx")?.grantingCapabilities,
+            [.readDOCX])
+        XCTAssertEqual(
+            mixed.registration(named: "read_pptx")?.grantingCapabilities,
+            [.documentRead])
+    }
+
+    func testDocumentProcessAccessIsSeparateFromMutationConflictAuthority() {
+        for capability in [
+            ToolCapability.readDOCX,
+            .readPPTX,
+            .readXLSX,
+            .readHTML,
+            .readEPUB,
+            .documentOCR,
+        ] {
+            let lease = CapabilityLease(tools: [capability])
+            XCTAssertFalse(Orchestrator.requiresReadWriteWorkspaceAccess(lease))
+            XCTAssertFalse(Orchestrator.hasWorkspaceMutationCapability(lease))
+        }
+        for capability in [
+            ToolCapability.documentRender,
+            .documentExportPDF,
+            .documentWrite,
+        ] {
+            let lease = CapabilityLease(tools: [capability])
+            XCTAssertTrue(Orchestrator.requiresReadWriteWorkspaceAccess(lease))
+            XCTAssertTrue(Orchestrator.hasWorkspaceMutationCapability(lease))
+        }
+        XCTAssertFalse(Orchestrator.requiresReadWriteWorkspaceAccess(
+            CapabilityLease(tools: [.readPDF])))
+        XCTAssertFalse(Orchestrator.hasWorkspaceMutationCapability(
+            CapabilityLease(tools: [.readPDF])))
     }
 
     func testScopedRegistryFailsClosedForWrongLeaseAndDuplicateNames() throws {
@@ -323,7 +1157,7 @@ final class ToolRegistryLeaseTests: XCTestCase {
                 }
             }
 
-        let wrongConcreteTool = try replacing("concreteToolID", with: "intatis.cowork.v1/other")
+        let wrongConcreteTool = try replacing("concreteToolID", with: "intatis.cowork.v4/other")
         XCTAssertThrowsError(try registry.validateAuthorizationSnapshot(
             wrongConcreteTool,
             toolName: "write_file",
@@ -485,7 +1319,7 @@ final class ToolRegistryLeaseTests: XCTestCase {
             taskID: granted.taskID,
             tools: granted.tools,
             communication: granted.communication,
-            delegation: .requestOnly)
+            delegation: .none)
         XCTAssertThrowsError(try registry.resolveAuthorization(
             toolName: "delegate_task",
             intent: delegate.permissionIntent(delegateArgs, workspaceRoot: root),
@@ -556,11 +1390,21 @@ final class ToolRegistryLeaseTests: XCTestCase {
         let registry = Orchestrator.toolRegistry(for: .worker(taskID: TaskID(rawValue: "task_worker")))
         let toolNames = Set(registry.descriptors().map(\.name))
 
+        XCTAssertEqual(registry.registryVersion, "intatis.cowork.v4")
         XCTAssertTrue(toolNames.contains("read_file"))
         XCTAssertTrue(toolNames.contains("read_pdf"))
         XCTAssertTrue(toolNames.contains("list_files"))
         XCTAssertTrue(toolNames.contains("search_text"))
+        XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
+            .allSatisfy(toolNames.contains))
+        XCTAssertFalse(toolNames.contains("document_read"))
+        XCTAssertTrue(toolNames.contains("document_ocr"))
+        XCTAssertFalse(toolNames.contains("document_render"))
+        XCTAssertFalse(toolNames.contains("document_export_pdf"))
+        XCTAssertFalse(toolNames.contains("document_write"))
+        XCTAssertFalse(toolNames.contains("read_document"))
         XCTAssertFalse(toolNames.contains("edit_pdf_pages"))
+        XCTAssertFalse(toolNames.contains("reconstruct_document_image"))
         XCTAssertFalse(toolNames.contains("compile_latex"))
         XCTAssertFalse(toolNames.contains("generate_image"))
         XCTAssertFalse(toolNames.contains("edit_image"))
@@ -623,6 +1467,67 @@ final class ToolRegistryLeaseTests: XCTestCase {
         XCTAssertFalse(toolNames.contains("update_goal"))
     }
 
+    func testWorkerTaskUpdateSchemaExposesOnlyBoundProgressAndSettlementFields() throws {
+        let workerRegistry = Orchestrator.toolRegistry(
+            for: .worker(taskID: TaskID(rawValue: "task_worker")))
+        let workerRegistration = try XCTUnwrap(
+            workerRegistry.registration(named: "task_update"))
+        let workerSchemaData = try JSONEncoder().encode(
+            workerRegistration.descriptor.parameters)
+        let workerSchema = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: workerSchemaData) as? [String: Any])
+        let workerProperties = try XCTUnwrap(
+            workerSchema["properties"] as? [String: Any])
+
+        XCTAssertEqual(workerRegistry.registryVersion, "intatis.cowork.v4")
+        XCTAssertEqual(
+            workerRegistration.grantingCapabilities,
+            [.updateBoundWorkTask])
+        XCTAssertEqual(
+            Set(workerProperties.keys),
+            Set([
+                "task_id", "expected_revision", "progress_note",
+                "status", "result", "evidence",
+            ]))
+        XCTAssertEqual(
+            workerSchema["required"] as? [String],
+            ["task_id", "expected_revision"])
+        XCTAssertEqual(workerSchema["additionalProperties"] as? Bool, false)
+        let workerStatus = try XCTUnwrap(
+            workerProperties["status"] as? [String: Any])
+        XCTAssertEqual(
+            Set(workerStatus["enum"] as? [String] ?? []),
+            Set([
+                WorkTaskStatus.inProgress.rawValue,
+                WorkTaskStatus.blocked.rawValue,
+                WorkTaskStatus.completed.rawValue,
+                WorkTaskStatus.failed.rawValue,
+            ]))
+
+        let managerRegistry = Orchestrator.toolRegistry(
+            for: .coordinator(taskID: TaskID(rawValue: "task_manager")))
+        let managerRegistration = try XCTUnwrap(
+            managerRegistry.registration(named: "task_update"))
+        let managerSchemaData = try JSONEncoder().encode(
+            managerRegistration.descriptor.parameters)
+        let managerSchema = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: managerSchemaData) as? [String: Any])
+        let managerProperties = try XCTUnwrap(
+            managerSchema["properties"] as? [String: Any])
+
+        XCTAssertEqual(
+            managerRegistration.grantingCapabilities,
+            [.manageWorkTasks])
+        XCTAssertEqual(
+            Set(managerProperties.keys),
+            Set([
+                "task_id", "expected_revision", "title", "description",
+                "acceptance_criteria", "expected_artifacts", "depends_on",
+                "priority", "progress_note", "status", "result",
+                "evidence", "retry",
+            ]))
+    }
+
     func testCoordinatorLeaseCanExposeDelegationTools() {
         let registry = Orchestrator.toolRegistry(for: .coordinator(taskID: TaskID(rawValue: "task_coord")))
         let toolNames = Set(registry.descriptors().map(\.name))
@@ -632,8 +1537,16 @@ final class ToolRegistryLeaseTests: XCTestCase {
         XCTAssertTrue(toolNames.contains("list_agents"))
         XCTAssertTrue(toolNames.contains("ask_agent"))
         XCTAssertTrue(toolNames.contains("read_pdf"))
-        XCTAssertTrue(toolNames.contains("edit_pdf_pages"))
-        XCTAssertTrue(toolNames.contains("reconstruct_document_image"))
+        XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
+            .allSatisfy(toolNames.contains))
+        XCTAssertFalse(toolNames.contains("document_read"))
+        XCTAssertTrue(toolNames.contains("document_ocr"))
+        XCTAssertTrue(toolNames.contains("document_render"))
+        XCTAssertTrue(toolNames.contains("document_export_pdf"))
+        XCTAssertTrue(toolNames.contains("document_write"))
+        XCTAssertFalse(toolNames.contains("read_document"))
+        XCTAssertFalse(toolNames.contains("edit_pdf_pages"))
+        XCTAssertFalse(toolNames.contains("reconstruct_document_image"))
         XCTAssertTrue(toolNames.contains("compile_latex"))
         XCTAssertTrue(toolNames.contains("generate_image"))
         XCTAssertTrue(toolNames.contains("edit_image"))
@@ -692,7 +1605,7 @@ final class ToolRegistryLeaseTests: XCTestCase {
         XCTAssertTrue(toolNames.contains("task_get"))
         XCTAssertTrue(toolNames.contains("task_list"))
         XCTAssertTrue(toolNames.contains("get_goal"))
-        XCTAssertTrue(toolNames.contains("create_goal"))
+        XCTAssertFalse(toolNames.contains("create_goal"))
         XCTAssertFalse(toolNames.contains("update_goal"))
     }
 
@@ -757,7 +1670,7 @@ final class ToolRegistryLeaseTests: XCTestCase {
         XCTAssertTrue(toolNames.contains("remove_agent"))
         XCTAssertTrue(toolNames.contains("list_agents"))
         XCTAssertTrue(toolNames.contains("ask_agent"))
-        XCTAssertFalse(toolNames.contains("create_goal"), "only @main receives Goal creation authority")
+        XCTAssertFalse(toolNames.contains("create_goal"), "Goal creation is host-only")
         XCTAssertTrue(toolNames.contains("get_goal"))
 
         let systemPrompt = try XCTUnwrap(request.messages.first?.content)

@@ -6,6 +6,7 @@ import IntatisTools
 import IntatisPermission
 import IntatisConversation
 import IntatisMCP
+import IntatisArtifacts
 
 public typealias ToolAuthorizationRevalidator = @Sendable (
     ResolvedToolAuthorization
@@ -62,9 +63,10 @@ public enum AgentLoopError: Error, Sendable, Equatable, LocalizedError {
     case responseEndedWithoutCompletionMarker
     case completionExpectedToolCalls(finishReason: String)
     case incompleteFinishReason(String)
-    case toolExecutionRequiresManualReconciliation(tool: String, executionID: String, reason: String)
     case repeatedDeniedToolCall(tool: String)
-    case unresolvedDeniedSideEffects([String])
+    case invalidEvidenceCitation(String)
+    case mediaOutputUnsupported(String)
+    case mediaOutputInvalid(String)
 
     public var errorDescription: String? {
         switch self {
@@ -76,12 +78,14 @@ public enum AgentLoopError: Error, Sendable, Equatable, LocalizedError {
             return "Agent response finished with \(finishReason) but provided no tool calls."
         case .incompleteFinishReason(let finishReason):
             return "Agent response ended incompletely with finish reason \(finishReason)."
-        case .toolExecutionRequiresManualReconciliation(let tool, let executionID, let reason):
-            return "Tool \(tool) may have produced a side effect before it failed (execution \(executionID)); manual reconciliation is required before retrying. \(reason)"
         case .repeatedDeniedToolCall(let tool):
             return "Agent repeatedly retried the identical denied tool call \(tool); the task was stopped to protect the automatic permission reviewer."
-        case .unresolvedDeniedSideEffects(let actions):
-            return "Agent invocation cannot complete because required side effects remain denied or failed: \(actions.joined(separator: "; "))."
+        case .invalidEvidenceCitation(let reason):
+            return "Agent invocation contains an invalid knowledge evidence citation: \(reason)"
+        case .mediaOutputUnsupported(let reason):
+            return "Tool media cannot be delivered to the selected model route: \(reason)"
+        case .mediaOutputInvalid(let reason):
+            return "Tool media failed durable validation: \(reason)"
         }
     }
 }
@@ -107,6 +111,39 @@ private struct ModelHistoryRecordingScope: Sendable {
     var taskID: TaskID?
     var submissionID: SubmissionID
     var taskAttempt: Int
+}
+
+private struct AgentMaterializedImages: Sendable {
+    var references: [ModelHistoryImageReference]
+    var attachments: [ImageAttachment]
+}
+
+/// Request-local handoff between durable tool completion and the next provider
+/// request. Keys include the TurnID so concurrent or retried invocations can
+/// never consume another turn's function-call output.
+private actor AgentToolOutputDeliveryLedger {
+    private var messages: [String: [String: AgentMessage]] = [:]
+
+    func record(
+        _ message: AgentMessage,
+        turnID: TurnID,
+        callID: String
+    ) {
+        messages[turnID.rawValue, default: [:]][callID] = message
+    }
+
+    func take(turnID: TurnID, callID: String) -> AgentMessage? {
+        let message = messages[turnID.rawValue]?[callID]
+        messages[turnID.rawValue]?[callID] = nil
+        if messages[turnID.rawValue]?.isEmpty == true {
+            messages[turnID.rawValue] = nil
+        }
+        return message
+    }
+
+    func remove(turnID: TurnID) {
+        messages[turnID.rawValue] = nil
+    }
 }
 
 /// Per-AgentLoop circuit breaker. Policy/user/reviewer denials keep the normal
@@ -138,205 +175,6 @@ private actor ToolDenialCircuitBreaker {
         denials[signature] = DenialState(
             attempts: 1,
             permitsFreshReview: permitsOneFreshReview)
-    }
-}
-
-/// Host-derived completion evidence for Cowork. A model cannot turn a denied
-/// mutating/network/exec action into a successful invocation merely by ending
-/// its response. A later successful execution against the same capability and
-/// resources clears the outstanding denial.
-private actor SideEffectEvidenceLedger {
-    private struct Key: Hashable {
-        var authority: String
-        var resources: [String]
-    }
-
-    private var unresolved: [Key: String] = [:]
-
-    /// Rebuilds completion evidence from the append-only log for the current
-    /// Cowork task. This closes the crash window between a durable permission
-    /// decision and a durable successful tool settlement: a restarted
-    /// invocation cannot simply claim completion while an earlier required
-    /// side effect for the same task still lacks host-derived success evidence.
-    func restore(from envelopes: [Envelope],
-                 taskID: TaskID,
-                 throughAttempt: Int?) {
-        for envelope in envelopes {
-            switch envelope.event {
-            case .permissionRequest(let payload):
-                guard let context = payload.context,
-                      let authorization = context.authorization,
-                      Self.belongsToCurrentTask(
-                        authorization: authorization,
-                        taskID: taskID,
-                        throughAttempt: throughAttempt)
-                else { continue }
-                recordDenied(
-                    tool: payload.tool,
-                    intent: context.intent ?? authorization.intent,
-                    authorization: authorization)
-
-            case .permissionReviewRequested(let payload):
-                guard let authorization = payload.task.authorization,
-                      Self.belongsToCurrentTask(
-                        authorization: authorization,
-                        taskID: taskID,
-                        throughAttempt: throughAttempt)
-                else { continue }
-                recordDenied(
-                    tool: payload.task.tool,
-                    intent: payload.task.intent ?? authorization.intent,
-                    authorization: authorization)
-
-            case .permissionReviewSettled(let payload):
-                guard let authorization = payload.authorization,
-                      Self.belongsToCurrentTask(
-                        authorization: authorization,
-                        taskID: taskID,
-                        throughAttempt: throughAttempt)
-                else { continue }
-                recordDenied(
-                    tool: payload.tool,
-                    intent: authorization.intent,
-                    authorization: authorization)
-
-            case .permissionResolved(let payload):
-                guard let authorization = payload.authorization,
-                      Self.belongsToCurrentTask(
-                        authorization: authorization,
-                        taskID: taskID,
-                        throughAttempt: throughAttempt)
-                else { continue }
-                recordDenied(
-                    tool: payload.tool,
-                    intent: payload.intent ?? authorization.intent,
-                    authorization: authorization)
-
-            case .toolExecutionPrepared(let payload):
-                guard Self.belongsToCurrentTask(
-                    payloadTaskID: payload.taskID,
-                    payloadAttempt: payload.attempt,
-                    authorization: payload.authorization,
-                    taskID: taskID,
-                    throughAttempt: throughAttempt),
-                    let intent = payload.intent ?? payload.authorization?.intent
-                else { continue }
-                recordDenied(
-                    tool: payload.tool,
-                    intent: intent,
-                    authorization: payload.authorization)
-
-            case .toolExecutionSettled(let payload):
-                guard Self.belongsToCurrentTask(
-                    payloadTaskID: payload.taskID,
-                    payloadAttempt: payload.attempt,
-                    authorization: payload.authorization,
-                    taskID: taskID,
-                    throughAttempt: throughAttempt),
-                    let intent = payload.intent ?? payload.authorization?.intent
-                else { continue }
-                if payload.outcome == .succeeded,
-                   let authorization = payload.authorization {
-                    recordSucceeded(intent: intent, authorization: authorization)
-                } else {
-                    recordDenied(
-                        tool: payload.tool,
-                        intent: intent,
-                        authorization: payload.authorization)
-                }
-
-            default:
-                continue
-            }
-        }
-    }
-
-    func recordDenied(tool: String,
-                      intent: PermissionIntent,
-                      authorization: ResolvedToolAuthorization?) {
-        guard Self.requiresExecutionEvidence(intent) else { return }
-        let key = Self.key(intent: intent, authorization: authorization)
-        unresolved[key] = Self.description(tool: tool, intent: intent)
-    }
-
-    func recordSucceeded(intent: PermissionIntent,
-                         authorization: ResolvedToolAuthorization) {
-        guard Self.requiresExecutionEvidence(intent) else { return }
-        let succeededKey = Self.key(
-            intent: intent,
-            authorization: authorization)
-        unresolved.removeValue(forKey: succeededKey)
-        // A malformed mutating call may not expose a usable resource yet. A
-        // later successful action in the same canonical permission family is
-        // the strongest host-derived remediation available for that wildcard.
-        unresolved.removeValue(forKey: Key(
-            authority: succeededKey.authority,
-            resources: []))
-    }
-
-    func unresolvedDescriptions() -> [String] {
-        Array(Set(unresolved.values)).sorted()
-    }
-
-    private static func requiresExecutionEvidence(_ intent: PermissionIntent) -> Bool {
-        !intent.controlEffects.isEmpty || intent.dataEffects.contains { effect in
-            effect != .none && effect != .read
-        }
-    }
-
-    private static func key(intent: PermissionIntent,
-                            authorization: ResolvedToolAuthorization?) -> Key {
-        let capabilities = authorization?.requiredCapabilities.map(\.rawValue).sorted() ?? []
-        let semanticAction: String
-        if let canonicalPermission = authorization?.canonicalPermission {
-            semanticAction = canonicalPermission
-        } else if authorization?.requiredCapabilities.contains(.applyPatch) == true
-            || intent.action == "filesystem.write"
-            || intent.action == "filesystem.patch" {
-            semanticAction = "filesystem.edit"
-        } else {
-            semanticAction = intent.action
-        }
-        let authority = capabilities.isEmpty
-            ? "action:\(semanticAction)"
-            : "capabilities:\(capabilities.joined(separator: ","))|action:\(semanticAction)"
-        let resources = intent.resources.map { resource in
-            "\(resource.kind.rawValue):\(resource.value):\(resource.access?.rawValue ?? "")"
-        }.sorted()
-        return Key(authority: authority, resources: resources)
-    }
-
-    private static func belongsToCurrentTask(
-        authorization: ResolvedToolAuthorization,
-        taskID: TaskID,
-        throughAttempt: Int?
-    ) -> Bool {
-        belongsToCurrentTask(
-            payloadTaskID: authorization.taskID,
-            payloadAttempt: authorization.attempt,
-            authorization: authorization,
-            taskID: taskID,
-            throughAttempt: throughAttempt)
-    }
-
-    private static func belongsToCurrentTask(
-        payloadTaskID: TaskID?,
-        payloadAttempt: Int?,
-        authorization: ResolvedToolAuthorization?,
-        taskID: TaskID,
-        throughAttempt: Int?
-    ) -> Bool {
-        guard (payloadTaskID ?? authorization?.taskID) == taskID else { return false }
-        guard let throughAttempt else { return true }
-        guard let eventAttempt = payloadAttempt ?? authorization?.attempt else { return true }
-        return eventAttempt <= throughAttempt
-    }
-
-    private static func description(tool: String, intent: PermissionIntent) -> String {
-        let resources = intent.resources.map(\.value).sorted().joined(separator: ", ")
-        return resources.isEmpty
-            ? "\(tool) (\(intent.action))"
-            : "\(tool) (\(intent.action)) on \(resources)"
     }
 }
 
@@ -427,14 +265,15 @@ public struct AgentLoop: Sendable {
     private let context: ContextBuilder
     private let allowsShell: Bool
     private let shell: ShellRunner
-    private let browserSession: (any BrowserSessionManaging)?
     private let terminal: (any TerminalSessionManaging)?
     private let git: GitService
     private let messenger: AgentMessenger?
     private let agentManager: AgentManager?
     private let workTaskManager: WorkTaskManager?
     private let goalManager: GoalManager?
+    private let runController: RunController?
     private let imageGenerator: ImageGenerationToolService?
+    private let imageResolver: AgentImageResolver?
     private let sessionNaming: SessionNamingService?
     private let reasoningEffort: ReasoningEffort?
     private let includeUsage: Bool
@@ -449,6 +288,7 @@ public struct AgentLoop: Sendable {
     private let authorizationPreparer: ToolAuthorizationPreparer?
     private let authorizationRevalidator: ToolAuthorizationRevalidator?
     private let toolSnapshotProvider: AgentRequestToolSnapshotProvider?
+    private let toolOutputDeliveryLedger = AgentToolOutputDeliveryLedger()
 
     public init(log: EventLog,
                 provider: ToolCallingProvider,
@@ -459,14 +299,15 @@ public struct AgentLoop: Sendable {
                 context: ContextBuilder = ContextBuilder(),
                 allowsShell: Bool,
                 shell: ShellRunner = ProcessShellRunner(),
-                browserSession: (any BrowserSessionManaging)? = nil,
                 terminal: (any TerminalSessionManaging)? = nil,
                 git: GitService = ProcessGitService(),
                 messenger: AgentMessenger? = nil,
                 agentManager: AgentManager? = nil,
                 workTaskManager: WorkTaskManager? = nil,
                 goalManager: GoalManager? = nil,
+                runController: RunController? = nil,
                 imageGenerator: ImageGenerationToolService? = nil,
+                imageResolver: AgentImageResolver? = nil,
                 sessionNaming: SessionNamingService? = nil,
                 reasoningEffort: ReasoningEffort? = nil,
                 includeUsage: Bool = false,
@@ -490,14 +331,15 @@ public struct AgentLoop: Sendable {
         self.context = context
         self.allowsShell = allowsShell
         self.shell = shell
-        self.browserSession = browserSession
         self.terminal = terminal
         self.git = git
         self.messenger = messenger
         self.agentManager = agentManager
         self.workTaskManager = workTaskManager
         self.goalManager = goalManager
+        self.runController = runController
         self.imageGenerator = imageGenerator
+        self.imageResolver = imageResolver
         self.sessionNaming = sessionNaming
         self.reasoningEffort = reasoningEffort
         self.includeUsage = includeUsage
@@ -522,6 +364,10 @@ public struct AgentLoop: Sendable {
                      userMessage: UserMessagePayload? = nil,
                      recordUserMessage: Bool = true,
                      submissionID: SubmissionID? = nil) async throws -> String {
+        guard images.isEmpty else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "Code and Cowork user images require exact-session artifact IDs")
+        }
         // A first attempt uses the identity frozen at the user submission
         // boundary. Whole-task Retry is a distinct turn and must not create a
         // second terminal outcome under the prior TurnID.
@@ -538,11 +384,11 @@ public struct AgentLoop: Sendable {
                     ? SubmissionID.new()
                     : nil
             )
+        await toolOutputDeliveryLedger.remove(turnID: turnID)
         let start = Date()
         var firstTokenAt: Date?
         var usage: Usage?
         var turnStatsAppended = false
-        let permissionAuthorizationUsage = PermissionAuthorizationUsageLedger()
 
         do {
         let modelHistoryScope = try modelHistoryRecordingScope(
@@ -584,20 +430,28 @@ public struct AgentLoop: Sendable {
             currentSubmissionID: effectiveSubmissionID,
             recoveredEvents: recoveredModelHistoryEvents)
         var history: [AgentMessage]
-        if let modelHistoryProjection {
-            history = modelHistoryProjection.messages
+        if let projected = modelHistoryProjection {
+            let materialized = try await materializeModelHistory(projected)
+            modelHistoryProjection = materialized
+            history = materialized.messages
         } else {
             history = try await projectedHistory(
                 recoveredEvents: recoveredModelHistoryEvents,
                 excludingCurrentAndLaterSubmissionsFrom:
                     effectiveSubmissionID)
         }
+        var currentUserImages: [ImageAttachment] = []
+        var currentUserImageReferences: [ModelHistoryImageReference]?
         let mcpTurnResultBudget =
             MCPToolResultAggregateBudget(
                 scope: .turn,
                 maximumBytes:
                     MCPToolResultAggregateLimits
                         .maximumTurnBytes)
+        // Citation authority is intentionally request-local. Previous tool
+        // results may be visible in history, but their evidence IDs are never
+        // admitted into a new turn's registry.
+        var groundingEvidence = TurnGroundingEvidenceRegistry()
         // Stable Code/Cowork main-thread history must measure the exact tool
         // surface that the first ordinary provider request will receive. Freeze
         // that request-owned snapshot before pre-turn compaction, then consume
@@ -626,9 +480,9 @@ public struct AgentLoop: Sendable {
                     "model-history-preturn-tools",
                     "stable main-thread tool snapshot is missing")
             }
-            let preTurnTools = providerToolSpecs(
+            let preTurnTools = try providerToolSpecs(
                 for: frozenRequestToolSnapshot)
-            if shouldCompact(
+            if try shouldCompact(
                 messages: preTurnContext,
                 tools: preTurnTools)
             {
@@ -661,6 +515,18 @@ public struct AgentLoop: Sendable {
                 expectedText: userText,
                 preferredPayload: acceptedCurrentUserMessage,
                 events: recoveredEvents)
+            let acceptedAttachmentIDs =
+                acceptedCurrentUserMessage?.attachments ?? []
+            if acceptedAttachmentIDs.isEmpty {
+                currentUserImages = []
+                currentUserImageReferences = nil
+            } else {
+                let resolved = try await materializeImages(
+                    artifactIDs: acceptedAttachmentIDs,
+                    expectedReferences: nil,
+                    purpose: "current user input")
+                currentUserImageReferences = resolved.references
+            }
             var durableItems: [Event] = []
             if let explicitSkillContext =
                 resolvedSkillActivation.prompt
@@ -684,12 +550,43 @@ public struct AgentLoop: Sendable {
                 taskID: modelHistoryScope.taskID,
                 submissionID: modelHistoryScope.submissionID,
                 taskAttempt: modelHistoryScope.taskAttempt,
-                role: .user,
-                content: userText,
-                attachmentIDs: acceptedCurrentUserMessage?.attachments,
-                messageClassification: .realUser)))
+                    role: .user,
+                    content: userText,
+                    attachmentIDs: acceptedCurrentUserMessage?.attachments,
+                    imageReferences: currentUserImageReferences,
+                    messageClassification: .realUser)))
             let appendedItems = try await log.append(durableItems)
             recoveredModelHistoryEvents?.append(contentsOf: appendedItems)
+            let userItemID = "model-history-user:\(turnID.rawValue)"
+            guard let canonicalUserItem = appendedItems.compactMap({ envelope
+                -> ModelHistoryItemPayload? in
+                guard case .modelHistoryItem(let payload) = envelope.event,
+                      payload.itemID == userItemID else {
+                    return nil
+                }
+                return payload
+            }).first,
+            canonicalUserItem.attachmentIDs
+                == acceptedCurrentUserMessage?.attachments,
+            canonicalUserItem.imageReferences
+                == currentUserImageReferences else {
+                throw AgentModelHistoryProjectionError.invalidItem(
+                    userItemID,
+                    "committed user media binding differs from the admitted artifact set")
+            }
+            let canonicalAttachmentIDs =
+                canonicalUserItem.attachmentIDs ?? []
+            if canonicalAttachmentIDs.isEmpty {
+                currentUserImages = []
+                currentUserImageReferences = nil
+            } else {
+                let readback = try await materializeImages(
+                    artifactIDs: canonicalAttachmentIDs,
+                    expectedReferences: canonicalUserItem.imageReferences,
+                    purpose: "committed current user input")
+                currentUserImages = readback.attachments
+                currentUserImageReferences = readback.references
+            }
             if var projection = modelHistoryProjection {
                 projection.latestAgentHistorySequence =
                     appendedItems.last?.seq
@@ -698,17 +595,28 @@ public struct AgentLoop: Sendable {
                     AgentModelHistoryRealUserMessage(
                         content: userText,
                         submissionID: modelHistoryScope.submissionID,
-                        attachmentIDs:
-                            acceptedCurrentUserMessage?.attachments))
+                        attachmentIDs: canonicalUserItem.attachmentIDs,
+                        imageReferences:
+                            canonicalUserItem.imageReferences))
                 modelHistoryProjection = projection
             }
+        }
+        if modelHistoryScope == nil,
+           let attachmentIDs = acceptedCurrentUserMessage?.attachments,
+           !attachmentIDs.isEmpty {
+            let resolved = try await materializeImages(
+                artifactIDs: attachmentIDs,
+                expectedReferences: nil,
+                purpose: "current user input")
+            currentUserImages = resolved.attachments
+            currentUserImageReferences = resolved.references
         }
         try await log.append(.agentStatus(AgentStatusPayload(agent: agent.name, state: .thinking)))
 
         var convo = context.initialMessages(
             history: history,
             userText: userText,
-            userImages: images,
+            userImages: currentUserImages,
             externalContexts:
                 acceptedCurrentUserMessage?
                     .untrustedExternalContexts
@@ -716,17 +624,8 @@ public struct AgentLoop: Sendable {
             resolvedSkillActivation:
                 resolvedSkillActivation)
         let denialCircuitBreaker = ToolDenialCircuitBreaker()
-        let sideEffectEvidence = SideEffectEvidenceLedger()
         var usedToolCallIDs = Set<String>()
         var syntheticToolCallOrdinal = 0
-        if context.runtimeEnvironment.mode == .cowork,
-           let taskID = context.taskContract?.id,
-           let recoveredModelHistoryEvents {
-            await sideEffectEvidence.restore(
-                from: recoveredModelHistoryEvents,
-                taskID: taskID,
-                throughAttempt: taskAttempt)
-        }
 
         for iteration in 0..<maxIterations {
             try Task.checkCancellation()
@@ -738,15 +637,19 @@ public struct AgentLoop: Sendable {
                 toolSnapshot = try await resolveToolSnapshot(
                     outputBudget: mcpTurnResultBudget)
             }
-            let specs = providerToolSpecs(for: toolSnapshot)
+            let specs = try providerToolSpecs(for: toolSnapshot)
             var assistantText = ""
             var pendingToolCalls: [ToolCall] = []
             var responseUsage: Usage?
             var receivedCompletionMarker = false
             var finishReason: String?
             let assistantID = MessageID.new()
+            let providerGenerationID = IDGen.random(
+                prefix: "provider-generation")
 
-            var request = AgentRequest(model: agent.model, messages: convo, tools: specs,
+            let providerMessages = try providerMessages(for: convo)
+            try validateRequestImageLimits(messages: providerMessages)
+            var request = AgentRequest(model: agent.model, messages: providerMessages, tools: specs,
                                        reasoningEffort: reasoningEffort, includeUsage: includeUsage,
                                        parallelToolCalls:
                                         specs.contains(where: \.supportsParallelCalls)
@@ -851,6 +754,50 @@ public struct AgentLoop: Sendable {
             pendingToolCalls = Self.normalizedToolCallKinds(
                 pendingToolCalls,
                 registry: toolSnapshot.registry)
+            let permissionSessionID = await log.sessionID
+            let usesAutomaticSidecars =
+                context.runtimeEnvironment.mode == .cowork
+                && responder.approvalMode == .automaticReviewer
+            let preparedPermissionToolCalls = pendingToolCalls.map { call in
+                if usesAutomaticSidecars {
+                    return AuthorizationSidecarCodec.prepare(
+                        call,
+                        sessionID: permissionSessionID,
+                        turnID: turnID,
+                        taskID: context.taskContract?.id,
+                        providerGenerationID: providerGenerationID,
+                        registrySnapshotID: toolSnapshot.snapshotID)
+                }
+                if AuthorizationSidecarCodec.containsReservedField(
+                    in: call.arguments) {
+                    return PreparedPermissionToolCall(
+                        providerCall: call,
+                        executableCall: nil,
+                        modelAuthorizationContext: nil,
+                        sidecarStatus: .malformed(.unexpectedField(
+                            AuthorizationSidecarCodec.reservedFieldName)),
+                        canonicalBusinessArgumentsDigest: nil,
+                        sidecarDigest: nil,
+                        binding: nil)
+                }
+                return PreparedPermissionToolCall(
+                    providerCall: call,
+                    executableCall: call,
+                    modelAuthorizationContext: nil,
+                    sidecarStatus: .missing,
+                    canonicalBusinessArgumentsDigest: nil,
+                    sidecarDigest: nil,
+                    binding: nil)
+            }
+            // Durable history, authorization, and execution use only the
+            // sidecar-free call. The same in-memory acting-model conversation
+            // may retain a validated non-secret sidecar so a successful call
+            // remains a correct formatting example on the next iteration.
+            // Invalid sidecars are never copied into either view.
+            let liveConversationToolCalls = preparedPermissionToolCalls.map(
+                Self.liveConversationHistoryCall)
+            pendingToolCalls = preparedPermissionToolCalls.map(
+                Self.sidecarFreeHistoryCall)
             if pendingToolCalls.isEmpty,
                Self.finishReasonRequiresToolCalls(finishReason) {
                 throw AgentLoopError.completionExpectedToolCalls(
@@ -859,6 +806,14 @@ public struct AgentLoop: Sendable {
             if let finishReason,
                !Self.finishReasonIsSuccessful(finishReason) {
                 throw AgentLoopError.incompleteFinishReason(finishReason)
+            }
+            do {
+                try await groundingEvidence.validateCitations(
+                    in: assistantText,
+                    requireAtLeastOne: pendingToolCalls.isEmpty)
+            } catch {
+                throw AgentLoopError.invalidEvidenceCitation(
+                    RuntimeErrorPresentation.message(for: error))
             }
 
             var completedResponseEvents: [Event] = []
@@ -898,74 +853,65 @@ public struct AgentLoop: Sendable {
                                 registry: toolSnapshot.registry))))
                 }
             }
-            if !completedResponseEvents.isEmpty {
-                try Task.checkCancellation()
-                try await log.append(completedResponseEvents)
-            }
-
-            if pendingToolCalls.isEmpty,
-               context.runtimeEnvironment.mode == .cowork {
-                let unresolved = await sideEffectEvidence.unresolvedDescriptions()
-                if !unresolved.isEmpty {
-                    throw AgentLoopError.unresolvedDeniedSideEffects(unresolved)
-                }
-            }
-
             if pendingToolCalls.isEmpty {
-                usage = Usage.adding(
-                    usage,
-                    await permissionAuthorizationUsage.drain())
                 await appendTurnStats(start: start, firstTokenAt: firstTokenAt, usage: usage)
                 turnStatsAppended = true
-                try await log.append(.agentStatus(AgentStatusPayload(agent: agent.name, state: .idle)))
-                try Task.checkCancellation()
-                try await log.append(.turnOutcome(TurnOutcomePayload(
+                completedResponseEvents.append(.agentStatus(AgentStatusPayload(
+                    agent: agent.name,
+                    state: .idle)))
+                completedResponseEvents.append(.turnOutcome(TurnOutcomePayload(
                     turnID: turnID,
                     outcome: .completed,
                     submissionID: effectiveSubmissionID,
                     taskID: context.taskContract?.id,
                     agentID: agent.name)))
+                try Task.checkCancellation()
+                // Final transcript/model-history publication and the
+                // authoritative successful turn terminal are one EventLog
+                // transaction.
+                try await log.append(completedResponseEvents)
+                await toolOutputDeliveryLedger.remove(turnID: turnID)
                 return assistantText  // final answer
             }
 
-            let authorizationReportingTurn = PermissionAuthorizationReportingTurn(
-                providerMessages: request.messages,
-                assistantText: assistantText,
-                toolCalls: pendingToolCalls,
-                visibleUserMessages: permissionAuthorizationVisibleUserMessages(
-                    projection: modelHistoryProjection,
-                    currentSubmissionID: effectiveSubmissionID,
-                    currentUserText: userText),
-                currentSubmissionID:
-                    context.taskContract?.submissionID
-                    ?? effectiveSubmissionID)
-            convo.append(.assistant(toolCalls: pendingToolCalls, content: assistantText.isEmpty ? nil : assistantText))
+            if !completedResponseEvents.isEmpty {
+                try Task.checkCancellation()
+                try await log.append(completedResponseEvents)
+            }
+
+            convo.append(.assistant(
+                toolCalls: liveConversationToolCalls,
+                content: assistantText.isEmpty ? nil : assistantText))
             let observations = try await runToolCalls(
-                pendingToolCalls,
+                preparedPermissionToolCalls,
                 turnID: turnID,
                 denialCircuitBreaker: denialCircuitBreaker,
-                sideEffectEvidence: sideEffectEvidence,
                 modelHistoryScope: modelHistoryScope,
                 registry: toolSnapshot.registry,
                 mcpAvailability:
-                    toolSnapshot.mcpAvailability,
-                authorizationReportingTurn: authorizationReportingTurn,
-                permissionAuthorizationUsage: permissionAuthorizationUsage)
+                    toolSnapshot.mcpAvailability)
             for (toolCall, observation) in zip(pendingToolCalls, observations) {
                 try Task.checkCancellation()
-                if toolCall.kind == .toolSearch {
-                    convo.append(.toolSearchOutput(
-                        id: toolCall.id,
-                        output: observation.toolSearchOutput
-                            ?? ModelToolSearchOutput(
-                                execution:
-                                    toolCall.execution ?? "client",
-                                tools: [])))
-                } else {
-                    convo.append(.tool(
-                        id: toolCall.id,
-                        content: observation.text))
+                do {
+                    try groundingEvidence.record(
+                        toolName: toolCall.name,
+                        observation: observation,
+                        revalidator: toolSnapshot.registry
+                            .registration(named: toolCall.name)?
+                            .groundingEvidenceRevalidator)
+                } catch {
+                    throw AgentLoopError.invalidEvidenceCitation(
+                        RuntimeErrorPresentation.message(for: error))
                 }
+                guard let delivered = await toolOutputDeliveryLedger.take(
+                    turnID: turnID,
+                    callID: toolCall.id),
+                delivered.role == .tool,
+                delivered.toolCallId == toolCall.id else {
+                    throw AgentLoopError.mediaOutputInvalid(
+                        "committed tool output was not materialized for call \(toolCall.id)")
+                }
+                convo.append(delivered)
             }
             // Resolve the exact tool surface for the next ordinary provider
             // request before deciding whether its input requires compaction.
@@ -979,11 +925,11 @@ public struct AgentLoop: Sendable {
             try Task.checkCancellation()
             let nextToolSnapshot = try await resolveToolSnapshot(
                 outputBudget: mcpTurnResultBudget)
-            let nextSpecs = providerToolSpecs(for: nextToolSnapshot)
+            let nextSpecs = try providerToolSpecs(for: nextToolSnapshot)
             frozenRequestToolSnapshot = nextToolSnapshot
             if modelHistoryScope != nil,
                var projection = modelHistoryProjection,
-               shouldCompact(messages: convo, tools: nextSpecs)
+               try shouldCompact(messages: convo, tools: nextSpecs)
             {
                 let replay = try await log.replayForProjectionChecked()
                 guard replay.hasCompleteKnownHistory else {
@@ -1023,20 +969,15 @@ public struct AgentLoop: Sendable {
         }
 
         try Task.checkCancellation()
-        usage = Usage.adding(
-            usage,
-            await permissionAuthorizationUsage.drain())
         await appendTurnStats(start: start, firstTokenAt: firstTokenAt, usage: usage)
         turnStatsAppended = true
         throw AgentLoopError.maxIterationsExceeded(limit: maxIterations)
         } catch {
+            await toolOutputDeliveryLedger.remove(turnID: turnID)
             // AgentLoop owns the single terminal error event for failures that
             // occur after entering the loop. Callers should propagate/classify
             // the thrown error, not append a second copy of the same event.
             if !turnStatsAppended {
-                usage = Usage.adding(
-                    usage,
-                    await permissionAuthorizationUsage.drain())
                 await appendTurnStats(start: start, firstTokenAt: firstTokenAt, usage: usage)
             }
             let interruption = Self.turnInterruption(for: error)
@@ -1071,9 +1012,29 @@ public struct AgentLoop: Sendable {
 
     private func providerToolSpecs(
         for snapshot: AgentRequestToolSnapshot
-    ) -> [ToolSpec] {
-        snapshot.providerToolSpecs
+    ) throws -> [ToolSpec] {
+        let specs = snapshot.providerToolSpecs
             ?? context.toolSpecs(snapshot.registry)
+        guard context.runtimeEnvironment.mode == .cowork,
+              responder.approvalMode == .automaticReviewer else {
+            return specs
+        }
+        return try AuthorizationSidecarCodec.decorate(specs)
+    }
+
+    /// Returns the exact request-owned message copy used for provider token
+    /// estimation and dispatch. Durable/in-memory history remains sidecar-free;
+    /// automatic Cowork decorates only deferred functions embedded in
+    /// `tool_search_output` items.
+    private func providerMessages(
+        for messages: [AgentMessage]
+    ) throws -> [AgentMessage] {
+        guard context.runtimeEnvironment.mode == .cowork,
+              responder.approvalMode == .automaticReviewer else {
+            return messages
+        }
+        return try AuthorizationSidecarCodec
+            .decorateProviderMessages(messages)
     }
 
     private func modelHistoryRecordingScope(
@@ -1122,18 +1083,226 @@ public struct AgentLoop: Sendable {
             taskAttempt: attempt)
     }
 
+    private func materializeImages(
+        artifactIDs: [ArtifactID],
+        expectedReferences: [ModelHistoryImageReference]?,
+        purpose: String
+    ) async throws -> AgentMaterializedImages {
+        guard !artifactIDs.isEmpty else {
+            guard expectedReferences?.isEmpty != false else {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "\(purpose) has descriptors but no artifact IDs")
+            }
+            return AgentMaterializedImages(
+                references: [],
+                attachments: [])
+        }
+        guard let imageResolver else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "\(purpose) requires the exact-session artifact resolver")
+        }
+        let resolved = try await imageResolver(artifactIDs)
+        guard resolved.count == artifactIDs.count,
+              zip(resolved, artifactIDs).allSatisfy({
+                  $0.artifactID == $1
+              }) else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "\(purpose) resolved a different artifact set or order")
+        }
+        let references = resolved.map { image in
+            ModelHistoryImageReference(
+                artifactID: image.artifactID,
+                mimeType: image.mimeType,
+                byteCount: image.byteCount,
+                sha256: image.sha256)
+        }
+        for reference in references {
+            do {
+                try reference.validate()
+            } catch {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "\(purpose) produced a non-canonical image descriptor")
+            }
+        }
+        if let expectedReferences,
+           references != expectedReferences {
+            throw AgentLoopError.mediaOutputInvalid(
+                "\(purpose) bytes no longer match the durable image descriptor")
+        }
+        return AgentMaterializedImages(
+            references: references,
+            attachments: resolved.map(\.attachment))
+    }
+
+    private func materializeModelHistory(
+        _ projection: AgentModelHistoryProjection
+    ) async throws -> AgentModelHistoryProjection {
+        guard projection.messages.count == projection.imageBindings.count else {
+            throw AgentModelHistoryProjectionError.invalidItem(
+                "model-history-media",
+                "projected image bindings are not aligned with provider messages")
+        }
+
+        var flattenedIDs: [ArtifactID] = []
+        for binding in projection.imageBindings {
+            switch binding {
+            case .userVerified(let references),
+                 .toolVerified(_, let references):
+                flattenedIDs.append(contentsOf: references.map(\.artifactID))
+            case .userLegacy(let artifactIDs):
+                flattenedIDs.append(contentsOf: artifactIDs)
+            case nil:
+                continue
+            }
+        }
+        guard !flattenedIDs.isEmpty else { return projection }
+
+        let allImages = try await materializeImages(
+            artifactIDs: flattenedIDs,
+            expectedReferences: nil,
+            purpose: "projected model history")
+        var result = projection
+        var offset = 0
+        for index in result.messages.indices {
+            guard let binding = result.imageBindings[index] else { continue }
+            let count: Int
+            let expected: [ModelHistoryImageReference]?
+            switch binding {
+            case .userVerified(let references):
+                count = references.count
+                expected = references
+                guard result.messages[index].role == .user else {
+                    throw AgentModelHistoryProjectionError.invalidItem(
+                        "model-history-media-\(index)",
+                        "user image binding is attached to a non-user message")
+                }
+            case .userLegacy(let artifactIDs):
+                count = artifactIDs.count
+                expected = nil
+                guard result.messages[index].role == .user else {
+                    throw AgentModelHistoryProjectionError.invalidItem(
+                        "model-history-media-\(index)",
+                        "legacy image binding is attached to a non-user message")
+                }
+            case .toolVerified(let callID, let references):
+                count = references.count
+                expected = references
+                guard result.messages[index].role == .tool,
+                      result.messages[index].toolCallId == callID else {
+                    throw AgentModelHistoryProjectionError.invalidItem(
+                        "model-history-media-\(index)",
+                        "tool image binding does not match its function call")
+                }
+            }
+            let end = offset + count
+            guard end <= allImages.references.count else {
+                throw AgentModelHistoryProjectionError.invalidItem(
+                    "model-history-media-\(index)",
+                    "projected image binding exceeds the resolved artifact set")
+            }
+            let references = Array(allImages.references[offset..<end])
+            if let expected, references != expected {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "projected history bytes no longer match their durable descriptors")
+            }
+            guard result.messages[index].images.isEmpty else {
+                throw AgentModelHistoryProjectionError.invalidItem(
+                    "model-history-media-\(index)",
+                    "projected provider message already contains image wire data")
+            }
+            result.messages[index].images =
+                Array(allImages.attachments[offset..<end])
+            if case .userLegacy(let artifactIDs) = binding {
+                result.imageBindings[index] = .userVerified(references)
+                for userIndex in result.realUserMessages.indices
+                where result.realUserMessages[userIndex].imageReferences == nil
+                    && result.realUserMessages[userIndex].attachmentIDs
+                        == artifactIDs
+                {
+                    result.realUserMessages[userIndex].imageReferences =
+                        references
+                }
+            }
+            offset = end
+        }
+        guard offset == allImages.references.count else {
+            throw AgentModelHistoryProjectionError.invalidItem(
+                "model-history-media",
+                "resolved image set was not consumed exactly once")
+        }
+        return result
+    }
+
+    private func validateRequestImageLimits(
+        messages: [AgentMessage]
+    ) throws {
+        let policy = ArtifactImageValidationPolicy()
+        let capabilities = provider.toolCallingCapabilities
+        if messages.contains(where: {
+            $0.role != .tool && !$0.images.isEmpty
+        }), !capabilities.supportsUserImageInput {
+            throw AgentLoopError.mediaOutputUnsupported(
+                "the exact provider route does not accept user images")
+        }
+        if messages.contains(where: {
+            $0.role == .tool && !$0.images.isEmpty
+        }), !capabilities.supportsFunctionOutputImageInput {
+            throw AgentLoopError.mediaOutputUnsupported(
+                "the exact provider route does not accept function-output images")
+        }
+        let images = messages.flatMap(\.images)
+        guard images.count <= policy.maximumImageCount else {
+            throw ArtifactImageResolutionError.tooManyImages(
+                maximum: policy.maximumImageCount,
+                actual: images.count)
+        }
+        var totalBytes = 0
+        for image in images {
+            guard image.url.hasPrefix("data:"),
+                  let comma = image.url.firstIndex(of: ","),
+                  image.url[..<comma].hasSuffix(";base64") else {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "request images must use base64 data URLs")
+            }
+            let payload = image.url[image.url.index(after: comma)...]
+            let maximumEncodedBytes =
+                ((policy.maximumImageBytes + 2) / 3) * 4 + 2
+            guard payload.utf8.count <= maximumEncodedBytes else {
+                throw ArtifactImageResolutionError.imageByteLimitExceeded(
+                    ArtifactID(rawValue: "request-image"),
+                    maximumBytes: policy.maximumImageBytes)
+            }
+            guard let decoded = Data(base64Encoded: String(payload)) else {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "request image data URL contains invalid base64")
+            }
+            let decodedBytes = decoded.count
+            guard decodedBytes <= policy.maximumImageBytes else {
+                throw ArtifactImageResolutionError.imageByteLimitExceeded(
+                    ArtifactID(rawValue: "request-image"),
+                    maximumBytes: policy.maximumImageBytes)
+            }
+            totalBytes += decodedBytes
+            guard totalBytes <= policy.maximumTotalBytes else {
+                throw ArtifactImageResolutionError.totalByteLimitExceeded(
+                    maximumBytes: policy.maximumTotalBytes)
+            }
+        }
+    }
+
     private func shouldCompact(
         messages: [AgentMessage],
         tools: [ToolSpec]
-    ) -> Bool {
+    ) throws -> Bool {
         guard context.conversationHistoryPolicy != .taskScoped,
               let limit =
                 modelContextPolicy
                     .automaticCompactionTriggerTokens else {
             return false
         }
+        let exactProviderMessages = try providerMessages(for: messages)
         return AgentTokenEstimator.approximateInputTokens(
-            messages: messages,
+            messages: exactProviderMessages,
             tools: tools) >= limit
     }
 
@@ -1147,6 +1316,9 @@ public struct AgentLoop: Sendable {
         usage: Usage?,
         envelope: Envelope
     ) {
+        let providerSummaryHistory = try providerMessages(
+            for: summaryHistory)
+        try validateRequestImageLimits(messages: providerSummaryHistory)
         let maximumReplacementInputTokens: Int?
         if let hardLimit =
             modelContextPolicy.hardUsableContextWindowTokens {
@@ -1157,9 +1329,9 @@ public struct AgentLoop: Sendable {
                 includeCurrentTurnContext: false)
             let reservedTokens =
                 AgentTokenEstimator.approximateInputTokens(
-                    messages:
-                        fixedPrefix
-                        + contextualReplacementMessages,
+                    messages: try providerMessages(
+                        for: fixedPrefix
+                            + contextualReplacementMessages),
                     tools: tools)
             let available = hardLimit - reservedTokens
             guard available > 0 else {
@@ -1178,8 +1350,11 @@ public struct AgentLoop: Sendable {
             includeUsage: includeUsage,
             tokenBudgetMeter: tokenBudgetMeter)
             .compact(
-                history: summaryHistory,
+                history: providerSummaryHistory,
                 realUserMessages: projection.realUserMessages,
+                mediaAwareCheckpointRequired:
+                    projection.latestCheckpoint?.payload.schemaVersion
+                        == ModelHistoryCompactedPayload.mediaSchemaVersion,
                 maximumReplacementInputTokens:
                     maximumReplacementInputTokens)
 
@@ -1227,7 +1402,8 @@ public struct AgentLoop: Sendable {
                     includeCurrentTurnContext: false)
             let estimated =
                 AgentTokenEstimator.approximateInputTokens(
-                    messages: replacementRequestMessages,
+                    messages: try providerMessages(
+                        for: replacementRequestMessages),
                     tools: tools)
             guard estimated <= hardLimit else {
                 throw AgentModelHistoryCompactionError
@@ -1263,6 +1439,7 @@ public struct AgentLoop: Sendable {
             windowID = AgentModelHistoryWindowID.new()
         }
         let checkpoint = ModelHistoryCompactedPayload(
+            schemaVersion: result.checkpointSchemaVersion,
             agent: agent.name,
             message: result.message,
             replacementHistory: replacement,
@@ -1274,28 +1451,24 @@ public struct AgentLoop: Sendable {
             checkpoint,
             expectedLatestAgentHistorySeq:
                 projection.latestAgentHistorySequence)
+        guard case .modelHistoryCompacted(let committedCheckpoint) =
+                envelope.event else {
+            throw AgentModelHistoryProjectionError.invalidItem(
+                "model-history-compacted:\(envelope.seq)",
+                "compaction append did not return its canonical checkpoint")
+        }
         let cursor = AgentModelHistoryCheckpointCursor(
             sequence: envelope.seq,
-            payload: checkpoint)
-        let realUsers = replacement.compactMap {
-            item -> AgentModelHistoryRealUserMessage? in
-            guard item.messageClassification == .realUser,
-                  let content = item.content else {
-                return nil
-            }
-            return AgentModelHistoryRealUserMessage(
-                content: content,
-                submissionID: item.sourceSubmissionID,
-                attachmentIDs: item.attachmentIDs,
-                contentTruncated: item.contentTruncated == true)
-        }
+            payload: committedCheckpoint)
+        var replacementProjection = try AgentModelHistoryProjector()
+            .projectReplacementState(committedCheckpoint)
+        replacementProjection.baseCheckpoint = cursor
+        replacementProjection.latestCheckpoint = cursor
+        replacementProjection.latestAgentHistorySequence = envelope.seq
+        replacementProjection = try await materializeModelHistory(
+            replacementProjection)
         return (
-            AgentModelHistoryProjection(
-                messages: providerHistory,
-                realUserMessages: realUsers,
-                baseCheckpoint: cursor,
-                latestCheckpoint: cursor,
-                latestAgentHistorySequence: envelope.seq),
+            replacementProjection,
             result.usage,
             envelope)
     }
@@ -1403,6 +1576,29 @@ public struct AgentLoop: Sendable {
                 message: error.localizedDescription,
                 submissionID: submissionID)
         }
+        if let imageError = error as? ArtifactImageResolutionError {
+            return ErrorPayload(
+                code: imageError.code,
+                message: imageError.localizedDescription,
+                submissionID: submissionID)
+        }
+        if let capabilityError =
+            error as? ToolCallingProviderCapabilityError
+        {
+            let code: String
+            switch capabilityError {
+            case .toolSearchUnsupported:
+                code = "tool_search_unsupported"
+            case .userImageInputUnsupported:
+                code = "user_image_input_unsupported"
+            case .functionOutputImageInputUnsupported:
+                code = "media_output_unsupported"
+            }
+            return ErrorPayload(
+                code: code,
+                message: capabilityError.localizedDescription,
+                submissionID: submissionID)
+        }
         guard let loopError = error as? AgentLoopError else {
             var payload = RuntimeErrorPresentation.payload(for: error, fallbackCode: "agent")
             payload.submissionID = submissionID
@@ -1418,12 +1614,14 @@ public struct AgentLoop: Sendable {
             code = "incomplete_tool_calls"
         case .incompleteFinishReason:
             code = "incomplete_response"
-        case .toolExecutionRequiresManualReconciliation:
-            code = "manual_reconciliation"
         case .repeatedDeniedToolCall:
             code = "repeated_denied_tool_call"
-        case .unresolvedDeniedSideEffects:
-            code = "unresolved_denied_side_effects"
+        case .invalidEvidenceCitation:
+            code = "invalid_evidence_citation"
+        case .mediaOutputUnsupported:
+            code = "media_output_unsupported"
+        case .mediaOutputInvalid:
+            code = "media_output_invalid"
         }
         return ErrorPayload(
             code: code,
@@ -1471,7 +1669,11 @@ public struct AgentLoop: Sendable {
                 return "path is outside the workspace lease: \(path)"
             }
             let relative = Self.relativePath(resolved, root: leaseRoot)
-            if lease.deniedPatterns.contains(where: { Self.path(relative, matches: $0) }) {
+            let mandatoryDenied = WorkspaceLease
+                .mandatoryManagedStoreDeniedPatterns
+            if (lease.deniedPatterns + mandatoryDenied).contains(where: {
+                Self.path(relative.lowercased(), matches: $0.lowercased())
+            }) {
                 return "path is denied by the workspace lease: \(relative)"
             }
             let allowed = lease.allowedPathRules.contains { rule in
@@ -1557,37 +1759,32 @@ public struct AgentLoop: Sendable {
 
     // MARK: - Tool execution with permission
 
-    private func runToolCalls(_ toolCalls: [ToolCall],
+    private func runToolCalls(
+                              _ preparedCalls: [PreparedPermissionToolCall],
                               turnID: TurnID,
                               denialCircuitBreaker: ToolDenialCircuitBreaker,
-                              sideEffectEvidence: SideEffectEvidenceLedger,
                               modelHistoryScope: ModelHistoryRecordingScope?,
                               registry: ToolRegistry,
                               mcpAvailability:
-                                MCPToolAvailabilitySnapshot,
-                              authorizationReportingTurn:
-                                PermissionAuthorizationReportingTurn,
-                              permissionAuthorizationUsage:
-                                PermissionAuthorizationUsageLedger) async throws
+                                MCPToolAvailabilitySnapshot) async throws
         -> [ToolObservation] {
         let parallelCollaborationTools = Set(["ask_agent", "delegate_task"])
-        guard toolCalls.count > 1,
-              toolCalls.allSatisfy({ parallelCollaborationTools.contains($0.name) }) else {
+        guard preparedCalls.count > 1,
+              preparedCalls.allSatisfy({
+                  parallelCollaborationTools.contains($0.providerCall.name)
+              }) else {
             var results: [ToolObservation] = []
-            results.reserveCapacity(toolCalls.count)
-            for toolCall in toolCalls {
+            results.reserveCapacity(preparedCalls.count)
+            for preparedCall in preparedCalls {
                 try Task.checkCancellation()
                 let observation = try await runTool(
-                    toolCall,
+                    preparedCall,
                     turnID: turnID,
                     denialCircuitBreaker: denialCircuitBreaker,
-                    sideEffectEvidence: sideEffectEvidence,
                     modelHistoryScope: modelHistoryScope,
                     registry: registry,
                     mcpAvailability:
-                        mcpAvailability,
-                    authorizationReportingTurn: authorizationReportingTurn,
-                    permissionAuthorizationUsage: permissionAuthorizationUsage)
+                        mcpAvailability)
                 results.append(observation)
             }
             return results
@@ -1597,24 +1794,21 @@ public struct AgentLoop: Sendable {
             of: (Int, ToolObservation).self,
             returning: [ToolObservation].self
         ) { group in
-            for (index, toolCall) in toolCalls.enumerated() {
+            for (index, preparedCall) in preparedCalls.enumerated() {
                 group.addTask {
                     let observation = try await runTool(
-                        toolCall,
+                        preparedCall,
                         turnID: turnID,
                         denialCircuitBreaker: denialCircuitBreaker,
-                        sideEffectEvidence: sideEffectEvidence,
                         modelHistoryScope: modelHistoryScope,
                         registry: registry,
                         mcpAvailability:
-                            mcpAvailability,
-                        authorizationReportingTurn: authorizationReportingTurn,
-                        permissionAuthorizationUsage: permissionAuthorizationUsage)
+                            mcpAvailability)
                     return (index, observation)
                 }
             }
             var indexed: [(Int, ToolObservation)] = []
-            indexed.reserveCapacity(toolCalls.count)
+            indexed.reserveCapacity(preparedCalls.count)
             for try await result in group { indexed.append(result) }
             return indexed.sorted { $0.0 < $1.0 }.map(\.1)
         }
@@ -1623,7 +1817,7 @@ public struct AgentLoop: Sendable {
     private func appendingModelHistoryToolOutput(
         to events: [Event],
         toolCall: ToolCall,
-        observation: String,
+        canonicalOutput: AgentCanonicalToolOutput,
         toolSearchOutput: ModelToolSearchOutput?,
         scope: ModelHistoryRecordingScope?
     ) -> [Event] {
@@ -1646,9 +1840,6 @@ public struct AgentLoop: Sendable {
                 execution: output.execution,
                 tools: output.tools))]
         }
-        let sanitized = PermissionReviewTextSanitizer.sanitize(
-            observation,
-            maxCharacters: 65_536)
         return events + [.modelHistoryItem(.functionCallOutput(
             itemID: "model-history-output:\(scope.turnID.rawValue):\(toolCall.id)",
             turnID: scope.turnID,
@@ -1657,7 +1848,11 @@ public struct AgentLoop: Sendable {
             submissionID: scope.submissionID,
             taskAttempt: scope.taskAttempt,
             callID: toolCall.id,
-            output: sanitized.text))]
+            output: canonicalOutput.output,
+            imageReferences:
+                canonicalOutput.imageReferences.isEmpty
+                    ? nil
+                    : canonicalOutput.imageReferences))]
     }
 
     private func appendToolCompletion(
@@ -1667,28 +1862,248 @@ public struct AgentLoop: Sendable {
         toolSearchOutput: ModelToolSearchOutput? = nil,
         modelHistoryScope: ModelHistoryRecordingScope?
     ) async throws {
-        try await log.append(appendingModelHistoryToolOutput(
-            to: events,
-            toolCall: toolCall,
-            observation: observation,
-            toolSearchOutput: toolSearchOutput,
-            scope: modelHistoryScope))
+        let turnID = events.compactMap { event -> TurnID? in
+            guard case .toolResult(let payload) = event,
+                  payload.toolCallId == toolCall.id else {
+                return nil
+            }
+            return payload.turnID
+        }.first ?? modelHistoryScope?.turnID
+
+        if toolCall.kind == .toolSearch {
+            let output = toolSearchOutput
+                ?? ModelToolSearchOutput(
+                    execution: toolCall.execution ?? "client",
+                    tools: [])
+            let canonical = AgentCanonicalToolOutput(
+                output: "",
+                imageReferences: [])
+            let appended = try await log.append(
+                appendingModelHistoryToolOutput(
+                    to: events,
+                    toolCall: toolCall,
+                    canonicalOutput: canonical,
+                    toolSearchOutput: output,
+                    scope: modelHistoryScope))
+            let committedOutput: ModelToolSearchOutput
+            if modelHistoryScope != nil {
+                guard let payload = appended.compactMap({ envelope
+                    -> ModelHistoryItemPayload? in
+                    guard case .modelHistoryItem(let payload) =
+                            envelope.event,
+                          payload.kind == .toolSearchOutput,
+                          payload.callID == toolCall.id else {
+                        return nil
+                    }
+                    return payload
+                }).first,
+                let durableOutput = payload.toolSearchOutput else {
+                    throw AgentLoopError.mediaOutputInvalid(
+                        "committed tool-search output is missing")
+                }
+                committedOutput = durableOutput
+            } else {
+                committedOutput = output
+            }
+            guard let turnID else {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "committed tool-search output has no TurnID")
+            }
+            await toolOutputDeliveryLedger.record(
+                .toolSearchOutput(
+                    id: toolCall.id,
+                    output: committedOutput),
+                turnID: turnID,
+                callID: toolCall.id)
+            return
+        }
+
+        let proposedResults = events.compactMap { event
+            -> ToolResultPayload? in
+            guard case .toolResult(let payload) = event,
+                  payload.toolCallId == toolCall.id else {
+                return nil
+            }
+            return payload
+        }
+        guard proposedResults.count == 1,
+              let proposedResult = proposedResults.first,
+              proposedResult.observation == observation else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "tool completion must contain one exact matching tool result")
+        }
+
+        let proposedOutput: AgentCanonicalToolOutput
+        do {
+            proposedOutput = try AgentCanonicalToolOutput.lower(
+                structuredResult: proposedResult.structuredResult,
+                legacyObservation: proposedResult.observation)
+        } catch let loweringError as AgentToolOutputLoweringError {
+            let fallback = AgentCanonicalToolOutput(
+                output:
+                    "[media delivery unavailable: \(loweringError.stableCode)]",
+                imageReferences: [])
+            _ = try await log.append(appendingModelHistoryToolOutput(
+                to: events,
+                toolCall: toolCall,
+                canonicalOutput: fallback,
+                toolSearchOutput: nil,
+                scope: modelHistoryScope))
+            switch loweringError {
+            case .unsupportedMedia:
+                throw AgentLoopError.mediaOutputUnsupported(
+                    loweringError.localizedDescription)
+            case .invalidBlock, .canonicalJSON:
+                throw AgentLoopError.mediaOutputInvalid(
+                    loweringError.localizedDescription)
+            }
+        }
+
+        let appended = try await log.append(
+            appendingModelHistoryToolOutput(
+                to: events,
+                toolCall: toolCall,
+                canonicalOutput: proposedOutput,
+                toolSearchOutput: nil,
+                scope: modelHistoryScope))
+        let committedResults = appended.compactMap { envelope
+            -> ToolResultPayload? in
+            guard case .toolResult(let payload) = envelope.event,
+                  payload.toolCallId == toolCall.id else {
+                return nil
+            }
+            return payload
+        }
+        guard committedResults.count == 1,
+              let committedResult = committedResults.first else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "committed completion lost its exact tool result")
+        }
+        guard committedResult.observation == proposedResult.observation,
+              committedResult.structuredResult
+                == proposedResult.structuredResult else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "committed tool output differs from its completion batch")
+        }
+        let committedOutput: AgentCanonicalToolOutput
+        do {
+            committedOutput = try AgentCanonicalToolOutput.lower(
+                structuredResult: committedResult.structuredResult,
+                legacyObservation: committedResult.observation)
+        } catch let loweringError as AgentToolOutputLoweringError {
+            throw AgentLoopError.mediaOutputInvalid(
+                "committed tool output cannot be lowered: \(loweringError.stableCode)")
+        }
+        var deliveryOutput = committedOutput
+        if modelHistoryScope != nil {
+            let durableOutputs = appended.compactMap { envelope
+                -> ModelHistoryItemPayload? in
+                guard case .modelHistoryItem(let payload) = envelope.event,
+                      payload.kind == .functionCallOutput,
+                      payload.callID == toolCall.id else {
+                    return nil
+                }
+                return payload
+            }
+            guard durableOutputs.count == 1,
+                  durableOutputs[0].output == committedOutput.output,
+                  (durableOutputs[0].imageReferences ?? [])
+                    == committedOutput.imageReferences,
+                  let durableText = durableOutputs[0].output else {
+                throw AgentLoopError.mediaOutputInvalid(
+                    "durable function output is not bound to the canonical tool result")
+            }
+            deliveryOutput = AgentCanonicalToolOutput(
+                output: durableText,
+                imageReferences:
+                    durableOutputs[0].imageReferences ?? [])
+        }
+
+        let attachments: [ImageAttachment]
+        if deliveryOutput.imageReferences.isEmpty {
+            attachments = []
+        } else {
+            guard provider.toolCallingCapabilities
+                    .supportsFunctionOutputImageInput else {
+                throw AgentLoopError.mediaOutputUnsupported(
+                    "the exact provider route does not accept function-output images")
+            }
+            do {
+                attachments = try await materializeImages(
+                    artifactIDs:
+                        deliveryOutput.imageReferences.map(\.artifactID),
+                    expectedReferences:
+                        deliveryOutput.imageReferences,
+                    purpose: "tool output \(toolCall.id)")
+                    .attachments
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw AgentLoopError.mediaOutputInvalid(
+                    RuntimeErrorPresentation.message(for: error))
+            }
+        }
+        guard let turnID else {
+            throw AgentLoopError.mediaOutputInvalid(
+                "committed tool output has no TurnID")
+        }
+        await toolOutputDeliveryLedger.record(
+            .tool(
+                id: toolCall.id,
+                content: deliveryOutput.output,
+                images: attachments),
+            turnID: turnID,
+            callID: toolCall.id)
     }
 
-    private func runTool(_ toolCall: ToolCall,
+    private func runTool(
+                         _ preparedCall: PreparedPermissionToolCall,
                          turnID: TurnID,
                          denialCircuitBreaker: ToolDenialCircuitBreaker,
-                         sideEffectEvidence: SideEffectEvidenceLedger,
                          modelHistoryScope: ModelHistoryRecordingScope?,
                          registry: ToolRegistry,
                          mcpAvailability:
-                            MCPToolAvailabilitySnapshot,
-                         authorizationReportingTurn:
-                            PermissionAuthorizationReportingTurn,
-                         permissionAuthorizationUsage:
-                            PermissionAuthorizationUsageLedger) async throws
+                            MCPToolAvailabilitySnapshot) async throws
         -> ToolObservation {
         try Task.checkCancellation()
+        let toolCall = Self.sidecarFreeHistoryCall(preparedCall)
+
+        if preparedCall.executableCall == nil,
+           case .malformed(.unexpectedField(let field)) =
+                preparedCall.sidecarStatus,
+           field == AuthorizationSidecarCodec.reservedFieldName {
+            let safeToolName = PermissionReviewTextSanitizer
+                .sanitizeDiagnostic(
+                    toolCall.name,
+                    maxCharacters: 128).text
+            try await appendDurableToolCall(
+                toolCall,
+                canonicalName: safeToolName,
+                validatedArguments: nil,
+                forceRedaction: true)
+            let signature =
+                "authorization-sidecar-mode-mismatch\u{001F}\(toolCall.name)"
+            if let repeatedAttempt = await denialCircuitBreaker
+                .noteRepeatedAttempt(signature: signature),
+               repeatedAttempt >= 3 {
+                throw AgentLoopError.repeatedDeniedToolCall(
+                    tool: toolCall.name)
+            }
+            let message =
+                "authorization_context_mode_mismatch: __intatis_authorization_context is host-reserved for Cowork automatic review and is not a business tool argument in this mode"
+            try await appendToolCompletion(
+                [.toolResult(ToolResultPayload(
+                    toolCallId: toolCall.id,
+                    observation: message,
+                    outcome: .failed,
+                    failureSource: .runtimeFailed,
+                    turnID: turnID))],
+                toolCall: toolCall,
+                observation: message,
+                modelHistoryScope: modelHistoryScope)
+            await denialCircuitBreaker.recordDenial(signature: signature)
+            return ToolObservation(text: message)
+        }
 
         guard let registration = registry.registration(named: toolCall.name) else {
             let safeUnknownToolName = PermissionReviewTextSanitizer.sanitizeDiagnostic(
@@ -1739,6 +2154,9 @@ public struct AgentLoop: Sendable {
                 validatedArguments: arguments,
                 forceRedaction: Self.redactsDurableArguments(for: descriptor.name))
         case .invalid(let message):
+            let invalidObservation = registration
+                .argumentValidationFailure(message: message)
+                ?? ToolObservation(text: message)
             try await appendDurableToolCall(
                 toolCall,
                 canonicalName: descriptor.name,
@@ -1753,23 +2171,20 @@ public struct AgentLoop: Sendable {
             try await appendToolCompletion(
                 [.toolResult(ToolResultPayload(
                     toolCallId: toolCall.id,
-                    observation: message,
+                    observation: invalidObservation.text,
+                    truncated: invalidObservation.truncated,
                     outcome: .failed,
                     failureSource: .runtimeFailed,
-                    turnID: turnID))],
+                    turnID: turnID,
+                    structuredResult: invalidObservation.structuredResult,
+                    provenance: invalidObservation.structuredResult?.content
+                        .compactMap(\.provenance)
+                        .first))],
                 toolCall: toolCall,
-                observation: message,
+                observation: invalidObservation.text,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: invalidInputIntent(
-                    registration: registration,
-                    descriptor: descriptor,
-                    rawArguments: toolCall.arguments,
-                    workspaceRoot: effectiveWorkspaceRoot),
-                authorization: nil)
-            return ToolObservation(text: message)
+            return invalidObservation
         }
 
         let args = ToolArgs(raw: normalizedArguments)
@@ -1806,10 +2221,6 @@ public struct AgentLoop: Sendable {
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(
                 signature: descriptor.name + "\u{001F}" + normalizedArguments)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: baseIntent,
-                authorization: nil)
             return ToolObservation(text: message)
         }
         let sessionID = await log.sessionID
@@ -1852,10 +2263,6 @@ public struct AgentLoop: Sendable {
             if repeatedAttempt >= 3 {
                 throw AgentLoopError.repeatedDeniedToolCall(tool: descriptor.name)
             }
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: baseIntent,
-                authorization: nil)
             return ToolObservation(text: message)
         }
 
@@ -1898,10 +2305,6 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: baseIntent,
-                authorization: nil)
             return ToolObservation(text: message)
         }
         let intent = preparation.intent
@@ -1944,10 +2347,6 @@ public struct AgentLoop: Sendable {
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(
                 signature: descriptor.name + "\u{001F}" + normalizedArguments)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: nil)
             return ToolObservation(text: message)
         }
         if let leaseFailure = workspaceLeaseFailure(
@@ -1976,10 +2375,6 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
         let callContext = ToolCallContext(
@@ -1999,12 +2394,46 @@ public struct AgentLoop: Sendable {
             agent: agent.name)
 
         let engineDecision = await engine.decideDetailed(callContext, permissionContext)
+        authorization = authorization.withDeterministicGate(
+            Self.gateSnapshot(engineDecision.gate))
+        if context.runtimeEnvironment.mode == .cowork,
+           responder.approvalMode == .automaticReviewer,
+           engineDecision.reviewerConsulted {
+            let reason =
+                "cowork automatic review configuration invoked an in-engine reviewer; the bound control-plane review is required"
+            try await appendToolCompletion(
+                [
+                    .permissionResolved(PermissionResolvedPayload(
+                        turnID: turnID,
+                        toolCallID: toolCall.id,
+                        tool: descriptor.name,
+                        decision: .deny,
+                        risk: .high,
+                        reason: reason,
+                        intent: intent,
+                        authorization: authorization,
+                        source: .automaticReviewerFailure,
+                        reviewStatus: .failed,
+                        failureKind: .reviewerContractViolation,
+                        failureSource: .reviewerFailed)),
+                    .toolResult(ToolResultPayload(
+                        toolCallId: toolCall.id,
+                        observation: reason,
+                        outcome: .denied,
+                        failureSource: .reviewerFailed,
+                        turnID: turnID)),
+                ],
+                toolCall: toolCall,
+                observation: reason,
+                modelHistoryScope: modelHistoryScope)
+            await denialCircuitBreaker.recordDenial(
+                signature: denialSignature)
+            return ToolObservation(text: reason)
+        }
         let outcome = MCPApprovalInteractionPolicy.decide(
             engineDecision: engineDecision,
             authorization: authorization,
             responderMode: responder.approvalMode)
-        authorization = authorization.withDeterministicGate(
-            Self.gateSnapshot(engineDecision.gate))
         if outcome.decision != .deny,
            let authorizationFailure = await authorizationRevalidationFailure(
             authorization,
@@ -2039,13 +2468,116 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
         try Task.checkCancellation()
+        var reviewInvocation: PermissionReviewInvocationInput?
+        let needsAutomaticReviewEvidence = outcome.decision == .askUser
+            && context.runtimeEnvironment.mode == .cowork
+            && responder.approvalMode == .automaticReviewer
+        if needsAutomaticReviewEvidence {
+            if let sidecarFailure = Self.authorizationSidecarFailureMessage(
+                preparedCall.sidecarStatus) {
+                // The reviewer has not run. A missing or malformed sidecar is
+                // an acting-model tool-input contract error, not a permission
+                // denial or reviewer failure. Return an actionable tool result
+                // and let a corrected call with the same business arguments
+                // reach the reviewer without spending its denial fuse.
+                try await appendToolCompletion(
+                    [.toolResult(ToolResultPayload(
+                        toolCallId: toolCall.id,
+                        observation: sidecarFailure,
+                        outcome: .failed,
+                        failureSource: .runtimeFailed,
+                        turnID: turnID))],
+                    toolCall: toolCall,
+                    observation: sidecarFailure,
+                    modelHistoryScope: modelHistoryScope)
+                return ToolObservation(text: sidecarFailure)
+            }
+            let canonicalContext = preparedCall.modelAuthorizationContext
+                .flatMap {
+                    AuthorizationSidecarCodec
+                        .canonicalAuthorizationContext($0)
+                }
+            let binding = preparedCall.binding
+            let canonicalBusinessArgumentsDigest =
+                ToolRegistry.authorizationDigest(normalizedArguments)
+            let secretBearingBusinessArguments = descriptor.name == "write_stdin"
+                || SecretScanner.containsSecret(normalizedArguments)
+                || PermissionReviewTextSanitizer.containsSensitiveMaterial(
+                    normalizedArguments)
+            var evidenceFailure: String?
+            var evidenceFailureKind:
+                PermissionApprovalFailureKind =
+                    .authorizationContextUnavailable
+            if secretBearingBusinessArguments {
+                evidenceFailure =
+                    "review_input_secret_bearing: automatic review requires opaque credential references and cannot receive plaintext secret-bearing business arguments"
+            } else if let canonicalContext,
+                      let binding,
+                      let sidecarDigest = binding.sidecarDigest,
+                      binding.sessionID == sessionID,
+                      binding.turnID == turnID,
+                      binding.taskID == context.taskContract?.id,
+                      binding.toolCallID == toolCall.id,
+                      binding.toolName == descriptor.name,
+                      binding.canonicalBusinessArgumentsDigest
+                        == canonicalBusinessArgumentsDigest {
+                reviewInvocation = PermissionReviewInvocationInput(
+                    sessionID: binding.sessionID,
+                    turnID: binding.turnID,
+                    taskID: binding.taskID,
+                    toolCallID: binding.toolCallID,
+                    toolName: binding.toolName,
+                    sourceGenerationID: binding.providerGenerationID,
+                    toolSnapshotID: binding.registrySnapshotID,
+                    canonicalBusinessArguments: normalizedArguments,
+                    businessArgumentsDigest:
+                        canonicalBusinessArgumentsDigest,
+                    businessArgumentsCharacterCount:
+                        normalizedArguments.count,
+                    modelAuthorizationContextJSON: canonicalContext,
+                    modelAuthorizationContextDigest: sidecarDigest)
+                evidenceFailure = nil
+            } else {
+                evidenceFailure =
+                    "authorization_context_binding_invalid: regenerate the exact business call; its sidecar could not be bound to this action"
+                evidenceFailureKind = .authorizationSnapshotInvalid
+            }
+
+            if let evidenceFailure {
+                try await appendToolCompletion(
+                    [
+                        .permissionResolved(PermissionResolvedPayload(
+                            turnID: turnID,
+                            toolCallID: toolCall.id,
+                            tool: descriptor.name,
+                            decision: .deny,
+                            risk: outcome.risk,
+                            reason: evidenceFailure,
+                            intent: intent,
+                            authorization: authorization,
+                            source: .automaticReviewerFailure,
+                            reviewStatus: .failed,
+                            failureKind: evidenceFailureKind,
+                            failureSource: .reviewerFailed)),
+                        .toolResult(ToolResultPayload(
+                            toolCallId: toolCall.id,
+                            observation: evidenceFailure,
+                            outcome: .denied,
+                            failureSource: .reviewerFailed,
+                            turnID: turnID)),
+                    ],
+                    toolCall: toolCall,
+                    observation: evidenceFailure,
+                    modelHistoryScope: modelHistoryScope)
+                await denialCircuitBreaker.recordDenial(
+                    signature: denialSignature,
+                    permitsOneFreshReview: true)
+                return ToolObservation(text: evidenceFailure)
+            }
+        }
         let executionID = IDGen.random(prefix: "tool-execution")
         let replayPolicy = intent.replayPolicy
         let settled = try await settle(outcome,
@@ -2058,10 +2590,7 @@ public struct AgentLoop: Sendable {
                                        authorization: authorization,
                                        executionID: executionID,
                                        replayPolicy: replayPolicy,
-                                       authorizationReportingTurn:
-                                        authorizationReportingTurn,
-                                       permissionAuthorizationUsage:
-                                        permissionAuthorizationUsage)
+                                       reviewInvocation: reviewInvocation)
         try Task.checkCancellation()
 
         guard settled.decision == .allow else {
@@ -2080,10 +2609,6 @@ public struct AgentLoop: Sendable {
             await denialCircuitBreaker.recordDenial(
                 signature: denialSignature,
                 permitsOneFreshReview: settled.permitsOneFreshReview)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
 
@@ -2120,10 +2645,6 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
 
@@ -2157,10 +2678,6 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
 
@@ -2169,7 +2686,7 @@ public struct AgentLoop: Sendable {
         let prepared = ToolExecutionPreparedPayload(
             executionID: executionID,
             taskID: context.taskContract?.id,
-            attempt: taskAttempt,
+            attempt: modelHistoryScope?.taskAttempt ?? taskAttempt,
             toolCallID: toolCall.id,
             agent: agent.name,
             tool: descriptor.name,
@@ -2178,8 +2695,8 @@ public struct AgentLoop: Sendable {
             authorization: authorization,
             replayPolicy: replayPolicy)
         // This record is the durable boundary: if it cannot be written, the
-        // executor is never invoked. An unresolved non-replayable record after
-        // a crash forces reconciliation instead of blindly replaying the task.
+        // executor is never invoked. An interrupted non-replayable call blocks
+        // automatic replay of the old task attempt.
         try await log.append(.toolExecutionPrepared(prepared))
 
         if let authorizationFailure = await authorizationRevalidationFailure(
@@ -2220,10 +2737,6 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
 
@@ -2262,23 +2775,19 @@ public struct AgentLoop: Sendable {
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
 
         let toolContext = ToolContext(workspaceRoot: effectiveWorkspaceRoot,
                                       workspaceLease: workspaceLease,
                                       shell: shell,
-                                      browserSession: browserSession,
                                       terminal: terminal,
                                       git: git,
                                       messenger: messenger,
                                       agentManager: agentManager,
                                       workTaskManager: workTaskManager,
                                       goalManager: goalManager,
+                                      runController: runController,
                                       imageGenerator: imageGenerator,
                                       sessionNaming: sessionNaming,
                                       executionID: executionID,
@@ -2307,28 +2816,26 @@ public struct AgentLoop: Sendable {
                 toolCall: toolCall,
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             throw CancellationError()
         }
         do {
             observation = try await registration.execute(args, in: toolContext)
         } catch is CancellationError {
-            let message = replayPolicy == .requiresManualReconciliation
-                ? "tool cancelled; manual reconciliation required because the side effect may already have occurred"
-                : "tool cancelled after execution started; execution outcome is unresolved"
-            // The executor boundary has been crossed. Even a cancellation from
-            // a nominally replayable tool is not proof that its work stopped,
-            // so leave the durable ticket unresolved.
+            let message = "tool cancelled after execution started"
             try await appendToolCompletion(
-                [.toolResult(ToolResultPayload(
-                    toolCallId: toolCall.id,
-                    observation: message,
-                    outcome: .failed,
-                    failureSource: .turnCancelled,
-                    turnID: turnID))],
+                [
+                    .toolResult(ToolResultPayload(
+                        toolCallId: toolCall.id,
+                        observation: message,
+                        outcome: .failed,
+                        failureSource: .turnCancelled,
+                        turnID: turnID)),
+                    .toolExecutionSettled(ToolExecutionSettledPayload(
+                        prepared: prepared,
+                        outcome: .cancelled,
+                        effectDisposition: .unknown,
+                        reason: message)),
+                ],
                 toolCall: toolCall,
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
@@ -2357,10 +2864,6 @@ public struct AgentLoop: Sendable {
                 toolCall: toolCall,
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             await denialCircuitBreaker.recordDenial(signature: denialSignature)
             return ToolObservation(text: message)
         } catch let rejection as ToolExecutionRejectedWithoutSideEffect {
@@ -2382,34 +2885,9 @@ public struct AgentLoop: Sendable {
                 toolCall: toolCall,
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         } catch {
             let underlying = RuntimeErrorPresentation.message(for: error)
-            if replayPolicy == .requiresManualReconciliation {
-                let message = "tool error: \(underlying); manual reconciliation required because the side effect may already have occurred"
-                // Deliberately leave the execution ticket unresolved. A network,
-                // process, or collaboration tool can commit its side effect and
-                // still throw locally (for example after a timeout), so `failed`
-                // is not proof that replay is safe.
-                try await appendToolCompletion(
-                    [.toolResult(ToolResultPayload(
-                        toolCallId: toolCall.id,
-                        observation: message,
-                        outcome: .failed,
-                        failureSource: .runtimeFailed,
-                        turnID: turnID))],
-                    toolCall: toolCall,
-                    observation: message,
-                    modelHistoryScope: modelHistoryScope)
-                throw AgentLoopError.toolExecutionRequiresManualReconciliation(
-                    tool: descriptor.name,
-                    executionID: executionID,
-                    reason: underlying)
-            }
             let message = "tool error: \(underlying)"
             try await appendToolCompletion(
                 [
@@ -2422,15 +2900,12 @@ public struct AgentLoop: Sendable {
                     .toolExecutionSettled(ToolExecutionSettledPayload(
                         prepared: prepared,
                         outcome: .failed,
+                        effectDisposition: .unknown,
                         reason: message)),
                 ],
                 toolCall: toolCall,
                 observation: message,
                 modelHistoryScope: modelHistoryScope)
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
             return ToolObservation(text: message)
         }
 
@@ -2459,13 +2934,9 @@ public struct AgentLoop: Sendable {
                 observation: observation.text,
                 modelHistoryScope: modelHistoryScope)
             // MCP `isError` is a typed tool failure, not proof that a remote
-            // side effect never crossed its commit boundary. Keep mutating
-            // completion evidence unresolved and let the model recover from
-            // the durable failed tool result without replaying automatically.
-            await sideEffectEvidence.recordDenied(
-                tool: descriptor.name,
-                intent: intent,
-                authorization: authorization)
+            // effect never crossed its commit boundary. The durable unknown
+            // disposition prevents replay of that old execution while the
+            // model can continue from the failed tool result in this turn.
             try Task.checkCancellation()
             return observation
         }
@@ -2495,10 +2966,7 @@ public struct AgentLoop: Sendable {
             observation: observation.text,
             toolSearchOutput: observation.toolSearchOutput,
             modelHistoryScope: modelHistoryScope)
-        await sideEffectEvidence.recordSucceeded(
-            intent: intent,
-            authorization: authorization)
-        // Persist completed side effects before surfacing a concurrent cancel.
+        // Persist completed execution before surfacing a concurrent cancel.
         try Task.checkCancellation()
         return observation
     }
@@ -2560,6 +3028,55 @@ public struct AgentLoop: Sendable {
                 execution: kind == .toolSearch
                     ? (call.execution ?? "client")
                     : call.execution)
+        }
+    }
+
+    private static func sidecarFreeHistoryCall(
+        _ prepared: PreparedPermissionToolCall
+    ) -> ToolCall {
+        if let executableCall = prepared.executableCall {
+            return executableCall
+        }
+        let providerCall = prepared.providerCall
+        return ToolCall(
+            id: providerCall.id,
+            name: providerCall.name,
+            arguments: #"{"_intatis":"arguments_redacted"}"#,
+            kind: providerCall.kind,
+            namespace: providerCall.namespace,
+            status: providerCall.status,
+            execution: providerCall.execution)
+    }
+
+    /// Keeps a validated, non-secret same-generation sidecar only in the
+    /// current acting model's in-memory conversation. Durable model history,
+    /// EventLog, authorization identity, and the executor continue to use the
+    /// stripped call above.
+    private static func liveConversationHistoryCall(
+        _ prepared: PreparedPermissionToolCall
+    ) -> ToolCall {
+        guard prepared.sidecarStatus == .valid,
+              prepared.modelAuthorizationContext != nil,
+              prepared.executableCall != nil else {
+            return sidecarFreeHistoryCall(prepared)
+        }
+        return prepared.providerCall
+    }
+
+    private static func authorizationSidecarFailureMessage(
+        _ status: AuthorizationSidecarStatus
+    ) -> String? {
+        switch status {
+        case .valid:
+            return nil
+        case .missing:
+            return "authorization_context_missing: include the required __intatis_authorization_context string in this exact business tool call"
+        case .malformed:
+            return "authorization_context_malformed: regenerate this exact business tool call with one nonempty __intatis_authorization_context string"
+        case .oversized(let actualBytes, let maximumBytes):
+            return "authorization_context_oversized: the complete context is \(actualBytes) bytes but this route allows \(maximumBytes); rewrite the complete string more concisely"
+        case .secretBearing:
+            return "authorization_context_secret_bearing: do not copy credentials or secret values; summarize them only as opaque references and regenerate the exact call"
         }
     }
 
@@ -2692,6 +3209,8 @@ public struct AgentLoop: Sendable {
         toolName == "spawn_agent"
             || toolName == "rename_session"
             || toolName == "write_stdin"
+            || toolName == "build_knowledge"
+            || toolName == "search_knowledge"
     }
 
     private static func sessionRenameContainsSecret(_ normalizedArguments: String) -> Bool {
@@ -3044,10 +3563,8 @@ public struct AgentLoop: Sendable {
                         authorization: ResolvedToolAuthorization,
                         executionID: String,
                         replayPolicy: ToolExecutionReplayPolicy,
-                        authorizationReportingTurn:
-                            PermissionAuthorizationReportingTurn,
-                        permissionAuthorizationUsage:
-                            PermissionAuthorizationUsageLedger) async throws -> SettledPermission {
+                        reviewInvocation:
+                            PermissionReviewInvocationInput?) async throws -> SettledPermission {
         switch outcome.decision {
         case .allow, .deny:
             try await log.append(.permissionResolved(PermissionResolvedPayload(
@@ -3069,32 +3586,15 @@ public struct AgentLoop: Sendable {
         case .askUser:
             let requestID = RequestID.new()
             let boundedArguments = "digest=\(authorization.normalizedArgumentsDigest); characters=\(authorization.normalizedArgumentsCharacterCount)"
-            var requestContext = permissionRequestContext(
+            let requestContext = permissionRequestContext(
                 outcome: outcome,
                 callContext: callContext,
                 toolCall: toolCall,
                 turnID: turnID,
                 authorization: authorization,
                 executionID: executionID,
-                replayPolicy: replayPolicy)
-            if context.runtimeEnvironment.mode == .cowork,
-               responder.approvalMode == .automaticReviewer {
-                let reportResult = await PermissionAuthorizationContextReporter(
-                    log: log,
-                    provider: provider,
-                    model: agent.model,
-                    reasoningEffort: reasoningEffort,
-                    tokenBudgetMeter: tokenBudgetMeter)
-                    .report(
-                        turn: authorizationReportingTurn,
-                        authorization: authorization)
-                await permissionAuthorizationUsage.record(reportResult.usage)
-                try Task.checkCancellation()
-                if var causalContext = requestContext.causalContext {
-                    causalContext.authorizationContext = reportResult.context
-                    requestContext.causalContext = causalContext
-                }
-            }
+                replayPolicy: replayPolicy,
+                reviewInvocation: reviewInvocation)
             let request = PermissionRequestPayload(
                 requestId: requestID, agent: agent.name, tool: descriptor.name,
                 args: context.runtimeEnvironment.mode == .cowork
@@ -3111,7 +3611,9 @@ public struct AgentLoop: Sendable {
 
             let resolution: PermissionApprovalResolution
             do {
-                resolution = try await awaitPermissionApproval(request)
+                resolution = try await awaitPermissionApproval(
+                    request,
+                    invocation: reviewInvocation)
                 try Task.checkCancellation()
             } catch is CancellationError {
                 let cancelled = PermissionResolvedPayload(
@@ -3211,7 +3713,9 @@ public struct AgentLoop: Sendable {
                                           turnID: TurnID,
                                           authorization: ResolvedToolAuthorization,
                                           executionID: String,
-                                          replayPolicy: ToolExecutionReplayPolicy) -> PermissionRequestContext {
+                                          replayPolicy: ToolExecutionReplayPolicy,
+                                          reviewInvocation:
+                                            PermissionReviewInvocationInput?) -> PermissionRequestContext {
         let contract = context.taskContract
         var lineage: [TaskID] = []
         if let rootTaskID { lineage.append(rootTaskID) }
@@ -3266,19 +3770,36 @@ public struct AgentLoop: Sendable {
                 assignee: contract?.assignee,
                 taskLineage: lineage,
                 relatedAgents: relatedAgents),
+            reviewInvocationEvidence: reviewInvocation.map {
+                PermissionReviewInvocationEvidenceMetadata(
+                    sourceGenerationID: $0.sourceGenerationID,
+                    toolSnapshotID: $0.toolSnapshotID,
+                    modelAuthorizationContextDigest:
+                        $0.modelAuthorizationContextDigest)
+            },
             authorization: authorization,
             executionID: executionID,
             replayPolicy: replayPolicy.rawValue)
     }
 
-    private func awaitPermissionApproval(_ request: PermissionRequestPayload) async throws -> PermissionApprovalResolution {
+    private func awaitPermissionApproval(
+        _ request: PermissionRequestPayload,
+        invocation: PermissionReviewInvocationInput?
+    ) async throws -> PermissionApprovalResolution {
         let gate = PermissionApprovalGate()
         return try await withTaskCancellationHandler(operation: {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 gate.install(continuation)
                 let approvalTask = Task {
-                    let resolution = await responder.requestResolution(request)
+                    let resolution: PermissionApprovalResolution
+                    if let invocation {
+                        resolution = await responder.requestResolution(
+                            request,
+                            invocation: invocation)
+                    } else {
+                        resolution = await responder.requestResolution(request)
+                    }
                     gate.resolve(.success(resolution))
                 }
                 gate.setApprovalTask(approvalTask)
@@ -3286,58 +3807,6 @@ public struct AgentLoop: Sendable {
         }, onCancel: {
             gate.cancel()
         })
-    }
-
-    /// Freezes only genuine user messages that were visible to the acting
-    /// agent's exact request. Stable main-thread history retains its canonical
-    /// submission identities; task-scoped workers receive only the root
-    /// submission propagated by their TaskContract and never inherit private
-    /// main-thread turns.
-    private func permissionAuthorizationVisibleUserMessages(
-        projection: AgentModelHistoryProjection?,
-        currentSubmissionID: SubmissionID?,
-        currentUserText: String
-    ) -> [PermissionAuthorizationVisibleUserMessage] {
-        let current = context.taskContract?.submissionID
-            ?? currentSubmissionID
-        switch context.conversationHistoryPolicy {
-        case .coworkMainThread:
-            guard let projection,
-                  projection.realUserMessages.allSatisfy({
-                      $0.submissionID != nil
-                  }) else {
-                return []
-            }
-            var seen = Set<SubmissionID>()
-            var visible: [PermissionAuthorizationVisibleUserMessage] = []
-            for message in projection.realUserMessages {
-                guard let submissionID = message.submissionID,
-                      seen.insert(submissionID).inserted else {
-                    return []
-                }
-                visible.append(PermissionAuthorizationVisibleUserMessage(
-                    submissionID: submissionID,
-                    expectedContent: message.content,
-                    contentTruncated: message.contentTruncated))
-            }
-            if let current, !seen.contains(current) {
-                visible.append(PermissionAuthorizationVisibleUserMessage(
-                    submissionID: current,
-                    expectedContent: currentUserText))
-            }
-            return visible
-
-        case .taskScoped:
-            guard let current else { return [] }
-            return [PermissionAuthorizationVisibleUserMessage(
-                submissionID: current)]
-
-        case .conversation:
-            guard let current else { return [] }
-            return [PermissionAuthorizationVisibleUserMessage(
-                submissionID: current,
-                expectedContent: currentUserText)]
-        }
     }
 
     private func projectedHistory(

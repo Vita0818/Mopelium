@@ -33,18 +33,20 @@ public enum EventLogError: Error, Equatable, LocalizedError, Sendable {
     case invalidModelHistoryWindowLineage
     case reusedModelHistoryWindowID
     case modelHistoryCompactionRequiresValidatedAppend
+    case invalidModelHistoryMediaBatch
     case permissionRequestNotFound
     case conflictingPermissionRequest
     case conflictingPermissionSettlement
+    case conflictingContinuationRunCloseClaim
 
     public var errorDescription: String? {
         switch self {
         case .lockUnavailable(let code):
             return "The session event log lock could not be opened (error code \(code))."
         case .lockTimedOut:
-            return "The session event log is busy in another Mopelium operation."
+            return "The session event log is busy in another Intatis operation."
         case .writerAlreadyActive:
-            return "Another Mopelium runtime is already writing this session."
+            return "Another Intatis runtime is already writing this session."
         case .storageUnavailable(let operation, let code):
             return "The session event log could not \(operation) (error code \(code))."
         case .journalCorrupted:
@@ -62,7 +64,7 @@ public enum EventLogError: Error, Equatable, LocalizedError, Sendable {
         case .sequenceExhausted:
             return "The session event log sequence space is exhausted."
         case .unsupportedEventTypes:
-            return "The session contains newer event types that this Mopelium version cannot update safely."
+            return "The session contains newer event types that this Intatis version cannot update safely."
         case .incompleteEventHistory:
             return "The session event history is incomplete and cannot be updated safely."
         case .staleModelHistory(
@@ -79,12 +81,16 @@ public enum EventLogError: Error, Equatable, LocalizedError, Sendable {
             return "The model history compaction reuses a window identifier from the agent's canonical checkpoint chain."
         case .modelHistoryCompactionRequiresValidatedAppend:
             return "Model history compaction checkpoints require the validated compare-and-append operation."
+        case .invalidModelHistoryMediaBatch:
+            return "A model history image output is not bound to one exact tool result and execution settlement in the same event batch."
         case .permissionRequestNotFound:
             return "The permission request is not durably registered in this session."
         case .conflictingPermissionRequest:
             return "The session contains conflicting records for the same permission request."
         case .conflictingPermissionSettlement:
             return "The permission request already has a different terminal response."
+        case .conflictingContinuationRunCloseClaim:
+            return "The continuation run contains conflicting durable close claims."
         }
     }
 
@@ -93,7 +99,7 @@ public enum EventLogError: Error, Equatable, LocalizedError, Sendable {
         case .lockUnavailable, .storageUnavailable:
             return "Check storage permissions and available disk space, then retry."
         case .lockTimedOut:
-            return "Wait for the other operation to finish, or close the other Mopelium process using this session, then retry."
+            return "Wait for the other operation to finish, or close the other Intatis process using this session, then retry."
         case .writerAlreadyActive:
             return "Close the other Code or Cowork runtime for this session, then retry. Read-only replay can remain open."
         case .journalCorrupted, .journalMismatch, .sessionMismatch, .corruptedEvent,
@@ -102,7 +108,7 @@ public enum EventLogError: Error, Equatable, LocalizedError, Sendable {
         case .sequenceExhausted:
             return "Start a new session."
         case .unsupportedEventTypes:
-            return "Open this session with a compatible newer Mopelium version before changing its settings."
+            return "Open this session with a compatible newer Intatis version before changing its settings."
         case .staleModelHistory:
             return "Reload the agent's canonical model history, rebuild the replacement checkpoint, and retry."
         case .invalidModelHistoryWindowLineage,
@@ -110,11 +116,15 @@ public enum EventLogError: Error, Equatable, LocalizedError, Sendable {
             return "Reload the agent's canonical checkpoint chain, create the next unique window, and retry."
         case .modelHistoryCompactionRequiresValidatedAppend:
             return "Use the model-history compaction append operation so revision and window lineage are checked atomically."
+        case .invalidModelHistoryMediaBatch:
+            return "Rebuild the tool completion batch from one canonical structured result, then retry."
         case .incompleteEventHistory:
             return "Stop writing to this session and inspect or restore its canonical event log before retrying."
         case .permissionRequestNotFound,
              .conflictingPermissionRequest, .conflictingPermissionSettlement:
             return "Reload the session from its canonical event log and inspect the permission history before retrying."
+        case .conflictingContinuationRunCloseClaim:
+            return "Reload the session from its canonical event log and inspect the continuation-run close history before retrying."
         }
     }
 }
@@ -305,6 +315,26 @@ public struct PermissionRequestRegistrationResult: Equatable, Sendable {
         self.envelope = envelope
         self.request = request
         self.didAppend = didAppend
+    }
+}
+
+/// Result of the ContinuationRunID-scoped first-write close claim. A caller
+/// that loses a race receives the canonical first claim with `matchesRequest`
+/// false and must honor that winner rather than appending another outcome.
+public struct ContinuationRunCloseClaimResult: Equatable, Sendable {
+    public let envelope: Envelope
+    public let claim: ContinuationRunCloseRequestedPayload
+    public let didAppend: Bool
+    public let matchesRequest: Bool
+
+    public init(envelope: Envelope,
+                claim: ContinuationRunCloseRequestedPayload,
+                didAppend: Bool,
+                matchesRequest: Bool) {
+        self.envelope = envelope
+        self.claim = claim
+        self.didAppend = didAppend
+        self.matchesRequest = matchesRequest
     }
 }
 
@@ -1055,6 +1085,86 @@ public actor EventLog {
             didAppend: true)
     }
 
+    /// Atomically installs the first admission-closing claim for one exact
+    /// ContinuationRunID. The complete-known-history proof and append share the
+    /// event-log lock, so separate runtime instances cannot both win. An exact
+    /// replay is idempotent; a different request observes the canonical winner.
+    public func claimContinuationRunClose(
+        _ request: ContinuationRunCloseRequestedPayload,
+        ts: Date = Date()
+    ) throws -> ContinuationRunCloseClaimResult {
+        guard request.sessionID == session else {
+            throw EventLogError.sessionMismatch
+        }
+
+        let lock = try EventLogFileLock.acquire(at: lockURL, mode: .exclusive)
+        defer { lock.release() }
+
+        try Self.recoverJournalIfNeeded(
+            fileURL: fileURL,
+            journalURL: journalURL,
+            temporaryURL: journalTemporaryURL,
+            session: session,
+            decoder: decoder)
+        let data = try Self.readLogData(at: fileURL)
+        let scan = try Self.checkedScan(
+            data: data,
+            expectedSession: session,
+            decoder: decoder,
+            from: 0)
+        guard !scan.containsUnknownEventTypes else {
+            throw EventLogError.unsupportedEventTypes
+        }
+        guard scan.envelopes.enumerated().allSatisfy({ offset, envelope in
+            envelope.seq == offset
+        }) else {
+            throw EventLogError.incompleteEventHistory
+        }
+
+        var first: (Envelope, ContinuationRunCloseRequestedPayload)?
+        for envelope in scan.envelopes {
+            guard case .continuationRunCloseRequested(let existing) = envelope.event,
+                  existing.runID == request.runID else { continue }
+            if let first {
+                guard first.1 == existing else {
+                    throw EventLogError.conflictingContinuationRunCloseClaim
+                }
+            } else {
+                first = (envelope, existing)
+            }
+        }
+        if let first {
+            nextSeq = max(nextSeq, scan.nextSeq)
+            return ContinuationRunCloseClaimResult(
+                envelope: first.0,
+                claim: first.1,
+                didAppend: false,
+                matchesRequest: first.1 == request)
+        }
+
+        let state = try Self.tailSequenceState(
+            at: fileURL,
+            expectedSession: session,
+            decoder: decoder)
+        guard state.nextSeq >= nextSeq else {
+            throw EventLogError.sequenceRegressed(
+                expectedAtLeast: nextSeq,
+                found: state.nextSeq)
+        }
+        guard let envelope = try persistLocked(
+            [.continuationRunCloseRequested(request)],
+            ts: ts,
+            state: state).first,
+              case .continuationRunCloseRequested(let canonical) = envelope.event else {
+            preconditionFailure("a run close claim append must persist one claim")
+        }
+        return ContinuationRunCloseClaimResult(
+            envelope: envelope,
+            claim: canonical,
+            didAppend: true,
+            matchesRequest: true)
+    }
+
     /// Appends a fresh-session bootstrap only if no durable Envelope header is
     /// present at the instant of append. The emptiness predicate and batch
     /// write share one cross-process lock, closing the check/write race between
@@ -1112,6 +1222,7 @@ public actor EventLog {
             throw EventLogError
                 .modelHistoryCompactionRequiresValidatedAppend
         }
+        try Self.validateModelHistoryMediaBatch(events)
 
         var envelopes: [Envelope] = []
         envelopes.reserveCapacity(events.count)
@@ -1465,6 +1576,95 @@ public actor EventLog {
         return nil
     }
 
+    /// Binds every durable media-bearing function output to the canonical tool
+    /// result and execution settlement that produced it. This runs before
+    /// envelope/WAL bytes are created so an orphan, mismatch, or duplicate
+    /// rejects the whole batch.
+    private static func validateModelHistoryMediaBatch(
+        _ events: [Event]
+    ) throws {
+        struct SettlementKey: Hashable {
+            var callID: String
+            var taskID: TaskID?
+            var attempt: Int?
+            var agent: AgentID?
+        }
+
+        var toolResultsByTurnAndCall:
+            [TurnID: [String: [ToolResultPayload]]] = [:]
+        var settlementsByKey:
+            [SettlementKey: [ToolExecutionSettledPayload]] = [:]
+        for event in events {
+            switch event {
+            case .toolResult(let payload):
+                guard let turnID = payload.turnID else { continue }
+                toolResultsByTurnAndCall[turnID, default: [:]][
+                    payload.toolCallId,
+                    default: []
+                ].append(payload)
+            case .toolExecutionSettled(let payload):
+                settlementsByKey[SettlementKey(
+                    callID: payload.toolCallID,
+                    taskID: payload.taskID,
+                    attempt: payload.attempt,
+                    agent: payload.agent), default: []].append(payload)
+            default:
+                continue
+            }
+        }
+
+        var mediaOutputCallIDsByTurn: [TurnID: Set<String>] = [:]
+        var mediaOutputSettlementKeys = Set<SettlementKey>()
+        for event in events {
+            guard case .modelHistoryItem(let payload) = event,
+                  payload.schemaVersion
+                    == ModelHistoryItemPayload.mediaSchemaVersion,
+                  payload.kind == .functionCallOutput,
+                  let references = payload.imageReferences,
+                  !references.isEmpty else {
+                continue
+            }
+            guard let callID = payload.callID,
+                  mediaOutputCallIDsByTurn[
+                    payload.turnID,
+                    default: []
+                  ].insert(callID).inserted,
+                  let matchingResults = toolResultsByTurnAndCall[
+                    payload.turnID
+                  ]?[callID],
+                  matchingResults.count == 1,
+                  let structuredResult = matchingResults[0].structuredResult,
+                  mediaOutputSettlementKeys.insert(SettlementKey(
+                    callID: callID,
+                    taskID: payload.taskID,
+                    attempt: payload.taskAttempt,
+                    agent: payload.agent)).inserted
+            else {
+                throw EventLogError.invalidModelHistoryMediaBatch
+            }
+
+            let imageBlocks = structuredResult.content.filter {
+                $0.kind == .imageReference
+            }
+            guard imageBlocks.count == references.count else {
+                throw EventLogError.invalidModelHistoryMediaBatch
+            }
+            for (block, reference) in zip(imageBlocks, references) {
+                guard block.artifactID == reference.artifactID,
+                      block.mimeType == reference.mimeType,
+                      block.byteCount == reference.byteCount,
+                      block.sha256 == reference.sha256 else {
+                    throw EventLogError.invalidModelHistoryMediaBatch
+                }
+            }
+        }
+        for key in mediaOutputSettlementKeys {
+            guard settlementsByKey[key]?.count == 1 else {
+                throw EventLogError.invalidModelHistoryMediaBatch
+            }
+        }
+    }
+
     /// Validates the complete same-agent checkpoint chain while the EventLog
     /// lock is held. The candidate is checked after its source-history CAS and
     /// before any envelope or WAL bytes are created.
@@ -1472,6 +1672,36 @@ public actor EventLog {
         appending candidate: ModelHistoryCompactedPayload,
         in envelopes: [Envelope]
     ) throws {
+        var mediaAwareSchemaRequired = false
+        for envelope in envelopes {
+            switch envelope.event {
+            case .modelHistoryItem(let payload)
+                    where payload.agent == candidate.agent:
+                if payload.schemaVersion
+                    == ModelHistoryItemPayload.mediaSchemaVersion {
+                    mediaAwareSchemaRequired = true
+                }
+            case .modelHistoryCompacted(let payload)
+                    where payload.agent == candidate.agent:
+                if mediaAwareSchemaRequired,
+                   payload.schemaVersion
+                    != ModelHistoryCompactedPayload.mediaSchemaVersion {
+                    throw EventLogError.invalidModelHistoryWindowLineage
+                }
+                if payload.schemaVersion
+                    == ModelHistoryCompactedPayload.mediaSchemaVersion {
+                    mediaAwareSchemaRequired = true
+                }
+            default:
+                continue
+            }
+        }
+        if mediaAwareSchemaRequired,
+           candidate.schemaVersion
+            != ModelHistoryCompactedPayload.mediaSchemaVersion {
+            throw EventLogError.invalidModelHistoryWindowLineage
+        }
+
         var checkpoints = envelopes.compactMap {
             envelope -> ModelHistoryCompactedPayload? in
             guard case .modelHistoryCompacted(let payload) =

@@ -558,8 +558,6 @@ func runExecCommand(
     let live = try await makeLiveSession(
         context,
         arguments: arguments)
-    let browserSession =
-        ProcessBrowserSessionManager()
     let terminal =
         ProcessTerminalSessionManager()
     do {
@@ -573,6 +571,12 @@ func runExecCommand(
                 .agentRuntimeRoute(
                     model: ModelID(
                         rawValue: config.model))
+        let hostedWebSearch = live.capabilityLease.tools.contains(
+            .hostedWebSearch)
+            ? route.hostedWebSearch.map {
+                ProviderHostedWebSearchToolService(route: $0)
+            }
+            : nil
         let skillSnapshot =
             try await SkillCatalogService.shared.snapshot(
                 configuration: .standard(
@@ -585,7 +589,8 @@ func runExecCommand(
                         .skillCatalogMetadataBudget)
         let baseRegistry = skillSnapshot.augmenting(
             ToolRegistry.standard(
-                includesTerminal: true))
+                includesTerminal: true,
+                hostedWebSearch: hostedWebSearch))
         let consent = arguments.flags
             .contains("yes")
             ? MCPCLIConsentConfirmation(
@@ -622,7 +627,6 @@ func runExecCommand(
             context: ContextBuilder(
                 skillSnapshot: skillSnapshot,
                 runtimeEnvironment: .code),
-            browserSession: browserSession,
             terminal: terminal,
             capabilityLease:
                 live.capabilityLease,
@@ -649,8 +653,6 @@ func runExecCommand(
                         consent)
             })
         let answer = try await loop.send(prompt)
-        await browserSession.shutdown(
-            reason: "CLI exec completed")
         await terminal.shutdown(
             reason: "CLI exec completed")
         _ = await live.runtime.shutdown(
@@ -660,8 +662,6 @@ func runExecCommand(
             out("\n")
         }
     } catch {
-        await browserSession.shutdown(
-            reason: "CLI exec failed")
         await terminal.shutdown(
             reason: "CLI exec failed")
         _ = await live.runtime.shutdown(

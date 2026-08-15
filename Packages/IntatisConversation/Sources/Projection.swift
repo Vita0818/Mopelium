@@ -15,6 +15,7 @@ public struct ChatMessageView: Identifiable, Equatable, Sendable {
     public var goal: String?
     public var recoveryAdvice: RuntimeRecoveryAdvice?
     public var citations: [MessageCitation]
+    public var attachments: [ArtifactID]
 
     public init(id: MessageID,
                 role: MessageRole,
@@ -25,7 +26,8 @@ public struct ChatMessageView: Identifiable, Equatable, Sendable {
                 tags: [String] = [],
                 goal: String? = nil,
                 recoveryAdvice: RuntimeRecoveryAdvice? = nil,
-                citations: [MessageCitation] = []) {
+                citations: [MessageCitation] = [],
+                attachments: [ArtifactID] = []) {
         self.id = id
         self.role = role
         self.agent = agent
@@ -36,6 +38,7 @@ public struct ChatMessageView: Identifiable, Equatable, Sendable {
         self.goal = goal
         self.recoveryAdvice = recoveryAdvice
         self.citations = citations
+        self.attachments = attachments
     }
 }
 
@@ -67,7 +70,8 @@ public struct ConversationProjection: Equatable, Sendable {
                                             isComplete: true,
                                             timestamp: timestamp,
                                             tags: p.tags ?? [],
-                                            goal: p.goal))
+                                            goal: p.goal,
+                                            attachments: p.attachments ?? []))
 
         case .messageDelta(let p):
             if let i = messages.firstIndex(where: { $0.id == p.messageId }) {
@@ -118,19 +122,20 @@ public struct ConversationProjection: Equatable, Sendable {
              .agentToAgentMessage, .permissionReview,
              .permissionReviewRequested, .permissionReviewSettled,
              .informationRequested, .informationReplied,
-             .delegationRequested, .delegationApproved, .delegationRejected, .taskDelegated,
+             .delegationApproved, .delegationRejected, .taskDelegated,
              .workspaceLeaseRequested, .workspaceLeaseGranted, .workspaceLeaseDenied, .workspaceLeaseRevoked,
              .capabilityLeaseCreated, .capabilityLeaseRevoked,
              .taskCreated, .taskAssigned, .taskQueued, .taskStarted, .taskCompleted, .taskFailed, .taskCancelled, .taskRejected,
-             .workTaskCreated, .workTaskUpdated, .workTaskOwnerChanged, .workTaskDependencyChanged,
+             .workTaskCreated, .workTaskUpdated, .workTaskDependencyChanged,
              .workTaskReady, .workTaskStarted, .workTaskProgressed, .workTaskBlocked,
              .workTaskCompleted, .workTaskFailed, .workTaskCancelled,
-             .workTaskInvocationLinked, .workTaskEvidenceAdded, .workTaskCarriedForward,
+             .workTaskInvocationLinked, .workTaskEvidenceAdded,
              .goalCreated, .goalEdited, .goalPaused, .goalResumed, .goalAuditCompleted,
              .goalContinuationScheduled, .goalProgressed, .goalBlocked,
              .goalBudgetLimited, .goalUsageLimited, .goalCompleted, .goalCleared,
              .continuationRunCreated, .continuationRunStarted, .continuationRunCheckpointed,
-             .continuationRunCompleted, .continuationRunCancelled, .continuationRunRecovered,
+             .continuationRunCloseRequested,
+             .continuationRunCompleted, .continuationRunInterrupted, .continuationRunCancelled,
              .artifactProgress, .turnStats, .turnOutcome,
              .mcpServerAttached, .mcpServerDetached, .mcpAttachmentPolicyUpdated,
              .mcpConsentGranted, .mcpConsentRevoked,

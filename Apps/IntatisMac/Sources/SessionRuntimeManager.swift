@@ -5,7 +5,6 @@ import IntatisCore
 import IntatisProviders
 import IntatisConversation
 import IntatisArtifacts
-import IntatisMultimodal
 import IntatisSharedUI
 import IntatisMCP
 import IntatisAgentKernel
@@ -85,17 +84,30 @@ enum AppSessionRuntimeManagerError: Error, LocalizedError {
 final class AppChatSessionRuntime {
     let sessionID: SessionID
     let log: EventLog
-    let multimodal: MultimodalService
     let viewModel: ChatViewModel
 
-    init(sessionID: SessionID, registry: ProviderRegistry) throws {
-        self.sessionID = sessionID
-        self.log = try EventLog(
+    init(
+        sessionID: SessionID,
+        registry: ProviderRegistry,
+        autoTitleCoordinator: ChatSessionAutoTitleCoordinator,
+        onAutoTitleCommit: @escaping ChatSessionAutoTitleCommitHandler
+    ) throws {
+        let openedLog = try EventLog(
             session: sessionID,
             fileURL: AppConfig.sessionFile(sessionID))
         let store = try ArtifactStore(root: AppConfig.artifactsDir(sessionID))
-        self.multimodal = MultimodalService(log: log, store: store)
-        self.viewModel = ChatViewModel(log: log, registry: registry)
+        let autoTitleSession = autoTitleCoordinator.bind(
+            sessionID: sessionID,
+            log: openedLog,
+            onCommit: onAutoTitleCommit)
+        let model = ChatViewModel(
+            log: openedLog,
+            registry: registry,
+            artifactStore: store,
+            autoTitleSession: autoTitleSession)
+        self.sessionID = sessionID
+        self.log = openedLog
+        self.viewModel = model
         updateProviderRegistry(registry)
     }
 
@@ -107,17 +119,6 @@ final class AppChatSessionRuntime {
 
     func updateProviderRegistry(_ registry: ProviderRegistry) {
         viewModel.updateProviderRegistry(registry)
-        let multimodal = multimodal
-        viewModel.onGenerateImage = { prompt in
-            guard let provider = try await registry.defaultImageProvider(),
-                  let model = await registry.imageModel() else {
-                throw IntatisError.config("image generation is not configured")
-            }
-            _ = try await multimodal.generateImage(
-                using: provider,
-                model: model,
-                prompt: prompt)
-        }
     }
 
     func shutdown(reason: String) async {
@@ -164,6 +165,7 @@ final class AppSessionRuntimeManager: ObservableObject {
     let sessionActivitySettled = PassthroughSubject<AppSessionActivitySettlement, Never>()
     let sessionRuntimeStatusChanged = PassthroughSubject<AppSessionRuntimeStatusChange, Never>()
     private var chatRuntimes: [SessionID: AppChatSessionRuntime] = [:]
+    private let chatAutoTitleCoordinator = ChatSessionAutoTitleCoordinator()
     private var codeRuntimes: [SessionID: CodeViewModel] = [:]
     private var coworkRuntimes: [SessionID: CoworkSlot] = [:]
     private var mcpRuntimes: [AppSessionRuntimeKey: MCPSlot] = [:]
@@ -180,7 +182,7 @@ final class AppSessionRuntimeManager: ObservableObject {
     private var runtimePresentationStatuses: [
         AppSessionRuntimeKey: AppSessionRuntimePresentationStatus
     ] = [:]
-    private var sessionDisplayNameWatermarks: [AppSessionRuntimeKey: (revision: Int, seq: Int)] = [:]
+    private var sessionDisplayNameWatermarks = SessionDisplayNameWatermarks()
     private var removingKeys: Set<AppSessionRuntimeKey> = []
     private var shutdownBatch: BoundedSessionRuntimeShutdown?
     private(set) var shutdownReport: SessionRuntimeShutdownReport?
@@ -210,17 +212,32 @@ final class AppSessionRuntimeManager: ObservableObject {
         }
         let runtime = try AppChatSessionRuntime(
             sessionID: sessionID,
-            registry: registry)
+            registry: registry,
+            autoTitleCoordinator: chatAutoTitleCoordinator,
+            onAutoTitleCommit: { [weak self] commit in
+                guard commit.kind == .chat else { return }
+                await self?.publishSessionDisplayNameChange(
+                    AppSessionDisplayNameChange(
+                        key: AppSessionRuntimeKey(
+                            kind: .chat,
+                            sessionID: commit.sessionID),
+                        displayName: commit.displayName,
+                        settingsRevision: commit.settingsRevision,
+                        projectedThroughSeq: commit.projectedThroughSeq))
+            })
         chatRuntimes[sessionID] = runtime
         entries[key] = RuntimeEntry(
             isBusy: { runtime.isBusy },
             shutdown: { reason in await runtime.shutdown(reason: reason) })
         observeActivity(
-            Publishers.CombineLatest(
+            Publishers.CombineLatest3(
                 runtime.viewModel.$isStreaming,
-                runtime.viewModel.$imageGenerationState)
-                .map { isStreaming, generationState in
-                    isStreaming || generationState.isRunning
+                runtime.viewModel.$imageGenerationState,
+                runtime.viewModel.$isImportingAttachments)
+                .map { isStreaming, generationState, isImportingAttachments in
+                    isStreaming
+                        || generationState.isRunning
+                        || isImportingAttachments
                 },
             key: key)
         runtime.start()
@@ -522,16 +539,12 @@ final class AppSessionRuntimeManager: ObservableObject {
     /// projections out of order, so revision and sequence form a per-key
     /// high-watermark before any window is notified.
     func publishSessionDisplayNameChange(_ change: AppSessionDisplayNameChange) {
-        if let watermark = sessionDisplayNameWatermarks[change.key] {
-            guard change.settingsRevision > watermark.revision ||
-                    (change.settingsRevision == watermark.revision &&
-                     change.projectedThroughSeq > watermark.seq) else {
-                return
-            }
-        }
-        sessionDisplayNameWatermarks[change.key] = (
-            revision: change.settingsRevision,
-            seq: change.projectedThroughSeq)
+        guard sessionDisplayNameWatermarks.accept(
+            sessionID: change.key.sessionID,
+            kind: change.key.kind,
+            settingsRevision: change.settingsRevision,
+            projectedThroughSeq: change.projectedThroughSeq
+        ) else { return }
         sessionDisplayNameChanged.send(change)
     }
 
@@ -588,7 +601,9 @@ final class AppSessionRuntimeManager: ObservableObject {
         runtimeActivityStates.removeValue(forKey: key)
         runtimeSettlementObservations.removeValue(forKey: key)?.cancel()
         runtimeSettlementStates.removeValue(forKey: key)
-        sessionDisplayNameWatermarks.removeValue(forKey: key)
+        sessionDisplayNameWatermarks.remove(
+            sessionID: key.sessionID,
+            kind: key.kind)
         publishRuntimeStatus(key: key, status: nil)
         runtimeRemoved.send(key)
         if let storageError {

@@ -190,30 +190,25 @@ struct ThreadView: View {
 struct MessageRow: View {
     let message: ChatMessageView
     @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .body)
+    private var chatTextSize: CGFloat = IntatisTypography.spec(for: .chat).nominalPointSize
+    @ScaledMetric(relativeTo: .caption)
+    private var captionSize: CGFloat = IntatisTypography.spec(for: .caption).nominalPointSize
+    @ScaledMetric(relativeTo: .caption2)
+    private var metadataSize: CGFloat = IntatisTypography.spec(for: .metadata).nominalPointSize
 
     private var style: IntatisThreadStyle {
         .standard(scheme)
     }
 
-    private var isUninterruptedAgentReply: Bool {
-        (message.role == .assistant || message.role == .agent)
-            && message.recoveryAdvice == nil
-    }
-
     @ViewBuilder var body: some View {
-        if isUninterruptedAgentReply {
-            messageBody
-                .padding(.vertical, 8)
-        } else {
+        if message.role == .user {
             messageBody
                 .padding(10)
-                .intatisContentSurface(cornerRadius: 10)
-                .overlay {
-                    if message.role == .user {
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(style.accent.opacity(0.64), lineWidth: 1)
-                    }
-                }
+                .intatisLiquidGlass(cornerRadius: 10)
+        } else {
+            messageBody
+                .padding(.vertical, 8)
         }
     }
 
@@ -224,13 +219,14 @@ struct MessageRow: View {
                 HStack(spacing: 6) {
                     if let roleLabel {
                         Text(roleLabel)
-                            .font(.caption)
+                            .font(IntatisTypography.metadata(metadataSize, .semibold))
+                            .tracking(0.6)
                             .foregroundStyle(.secondary)
                     }
                     if (message.role == .assistant || message.role == .agent),
                        let timestamp = message.timestamp {
                         Text(IntatisMessageTimestampPresentation.string(for: timestamp))
-                            .font(.caption2)
+                            .font(IntatisTypography.metadata(metadataSize))
                             .monospacedDigit()
                             .foregroundStyle(.tertiary)
                     }
@@ -250,9 +246,25 @@ struct MessageRow: View {
                     IntatisMessageCitationsView(citations: message.citations)
                 }
             } else {
-                Text(displayText)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !displayText.isEmpty {
+                    Text(displayText)
+                        .font(IntatisTypography.chat(chatTextSize))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if message.role == .user, !message.attachments.isEmpty {
+                    Label(
+                        message.attachments.count == 1
+                            ? IntatisLocalization.format(
+                                "%lld attachment",
+                                Int64(message.attachments.count))
+                            : IntatisLocalization.format(
+                                "%lld attachments",
+                                Int64(message.attachments.count)),
+                        systemImage: "paperclip")
+                        .font(IntatisTypography.caption(captionSize))
+                        .foregroundStyle(.secondary)
+                }
             }
             if let advice = message.recoveryAdvice {
                 IntatisRecoveryAdviceView(advice: advice, tint: .red, style: style)
@@ -276,7 +288,7 @@ struct MessageRow: View {
 
     private func tagBadge(_ tag: String) -> some View {
         Text(tag.uppercased())
-            .font(.caption2.bold())
+            .font(IntatisTypography.metadata(metadataSize, .semibold))
             .foregroundStyle(Color.primary)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -364,7 +376,6 @@ struct ComposerView: View {
             canSend: canSend,
             isInputDisabled: model.isBusy,
             style: .standard(scheme),
-            secondaryAction: secondaryAction,
             leadingAccessory: leadingAccessory,
             inputLeadingAccessory: inputLeadingAccessory,
             trailingAction: voiceAction,
@@ -381,19 +392,6 @@ struct ComposerView: View {
                 : nil,
             onSend: { model.send() })
         .padding(10)
-    }
-
-    private var secondaryAction: IntatisThreadComposerSecondaryAction? {
-        #if os(iOS)
-        return nil
-        #else
-        return IntatisThreadComposerSecondaryAction(
-            systemImage: "photo",
-            help: IntatisLocalization.string("Generate image from prompt"),
-            isBusy: model.isGeneratingArtifact,
-            isDisabled: !canSend,
-            action: { model.generateImage() })
-        #endif
     }
 
     private var voiceAllowsSubmission: Bool {
@@ -437,7 +435,7 @@ struct ComposerView: View {
                 Label(label, systemImage: "paperclip")
                     .intatisComposerIconLabel()
             }
-            .intatisCompactIconButton()
+            .intatisComposerIconButton()
             .help(label)
             .accessibilityLabel(label)
             .accessibilityIdentifier("thread.composer.actions")

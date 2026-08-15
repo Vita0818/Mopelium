@@ -44,9 +44,9 @@ public struct AgentRuntime: Sendable {
     public let reasoningEffort: ReasoningEffort?
     public let includeUsage: Bool
     public let maxIterations: Int
-    /// Exact model metadata frozen with this runtime. `.unspecified` keeps
-    /// automatic history compaction disabled; callers must never infer a
-    /// context window from a model identifier.
+    /// Exact model metadata frozen with this runtime. `.unspecified` resolves
+    /// through the product-wide context-window fallback; callers must never
+    /// infer a context window from a model identifier.
     public let modelContextPolicy: AgentModelContextPolicy
 
     public init(environment: RuntimeEnvironmentManifest,
@@ -107,14 +107,15 @@ public struct AgentRuntime: Sendable {
                          agent: Agent,
                          context: ContextBuilder? = nil,
                          shell: ShellRunner = ProcessShellRunner(),
-                         browserSession: (any BrowserSessionManaging)? = nil,
                          terminal: (any TerminalSessionManaging)? = nil,
                          git: GitService = ProcessGitService(),
                          messenger: AgentMessenger? = nil,
                          agentManager: AgentManager? = nil,
                          workTaskManager: WorkTaskManager? = nil,
                          goalManager: GoalManager? = nil,
+                         runController: RunController? = nil,
                          imageGenerator: ImageGenerationToolService? = nil,
+                         imageResolver: AgentImageResolver? = nil,
                          sessionNaming: SessionNamingService? = nil,
                          capabilityLease: CapabilityLease? = nil,
                          workspaceLease: WorkspaceLease? = nil,
@@ -144,14 +145,15 @@ public struct AgentRuntime: Sendable {
             context: runtimeContext,
             allowsShell: allowsShell,
             shell: shell,
-            browserSession: browserSession,
             terminal: terminal,
             git: git,
             messenger: messenger,
             agentManager: agentManager,
             workTaskManager: workTaskManager,
             goalManager: goalManager,
+            runController: runController,
             imageGenerator: imageGenerator,
+            imageResolver: imageResolver,
             sessionNaming: sessionNaming,
             reasoningEffort: reasoningEffort,
             includeUsage: includeUsage,

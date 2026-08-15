@@ -70,7 +70,7 @@ struct IntatisMacRootView: View {
     @EnvironmentObject var env: AppEnvironment
     @ObservedObject private var runtimeManager: AppSessionRuntimeManager
     @Environment(\.colorScheme) private var scheme
-    @State private var selection: IntatisNavItem = .chat
+    @State private var selection: IntatisNavItem = .cowork
     @State private var isSettings = false
     @State private var didInit = false
     @State private var recentChatSessions: [AppSessionSummary] = []
@@ -96,13 +96,9 @@ struct IntatisMacRootView: View {
     }
 
     private var items: [IntatisNavItem] {
-        IntatisNavItem.allCases.filter { item in
-            switch item {
-            case .chat: return true
-            case .code: return PlatformProfile.current.supports(.code)
-            case .cowork: return PlatformProfile.current.supports(.cowork)
-            }
-        }
+        // Mopelium exposes Cowork as its only product entry. Chat and Code
+        // remain compiled below; they are intentionally hidden, not removed.
+        [.cowork]
     }
 
     var body: some View {

@@ -14,6 +14,18 @@ public struct MessageBus: Sendable {
         self.mediator = mediator
     }
 
+    /// Runs mediator policy without writing an event. Callers that need a
+    /// larger atomic admission batch can include the existing message payload
+    /// in that batch after every other preflight check succeeds.
+    public func mediate(from: AgentID, to: AgentID, content: String) async -> String? {
+        switch await mediator.mediate(from: from, to: to, content: content) {
+        case .forward(let forwarded):
+            return forwarded
+        case .block:
+            return nil
+        }
+    }
+
     /// Mediate + log an `from → to` message. Returns the forwarded (possibly
     /// redacted) content, or `nil` if the mediator blocked it. Either way an audit
     /// record is appended.
@@ -74,11 +86,15 @@ public struct MessageBus: Sendable {
                                    to: AgentID,
                                    question: String,
                                    taskID: TaskID? = nil,
-                                   requestID: MessageID = MessageID.new()) async -> InformationRequestedPayload? {
+                                   requestID: MessageID = MessageID.new(),
+                                   conversationID: MessageID? = nil,
+                                   basedOn: MessageID? = nil) async -> InformationRequestedPayload? {
         switch await mediator.mediate(from: from, to: to, content: question) {
         case .forward(let forwarded):
             let payload = InformationRequestedPayload(
                 requestID: requestID,
+                conversationID: conversationID ?? requestID,
+                basedOn: basedOn,
                 from: from,
                 to: to,
                 question: forwarded,
@@ -104,7 +120,8 @@ public struct MessageBus: Sendable {
     public func replyMessage(from: AgentID,
                              to: AgentID,
                              content: String,
-                             inReplyTo: MessageID?,
+                             inReplyTo: MessageID,
+                             conversationID: MessageID?,
                              taskID: TaskID? = nil,
                              replyID: MessageID = MessageID.new()) async -> InformationRepliedPayload? {
         switch await mediator.mediate(from: from, to: to, content: content) {
@@ -112,6 +129,7 @@ public struct MessageBus: Sendable {
             let payload = InformationRepliedPayload(
                 replyID: replyID,
                 inReplyTo: inReplyTo,
+                conversationID: conversationID,
                 from: from,
                 to: to,
                 content: forwarded,

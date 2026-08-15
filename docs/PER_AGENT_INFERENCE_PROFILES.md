@@ -1,14 +1,10 @@
 # PER_AGENT_INFERENCE_PROFILES
 
 文档状态：当前 durable inference binding 契约
-最后核对：2026-08-06
-产品基线：v0.36（build 36）
+最后核对：2026-08-03
+产品基线：v0.48（build 48）
 
 ## 1. 状态与范围
-
-Mopelium 的显示品牌与 Cowork-only 产品方向不改变本合同：内部 catalog、profile、binding、类型、
-配置和 durable identity 继续使用 Intatis。不得创建一套 Mopelium profile/binding mirror，也不得
-因 Chat/Code 后续隐藏而收窄 Cowork 的 exact binding 语义。
 
 Intatis Cowork 已实现同一 session 内按 agent 绑定不同推理配置的第一阶段。绑定对象不是单独的 model 字符串，而是一个指向不可变 catalog revision 的精确引用；该 revision 同时固定 connection、wire、model、variant、有效 request options、credential reference 元数据和安全路由标签。由此可以表达：
 
@@ -132,7 +128,7 @@ Catalog 编译阶段采用浅覆盖，顺序固定为：
 - 恢复时，durable `agentAttached` 是 binding 的权威来源；旧事件没有 binding 时解码为 unresolved，而不是自动套用当前默认。
 - strict production runtime 中，unresolved `@main` 或普通 agent 不能发起模型调用，必须由 host 显式 rebind；区别是 `@main`/控制面 unresolved 阻止启动，ordinary worker unresolved 只隔离并 durable-fail 自己被调度到的 invocation，不冻结无关 agent。
 - strict production runtime 只能通过 atomic `resolvedInferenceFor` 构造；`requiresInferenceBindings = true` 与 provider-only factory 的组合在 runtime 创建时直接拒绝。
-- non-empty CLI session 若 durable roster 缺失 `@main`，不得用当前 default profile/workspace 自动重建；只能由 host 运行 `/agent restore-main <path> <profile-id>` 走普通 reviewed attach，随后显式 `/auto` 启动冻结在该 binding 上的控制面。
+- non-empty CLI session 若 durable roster 缺失 `@main`，不得用当前 default profile/workspace 自动重建；只能由 host 运行 `/agent restore-main <path> <profile-id>` 走普通 reviewed attach。随后显式 `/auto` 使用配置冻结的 permission reviewer binding；GoalVerifier 才冻结首个可解析的 exact `@main` binding。
 
 ### 6.2 Spawn
 
@@ -151,7 +147,7 @@ Catalog 编译阶段采用浅覆盖，顺序固定为：
 
 委派给已有 agent 时不复制或改写目标 agent 的 binding。权限目标包含目标 agent 当前 exact binding、host-approved catalog snapshot 与 agent/lease fingerprint 的安全快照。执行器取得同一 target reservation 后，host rebind 必须把它视为 busy fence；即使 Mediator 或 exact resolver 发生异步等待，也必须在最终 admission lock 内再次复核 authorization、caller leases、catalog、target binding/model/workspace/fingerprint，且生成的 `TaskContract` binding 必须等于 reviewed binding，之后才可持久化/入队。任一变化都 fail closed 且不产生 worker provider request。
 
-`create_proposed` 委派也不能在 allow 后丢掉原授权再调用通用 spawn。相同 authorization 必须贯穿 spawn resolver 前后与最终 task admission；新 worker 只接受 reviewed inherited binding，并以 materialized target fingerprint/owner 复核。若后续 mediation/admission 失败，本次新建 worker 要回滚，不能留下可被其他调用接管的半授权 agent。
+`delegate_task` 不创建或 proposed 新 worker。显式 target 与 automatic target 都必须解析为已经 attached 的 data-plane agent；automatic 只在现有 idle workers 中选择。需要新 worker 时，coordinator 必须先单独调用 `spawn_agent`，等待成功 ToolResult 后再在后续 tool-call round 委派。
 
 ### 6.4 Rebind
 
@@ -187,7 +183,13 @@ Host 更新可选 profile catalog 时必须取得与 attach/spawn/delegate/rebin
 
 Agent admission 也遵守同一规则。Ordinary attach 在 permission review 前保存目标 exact binding 对应的 host-catalog snapshot；review allow 后先在锁外再次 exact-resolve，再进入 admission lock 比较 review 前、resolve 前和 commit 前的 snapshot，变化时 durable deny 而不写 `agent_attached`。Fresh `bootstrapMainAgent` 不调用模型 reviewer，但首次 empty-session preflight 与最终 commit 之间仍有 admission/resolver suspension：实现会在锁内检查空 roster/EventLog并记录 catalog snapshot，锁外二次 exact-resolve，随后重新取得锁并再次检查 empty-session 与 catalog facts，全部一致后才提交 leases/roster。
 
-自动 permission reviewer 和 GoalVerifier 属于控制面。当前 GUI/CLI 在首次解析 `@main` exact binding 时冻结本进程控制面 identity 与 exact route；后续 data-plane rebind 不会悄悄 retarget 正在运行的控制面。Permission reviewer 会在该冻结 binding 上为每个 request generation 重新 exact-resolve provider wrapper，GoalVerifier 保留自己的独立 provider lifecycle。若需要改变控制面配置，应通过显式停止/重建控制面的产品流程实现，不能复用普通 agent rebind。
+自动 permission reviewer 和 GoalVerifier 属于两个独立控制面。当前 GUI/CLI 从 canonical 顶层
+`permission_reviewer_model` 编译并冻结 reviewer 的 exact base-profile binding；字段缺失只在配置解析层
+一次性继承同一 JSON 文档的顶层 `model`，显式非法 route fail closed，不能读取 UI/session/default、
+`INTATIS_MODEL` 或 live/historical `@main`。Permission reviewer 会在该冻结 binding 上为每个 request
+generation 重新 exact-resolve provider wrapper。GoalVerifier 另行冻结首个可解析的 exact `@main`
+binding，并保留自己的 provider lifecycle。后续 data-plane rebind 不会悄悄 retarget 任一控制面；若需改变
+reviewer 配置，应修改顶层配置并显式停止/重建对应 runtime，不能复用普通 agent rebind。
 
 ## 8. Permission、EventLog 与安全
 

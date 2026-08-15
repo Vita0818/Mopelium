@@ -525,7 +525,7 @@ public actor ProcessTerminalSessionManager: TerminalSessionManaging {
         }
         processSpec = ManagedProcessSpec(
             executable: bubblewrap,
-            arguments: bubblewrapArguments(
+            arguments: try bubblewrapArguments(
                 workspace: workspace,
                 runtime: runtime,
                 executable: executable,
@@ -536,7 +536,7 @@ public actor ProcessTerminalSessionManager: TerminalSessionManaging {
                 environment: environment,
                 networkAccess: networkAccess,
                 startupMarker: startupMarker,
-                maximumOutputBytes: maximumCapturedBytes),
+                maximumGeneratedFileBytes: maximumCapturedBytes),
             environment: environment)
         sandboxBackend = .bubblewrap
         #else
@@ -856,6 +856,9 @@ public actor ProcessTerminalSessionManager: TerminalSessionManaging {
                 exitCode: nil,
                 timedOut: true,
                 truncated: output.truncated)
+        case .resourceLimit:
+            throw IntatisError.config(
+                "terminal process exceeded its runtime resource budget")
         }
     }
 
@@ -922,7 +925,7 @@ private extension ManagedProcessOutcome {
     var exitCodeForPresentation: Int {
         switch self {
         case .exited(let status): return Int(status)
-        case .cancelled, .timedOut: return 1
+        case .cancelled, .timedOut, .resourceLimit: return 1
         }
     }
 }
@@ -1389,7 +1392,7 @@ public struct ExecCommandTool: Tool {
             ],
             dataEffects: effects,
             risks: risks,
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func execute(_ args: ToolArgs,
@@ -1469,7 +1472,7 @@ public struct WriteStdinTool: Tool {
             ],
             dataEffects: [.execute],
             risks: [.processExecution],
-            replayPolicy: .requiresManualReconciliation)
+            replayPolicy: .doNotReplay)
     }
 
     public func permissionActionPreview(_ args: ToolArgs) -> PermissionActionPreview? {

@@ -48,20 +48,20 @@ private func tempLog(_ tag: String) throws -> EventLog {
 private let green = "\u{001B}[32m", red = "\u{001B}[31m", bold = "\u{001B}[1m", reset = "\u{001B}[0m"
 
 func runSelfTest() async throws {
-    out("\(bold)Mopelium self-test\(reset) — offline, no API key, no network.\n")
+    out("\(bold)Intatis self-test\(reset) — offline, no API key, no network.\n")
 
     // 1) CHAT: a full streamed turn.
     out("\n\(bold)[chat]\(reset)\n› hi")
     let chatLog = try tempLog("chat")
     let chatLoop = ChatLoop(log: chatLog,
-                            provider: FakeChat(parts: ["Hello! ", "I am Mopelium."]),
+                            provider: FakeChat(parts: ["Hello! ", "I am Intatis."]),
                             model: ModelID(rawValue: "fake"))
     let r1 = Task { await renderLoop(chatLog) }
     try await chatLoop.send("hi")
     try? await Task.sleep(nanoseconds: 60_000_000)
     r1.cancel()
     let chatMsgs = ConversationProjection.build(from: await chatLog.replay()).messages
-    let okChat = chatMsgs.contains { $0.role == .assistant && $0.text == "Hello! I am Mopelium." }
+    let okChat = chatMsgs.contains { $0.role == .assistant && $0.text == "Hello! I am Intatis." }
     out(okChat ? "\(green)PASS\(reset) streamed a complete reply\n"
                : "\(red)FAIL\(reset) chat reply not assembled\n")
 
@@ -385,7 +385,7 @@ func runSelfTest() async throws {
         && currentBDefinition.profile.effectiveRequestOptions["reasoning_effort"]
             == .string("high")
 
-    let frozenControlPlane = CLIControlPlaneInferenceBinding()
+    let frozenControlPlane = CLIGoalVerifierInferenceBinding()
     let firstFrozen = await frozenControlPlane.freeze(firstProfiles.defaultBinding)
     let secondFreezeAttempt = await frozenControlPlane.freeze(secondProfiles.defaultBinding)
     let controlPlaneStayedFrozen = firstFrozen == secondFreezeAttempt

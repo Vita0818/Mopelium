@@ -237,6 +237,13 @@ public enum AgentCommunicationKind: String, Codable, Sendable {
 
 public struct InformationRequestedPayload: Codable, Equatable, Sendable {
     public var requestID: MessageID
+    /// Stable conversation root. The first request normally uses its own ID;
+    /// every explicit follow-up retains that root while receiving a fresh
+    /// requestID.
+    public var conversationID: MessageID?
+    /// Message that prompted this new request correlation. Nil starts a new
+    /// conversation; a follow-up after a reply points at that reply ID.
+    public var basedOn: MessageID?
     public var from: AgentID
     public var to: AgentID
     public var question: String
@@ -245,6 +252,8 @@ public struct InformationRequestedPayload: Codable, Equatable, Sendable {
     public var metadata: CoworkEventMetadata?
 
     public init(requestID: MessageID = MessageID.new(),
+                conversationID: MessageID? = nil,
+                basedOn: MessageID? = nil,
                 from: AgentID,
                 to: AgentID,
                 question: String,
@@ -252,6 +261,8 @@ public struct InformationRequestedPayload: Codable, Equatable, Sendable {
                 taskID: TaskID? = nil,
                 metadata: CoworkEventMetadata? = nil) {
         self.requestID = requestID
+        self.conversationID = conversationID
+        self.basedOn = basedOn
         self.from = from
         self.to = to
         self.question = question
@@ -264,6 +275,7 @@ public struct InformationRequestedPayload: Codable, Equatable, Sendable {
 public struct InformationRepliedPayload: Codable, Equatable, Sendable {
     public var replyID: MessageID
     public var inReplyTo: MessageID?
+    public var conversationID: MessageID?
     public var from: AgentID
     public var to: AgentID
     public var content: String
@@ -273,6 +285,7 @@ public struct InformationRepliedPayload: Codable, Equatable, Sendable {
 
     public init(replyID: MessageID = MessageID.new(),
                 inReplyTo: MessageID? = nil,
+                conversationID: MessageID? = nil,
                 from: AgentID,
                 to: AgentID,
                 content: String,
@@ -281,6 +294,7 @@ public struct InformationRepliedPayload: Codable, Equatable, Sendable {
                 metadata: CoworkEventMetadata? = nil) {
         self.replyID = replyID
         self.inReplyTo = inReplyTo
+        self.conversationID = conversationID
         self.from = from
         self.to = to
         self.content = content
@@ -340,43 +354,14 @@ public struct AgentMessageDiscardedPayload: Codable, Equatable, Sendable {
     }
 }
 
-public struct DelegationRequestedPayload: Codable, Equatable, Sendable {
-    public var requestID: RequestID
-    public var requester: AgentID
-    public var recipient: AgentID?
-    public var objective: String
-    public var reason: String
-    public var parentTaskID: TaskID?
-    public var metadata: CoworkEventMetadata?
-
-    public init(requestID: RequestID = RequestID.new(),
-                requester: AgentID,
-                recipient: AgentID? = nil,
-                objective: String,
-                reason: String,
-                parentTaskID: TaskID? = nil,
-                metadata: CoworkEventMetadata? = nil) {
-        self.requestID = requestID
-        self.requester = requester
-        self.recipient = recipient
-        self.objective = objective
-        self.reason = reason
-        self.parentTaskID = parentTaskID
-        self.metadata = metadata
-    }
-}
-
 public struct DelegationApprovedPayload: Codable, Equatable, Sendable {
-    public var requestID: RequestID?
     public var contract: TaskContract
     public var reason: String
     public var metadata: CoworkEventMetadata?
 
-    public init(requestID: RequestID? = nil,
-                contract: TaskContract,
+    public init(contract: TaskContract,
                 reason: String = "delegation approved",
                 metadata: CoworkEventMetadata? = nil) {
-        self.requestID = requestID
         self.contract = contract
         self.reason = reason
         self.metadata = metadata
@@ -384,7 +369,6 @@ public struct DelegationApprovedPayload: Codable, Equatable, Sendable {
 }
 
 public struct DelegationRejectedPayload: Codable, Equatable, Sendable {
-    public var requestID: RequestID?
     public var requester: AgentID
     public var assignee: AgentID?
     public var objective: String
@@ -392,14 +376,12 @@ public struct DelegationRejectedPayload: Codable, Equatable, Sendable {
     public var violationKind: String?
     public var metadata: CoworkEventMetadata?
 
-    public init(requestID: RequestID? = nil,
-                requester: AgentID,
+    public init(requester: AgentID,
                 assignee: AgentID? = nil,
                 objective: String,
                 reason: String,
                 violationKind: String? = nil,
                 metadata: CoworkEventMetadata? = nil) {
-        self.requestID = requestID
         self.requester = requester
         self.assignee = assignee
         self.objective = objective

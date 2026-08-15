@@ -14,16 +14,20 @@ import IntatisSkills
 import IntatisMCP
 import IntatisTools
 import IntatisSharedUI
-import UniformTypeIdentifiers
 
 private actor ProviderRegistryBox {
     private var registry: ProviderRegistry
+    /// GoalVerifier keeps the legacy first-resolvable-main freeze. Permission
+    /// review has a separate immutable app-configured binding below.
     private var controlPlaneBinding: AgentInferenceBinding?
+    private let permissionReviewerBinding: AgentInferenceBinding?
 
     init(_ registry: ProviderRegistry,
-         controlPlaneBinding: AgentInferenceBinding?) {
+         controlPlaneBinding: AgentInferenceBinding?,
+         permissionReviewerBinding: AgentInferenceBinding?) {
         self.registry = registry
         self.controlPlaneBinding = controlPlaneBinding
+        self.permissionReviewerBinding = permissionReviewerBinding
     }
 
     func update(_ registry: ProviderRegistry) {
@@ -80,6 +84,16 @@ private actor ProviderRegistryBox {
 
     func controlPlaneModel(fallback: ModelID) -> ModelID {
         controlPlaneBinding?.modelID ?? fallback
+    }
+
+    func resolvablePermissionReviewerBinding() async
+        -> AgentInferenceBinding? {
+        guard let permissionReviewerBinding,
+              (try? await registry.agentInference(
+                  for: permissionReviewerBinding)) != nil else {
+            return nil
+        }
+        return permissionReviewerBinding
     }
 
     func exactBindingIsResolvable(_ binding: AgentInferenceBinding) async -> Bool {
@@ -146,11 +160,7 @@ struct CoworkGoalEditDraft: Equatable {
     var tokenBudget: String
 }
 
-struct CoworkDraftAttachment: Identifiable, Equatable {
-    var id: ArtifactID
-    var name: String
-    var mime: String
-}
+typealias CoworkDraftAttachment = IntatisComposerDraftAttachment
 
 enum CoworkSessionLaunchMode: Sendable {
     case fresh
@@ -177,38 +187,6 @@ private struct CoworkUnavailableAutomaticPermissionResponder: PermissionResponde
             source: .automaticReviewerFailure,
             failureKind: .controlPlaneShutdown,
             failureSource: .reviewerFailed)
-    }
-}
-
-private enum CoworkSubmissionAttachmentError: LocalizedError {
-    case missing(ArtifactID)
-    case unsupported(ArtifactID, String)
-    case unreadable(ArtifactID, String)
-
-    var errorDescription: String? {
-        switch self {
-        case .missing(let id):
-            return "Attachment \(id.rawValue) is no longer available in this session."
-        case .unsupported(let id, let mime):
-            return "Attachment \(id.rawValue) uses \(mime), but Cowork remote execution currently accepts image attachments only. The submitted file remains preserved locally."
-        case .unreadable(let id, let message):
-            return "Attachment \(id.rawValue) could not be read: \(message)"
-        }
-    }
-
-    var code: String {
-        switch self {
-        case .missing: return "attachment_missing"
-        case .unsupported: return "attachment_type_unsupported"
-        case .unreadable: return "attachment_unreadable"
-        }
-    }
-
-    var retryable: Bool {
-        switch self {
-        case .missing, .unsupported: return false
-        case .unreadable: return true
-        }
     }
 }
 
@@ -264,6 +242,12 @@ private final class CoworkAgentThreadUpdateHub {
 /// summary, and agent roster.
 @MainActor
 final class CoworkViewModel: ObservableObject, PermissionResponder {
+    private static let interruptedRunContinuationText =
+        "Continue the task that the previous run did not finish. "
+        + "First inspect the current workspace and existing tool results. "
+        + "Complete only the remaining work, and do not repeat operations "
+        + "that already succeeded."
+
     @Published private(set) var agents: [CoworkAgentInfo] = []
     @Published private(set) var summary = CoworkStatusSummary()
     @Published private(set) var project = CoworkProjectInfo()
@@ -373,11 +357,17 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
     }
     private let sessionNaming: SessionNamingService
     private let artifactStore: ArtifactStore
+    private let composerAttachmentStore: IntatisComposerAttachmentStore
     private let submittedIntentStore: SubmittedIntentStore
     private let registryBox: ProviderRegistryBox
+    private let permissionReviewerInferenceBinding:
+        AgentInferenceBinding?
+    private let permissionReviewerConfigurationError: String?
     private let mcpSnapshots:
         (@MainActor @Sendable () async throws
             -> MCPAgentRequestToolSnapshotSource)?
+    private let internalToolRegistryAugmenter:
+        HostToolRegistryAugmenter?
     private var orchestrator: Orchestrator?
     private var goalRuntime: GoalRuntimeController?
     private var subscription: Task<Void, Never>?
@@ -430,6 +420,9 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
          sessionNaming: SessionNamingService,
          registry: ProviderRegistry,
          inferenceProfileOptions: [AppInferenceProfileOption],
+         permissionReviewerInferenceBinding:
+            AgentInferenceBinding?,
+         permissionReviewerConfigurationError: String? = nil,
          projectSettings: CoworkProjectSettings,
          launchMode: CoworkSessionLaunchMode = .restored,
          sessionStorageWarning: String? = nil,
@@ -437,19 +430,30 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
          mcpSnapshots:
             (@MainActor @Sendable () async throws
                 -> MCPAgentRequestToolSnapshotSource)?
-                = nil) {
+                = nil,
+         internalToolRegistryAugmenter:
+            HostToolRegistryAugmenter? = nil) {
         self.sessionID = sessionID
         self.log = log
         self.sessionNaming = sessionNaming
         self.artifactStore = artifactStore
+        self.composerAttachmentStore = IntatisComposerAttachmentStore(
+            store: artifactStore)
         self.submittedIntentStore = SubmittedIntentStore(log: log)
+        self.permissionReviewerInferenceBinding =
+            permissionReviewerInferenceBinding
+        self.permissionReviewerConfigurationError =
+            permissionReviewerConfigurationError
         self.registryBox = ProviderRegistryBox(
             registry,
-            controlPlaneBinding: nil)
+            controlPlaneBinding: nil,
+            permissionReviewerBinding:
+                permissionReviewerInferenceBinding)
         #if canImport(AVFoundation)
         self.voiceInput = ComposerVoiceInputController(registry: registry)
         #endif
         self.mcpSnapshots = mcpSnapshots
+        self.internalToolRegistryAugmenter = internalToolRegistryAugmenter
         self.inferenceProfileOptions = inferenceProfileOptions
         self.nextMainInferenceOption = nil
         self.projectSettings = projectSettings
@@ -633,8 +637,12 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                 },
                 requiresInferenceBindings: true,
                 imageGeneratorFor: { _ in await registryBox.imageToolService() },
+                imageResolver: AgentImageResolution.resolver(
+                    store: artifactStore),
                 toolSnapshotProvider:
                     toolSnapshotProvider,
+                internalToolRegistryAugmenter:
+                    internalToolRegistryAugmenter,
                 sessionNaming: sessionNaming,
                 resolvedInferenceFor: { agent in
                     try await registryBox.resolvedInference(for: agent)
@@ -1000,7 +1008,9 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                 capabilityLease,
             workspaceLease: workspaceLease,
             baseRegistry: skillSnapshot.augmenting(
-                ToolRegistry.standard(
+                Orchestrator.toolRegistry(
+                    for: capabilityLease,
+                    agentID: descriptor.agentID,
                     includesTerminal:
                         allowsShell)),
             activationReason: reason)
@@ -1498,20 +1508,7 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
     }
 
     private static func workTaskPresentation(from projection: CoworkProjection) -> CoworkWorkTaskSummary {
-        let selected: [WorkTask]
-        if let goalID = projection.currentGoalID {
-            selected = projection.workTasks.values.filter { $0.goalID == goalID }
-        } else if let run = projection.continuationRuns.values
-            .filter({ $0.goalID == nil })
-            .max(by: { $0.startedAt < $1.startedAt }) {
-            selected = projection.workTasks.values.filter { $0.runID == run.id }
-        } else {
-            selected = []
-        }
-        let ordered = selected.sorted { lhs, rhs in
-            let lhsRun = projection.continuationRuns[lhs.runID]?.ordinal ?? 0
-            let rhsRun = projection.continuationRuns[rhs.runID]?.ordinal ?? 0
-            if lhsRun != rhsRun { return lhsRun < rhsRun }
+        let ordered = projection.workTasks.values.sorted { lhs, rhs in
             if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
             return lhs.id.rawValue < rhs.id.rawValue
         }
@@ -1529,7 +1526,6 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                 title: task.title,
                 detail: task.description,
                 status: task.status.rawValue,
-                owner: task.owner.map { "@\($0.rawValue)" },
                 dependencySummary: dependencies.isEmpty
                     ? nil : dependencies.joined(separator: ", "),
                 statusReason: task.progressNote,
@@ -1676,19 +1672,28 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
         let workspaceURL: URL
         guard let mainAgent = await orchestrator.agentList().first(where: {
             $0.name == mainID
-        }), let mainBinding = mainAgent.agentInferenceBinding else {
+        }) else {
             setPermissionReviewerStatus(.failed(
                 IntatisLocalization.format(
-                    "@%@ has no resolved inference profile for the control plane.",
+                    "@%@ must be attached before automatic permission review can start.",
                     mainID.rawValue)))
             return
         }
-        guard let controlPlaneBinding = await registryBox
-            .freezeResolvableControlPlaneBinding(mainBinding) else {
+        // GoalVerifier preserves its existing first-main freeze, but that
+        // route neither supplies nor gates the permission reviewer. A legacy
+        // main without an exact binding may leave Goal verification
+        // unavailable while automatic permission review still starts from its
+        // independently configured binding.
+        if let mainBinding = mainAgent.agentInferenceBinding {
+            _ = await registryBox
+                .freezeResolvableControlPlaneBinding(mainBinding)
+        }
+        guard let permissionReviewerBinding = await registryBox
+            .resolvablePermissionReviewerBinding() else {
             setPermissionReviewerStatus(.failed(
-                IntatisLocalization.format(
-                    "@%@ exact inference profile revision is unavailable or incompatible.",
-                    mainID.rawValue)))
+                permissionReviewerConfigurationError
+                    ?? IntatisLocalization.string(
+                        "The permission_reviewer_model exact inference profile is unavailable or incompatible.")))
             return
         }
 
@@ -1719,8 +1724,8 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
         }
 
         let result = await orchestrator.enableAutomaticPermissionReview(
-            model: controlPlaneBinding.modelID,
-            agentInferenceBinding: controlPlaneBinding,
+            model: permissionReviewerBinding.modelID,
+            agentInferenceBinding: permissionReviewerBinding,
             workspaceRoot: workspaceURL)
         guard !Task.isCancelled, self.orchestrator != nil else {
             setPermissionReviewerStatus(.disabled)
@@ -1905,9 +1910,22 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
             coordinationDepth: Agent.defaultCoordinationDepth)
         let attached: Bool
         if allowsInitialSessionBootstrap {
+            guard let permissionReviewerInferenceBinding else {
+                didRequestMainAgentAttach = false
+                let message = permissionReviewerConfigurationError
+                    ?? IntatisLocalization.string(
+                        "Configure a resolvable permission_reviewer_model before creating Cowork.")
+                composerError = message
+                setPermissionReviewerStatus(.failed(message))
+                return
+            }
             switch await orchestrator.bootstrapFreshSession(
                 main: main,
-                settings: projectSettings) {
+                settings: projectSettings,
+                permissionReviewerModel:
+                    permissionReviewerInferenceBinding.modelID,
+                permissionReviewerInferenceBinding:
+                    permissionReviewerInferenceBinding) {
             case .attached, .alreadyAttached:
                 attached = true
             case .failed(let message):
@@ -1928,6 +1946,11 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
             }
         }
         if attached {
+            // GoalVerifier keeps the first exact, resolvable @main route. The
+            // separately configured permission reviewer neither supplies nor
+            // gates this best-effort freeze.
+            _ = await registryBox
+                .freezeResolvableControlPlaneBinding(binding)
             needsPrimaryWorkspaceAuthorization = false
             composerError = nil
         } else {
@@ -2200,10 +2223,16 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
             switch result {
             case .rebound, .unchanged:
                 await self.refreshInferenceResolutionState()
-                if name == self.projectSettings.mainAgentName,
-                   !self.isAutomaticPermissionReviewReady {
-                    await self.ensureAutomaticPermissionReview(
-                        existingProjection: self.latestCoworkProjection)
+                if name == self.projectSettings.mainAgentName {
+                    // A legacy/unresolved main may become the first usable
+                    // GoalVerifier route after an explicit rebind. An already
+                    // frozen verifier remains unchanged.
+                    _ = await self.registryBox
+                        .freezeResolvableControlPlaneBinding(binding)
+                    if !self.isAutomaticPermissionReviewReady {
+                        await self.ensureAutomaticPermissionReview(
+                            existingProjection: self.latestCoworkProjection)
+                    }
                 }
                 await self.resumeRuntimeIfReady()
             case .failed(let message):
@@ -2396,30 +2425,11 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
             guard let self else { return }
             defer { self.activeOperations.removeValue(forKey: operationID) }
             for url in urls {
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer {
-                    if accessed { url.stopAccessingSecurityScopedResource() }
-                }
                 do {
-                    let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-                    let type = UTType(filenameExtension: url.pathExtension)
-                    let mime = type?.preferredMIMEType ?? "application/octet-stream"
-                    let ref = try await self.artifactStore.addAttachment(
-                        name: url.lastPathComponent,
-                        data: data,
-                        mime: mime)
-                    // Admission may retain only ArtifactID references, so
-                    // verify the blob/index pair before exposing the draft.
-                    let verifiedRef = await self.artifactStore.ref(for: ref.id)
-                    let verifiedData = try await self.artifactStore.data(for: ref.id)
-                    guard verifiedRef == ref,
-                          verifiedData.count == data.count else {
-                        throw IntatisError.io("attachment read-back verification failed")
-                    }
-                    self.draftAttachments.append(CoworkDraftAttachment(
-                        id: ref.id,
-                        name: url.lastPathComponent,
-                        mime: mime))
+                    let file = try IntatisComposerAttachmentFileReader.read(url)
+                    let attachment = try await self.composerAttachmentStore
+                        .preserve(file)
+                    self.draftAttachments.append(attachment)
                 } catch {
                     self.composerError = IntatisLocalization.format(
                         "Attachment %@ could not be preserved: %@",
@@ -2822,46 +2832,26 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                     }
                 }
             } else {
-                let explicitGoalIntent = ExplicitGoalIntentClassifier
-                    .classify(payload.text)
-                    .isExplicit
-                do {
-                    let images = try await submissionImages(for: payload)
-                    let result: OrchestratorSendResult
-                    if let retryTask = submissionRetryTasks[submissionID] {
-                        result = await orchestrator.retry(
-                            retryTask,
-                            images: images,
-                            userMessage: payload,
-                            recordUserMessage: false,
-                            explicitGoalIntent: explicitGoalIntent)
-                        submissionRetryTasks.removeValue(forKey: submissionID)
-                    } else {
-                        result = await goalRuntime.sendUserTurn(
-                            payload.text,
-                            to: target,
-                            images: images,
-                            userMessage: payload,
-                            recordUserMessage: false,
-                            explicitGoalIntent: explicitGoalIntent)
-                    }
-                    if let message = result.errorMessage {
-                        executionFailure = await submissionExecutionFailure(
-                            submissionID: submissionID,
-                            message: message)
-                    } else {
-                        executionFailure = nil
-                    }
-                } catch let error as CoworkSubmissionAttachmentError {
-                    executionFailure = SubmissionFailure(
-                        code: error.code,
-                        message: error.localizedDescription,
-                        retryable: error.retryable)
-                } catch {
-                    executionFailure = SubmissionFailure(
-                        code: "attachment_unreadable",
-                        message: "Attachment recovery failed: \(error.localizedDescription)",
-                        retryable: true)
+                let result: OrchestratorSendResult
+                if let retryTask = submissionRetryTasks[submissionID] {
+                    result = await orchestrator.retry(
+                        retryTask,
+                        userMessage: payload,
+                        recordUserMessage: false)
+                    submissionRetryTasks.removeValue(forKey: submissionID)
+                } else {
+                    result = await goalRuntime.sendUserTurn(
+                        payload.text,
+                        to: target,
+                        userMessage: payload,
+                        recordUserMessage: false)
+                }
+                if let message = result.errorMessage {
+                    executionFailure = await submissionExecutionFailure(
+                        submissionID: submissionID,
+                        message: message)
+                } else {
+                    executionFailure = nil
                 }
             }
             await synchronizePermissionReviewerHealth(using: orchestrator)
@@ -2901,30 +2891,6 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
             }
             if didStartGoalContinuation { return }
         }
-    }
-
-    private func submissionImages(
-        for payload: UserMessagePayload
-    ) async throws -> [ImageAttachment] {
-        var result: [ImageAttachment] = []
-        for id in payload.attachments ?? [] {
-            guard let ref = await artifactStore.ref(for: id) else {
-                throw CoworkSubmissionAttachmentError.missing(id)
-            }
-            guard ref.mime.hasPrefix("image/") else {
-                throw CoworkSubmissionAttachmentError.unsupported(id, ref.mime)
-            }
-            let data: Data
-            do {
-                data = try await artifactStore.data(for: id)
-            } catch {
-                throw CoworkSubmissionAttachmentError.unreadable(
-                    id,
-                    error.localizedDescription)
-            }
-            result.append(.base64(mime: ref.mime, base64: data.base64EncodedString()))
-        }
-        return result
     }
 
     private func settleSubmissionFailure(
@@ -2998,35 +2964,64 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                         "This submission payload is no longer available for retry.")
                     return
                 }
-                if let task = try await self.canonicalSubmissionTask(for: submissionID) {
-                    if task.status == .completed {
-                        let currentAttempt = max(
-                            1,
-                            self.submissionAttempts[submissionID] ?? 1)
-                        try await self.submittedIntentStore.appendStatus(
-                            SubmissionStatusChangedPayload(
-                                submissionID: submissionID,
-                                status: .completed,
-                                attempt: currentAttempt))
+                let currentAttempt = max(
+                    1,
+                    self.submissionAttempts[submissionID] ?? 1)
+                let task = try await self.canonicalSubmissionTask(
+                    for: submissionID)
+                let retryPlan = SubmittedIntentRetryPlanner.plan(
+                    currentAttempt: currentAttempt,
+                    task: task,
+                    isRestoredSubmission:
+                        self.restoredSubmissionIDs.contains(submissionID))
+                let retryAttempt: Int
+                let appendsQueuedStatus: Bool
+                switch retryPlan {
+                case .completed(let attempt):
+                    try await self.submittedIntentStore.appendStatus(
+                        SubmissionStatusChangedPayload(
+                            submissionID: submissionID,
+                            status: .completed,
+                            attempt: attempt))
+                    self.restoredSubmissionIDs.remove(submissionID)
+                    self.composerError = nil
+                    self.publishSubmissionThreadChange(submissionID)
+                    return
+                case .resumeRestoredTask(
+                    let attempt,
+                    let shouldAppendQueuedStatus):
+                    guard let task else { return }
+                    self.submissionRetryTasks[submissionID] = task
+                    retryAttempt = attempt
+                    appendsQueuedStatus = shouldAppendQueuedStatus
+                case .retryTerminalTask(let attempt):
+                    guard let task else { return }
+                    if try await self.requiresFreshRun(for: task) {
+                        try await self.enqueueInterruptedRunContinuation(
+                            from: payload)
                         self.restoredSubmissionIDs.remove(submissionID)
-                        self.composerError = nil
                         self.publishSubmissionThreadChange(submissionID)
                         return
                     }
-                    if task.status == .queued
-                        || task.status == .running
-                        || task.status == .failed
-                        || task.status == .cancelled {
-                        self.submissionRetryTasks[submissionID] = task
-                    }
+                    self.submissionRetryTasks[submissionID] = task
+                    retryAttempt = attempt
+                    appendsQueuedStatus = true
+                case .retrySubmissionWithoutTask(let attempt):
+                    retryAttempt = attempt
+                    appendsQueuedStatus = true
+                case .reject:
+                    self.composerError = IntatisLocalization.string(
+                        "This submission already has active or inconsistent task state and cannot be retried.")
+                    return
                 }
-                let nextAttempt = max(1, self.submissionAttempts[submissionID] ?? 1) + 1
-                try await self.submittedIntentStore.appendStatus(
-                    SubmissionStatusChangedPayload(
-                        submissionID: submissionID,
-                        status: .queued,
-                        attempt: nextAttempt))
-                self.submissionAttempts[submissionID] = nextAttempt
+                if appendsQueuedStatus {
+                    try await self.submittedIntentStore.appendStatus(
+                        SubmissionStatusChangedPayload(
+                            submissionID: submissionID,
+                            status: .queued,
+                            attempt: retryAttempt))
+                }
+                self.submissionAttempts[submissionID] = retryAttempt
                 self.restoredSubmissionIDs.remove(submissionID)
                 self.submittedPayloads[submissionID] = payload
                 if !self.submissionQueue.contains(submissionID) {
@@ -3058,6 +3053,74 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                 "submission \(submissionID.rawValue) is correlated with multiple root tasks")
         }
         return matches.first
+    }
+
+    private func requiresFreshRun(
+        for task: CoworkTaskView
+    ) async throws -> Bool {
+        guard let runID = task.contract?.continuationRunID else {
+            return false
+        }
+        let projection = CoworkProjection.build(
+            from: try await log.replayChecked())
+        guard !projection.ambiguousContinuationRunCloseClaimIDs
+            .contains(runID) else {
+            throw IntatisError.decoding(
+                "continuation run \(runID.rawValue) has conflicting close claims")
+        }
+        guard let run = projection.continuationRuns[runID] else {
+            throw IntatisError.decoding(
+                "continuation run \(runID.rawValue) is missing from durable history")
+        }
+        guard run.status.isTerminal else {
+            throw IntatisError.decoding(
+                "continuation run \(runID.rawValue) is still \(run.status.rawValue)")
+        }
+        return true
+    }
+
+    private func enqueueInterruptedRunContinuation(
+        from original: UserMessagePayload
+    ) async throws {
+        let mainAgentID = AgentID(
+            rawValue: projectSettings.mainAgentName)
+        let target = original.to ?? mainAgentID
+        if target == mainAgentID,
+           original.mainAgentInferenceBinding == nil {
+            throw IntatisError.config(
+                "The interrupted @\(mainAgentID.rawValue) submission has no exact model binding to carry into a fresh run.")
+        }
+        let submissionID = SubmissionID.new()
+        let payload = UserMessagePayload(
+            text: Self.interruptedRunContinuationText,
+            to: target,
+            submissionID: submissionID,
+            mainAgentInferenceBinding:
+                original.mainAgentInferenceBinding,
+            turnID: TurnID.new())
+        let acceptance = try await submittedIntentStore.accept(
+            payload: payload)
+        submittedPayloads[submissionID] = payload
+        submissionAttempts[submissionID] = 1
+        switch acceptance {
+        case .canonical(_, let cleanupWarning):
+            canonicalSubmissionIDs.insert(submissionID)
+            outboxEntries.removeValue(forKey: submissionID)
+            if !submissionQueue.contains(submissionID) {
+                submissionQueue.append(submissionID)
+            }
+            composerError = nil
+            if let cleanupWarning {
+                sessionStorageWarning = cleanupWarning
+            }
+            scheduleSubmissionDrain()
+        case .outbox(let entry, let canonicalError):
+            outboxEntries[submissionID] = entry
+            composerError = IntatisLocalization.format(
+                "The continuation is safe in the local outbox: %@",
+                canonicalError)
+            rebuildOutboxThreadItems(publishesChanges: true)
+        }
     }
 
     private func submissionExecutionFailure(

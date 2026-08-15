@@ -2,15 +2,16 @@
 
 文档状态：当前产品方向与品牌边界
 生效日期：2026-08-06
-产品代码基线：Intatis v0.36（build 36）
+最近核对：2026-08-15
+产品代码基线：Intatis v0.48（build 48；来源 commit 标题 v0.54）
 
 ## 1. 一句话定义
 
 Mopelium 是构建在现有 Intatis Cowork 运行时之上的用户可见产品品牌与领域化体验。
 
 它不是新的后端内核、不是 Intatis 的全仓重命名，也不是与 Cowork 并列的第四种运行模式。
-后续产品功能统一在 Cowork 内建设；Chat 与 Code 保留现有实现，未来只从面向用户的产品入口
-隐藏，不删除、不拆除，也不另行迁移。
+后续产品功能统一在 Cowork 内建设；Chat 与 Code 保留现有实现，目前只从 macOS 面向用户的
+产品入口隐藏，不删除、不拆除，也不另行迁移。
 
 ## 2. 当前事实与目标状态
 
@@ -18,16 +19,17 @@ Mopelium 是构建在现有 Intatis Cowork 运行时之上的用户可见产品�
 
 | 范围 | 当前事实 | 已确认方向 |
 |---|---|---|
-| 代码基线 | 仓库根目录直接采用 Intatis 快照 | 继续直接修改当前根目录，不维护第二套源码 |
-| 显示品牌 | macOS、iOS 与 CLI 的用户可见品牌文字显示 Mopelium | 继续保持 presentation-only，不扩散为内部改名 |
+| 代码基线 | 仓库根目录直接采用 `SNAPSHOT.md` 固定的 Intatis 快照 | 继续直接修改当前根目录，不维护第二套源码 |
+| 显示品牌 | macOS 与 iOS 的 App 显示名及用户可见文案为 Mopelium；CLI 仍显示 Intatis | 品牌只作用于用户可见层，不扩散为内部改名 |
 | 内部标识 | target、模块、类型、Bundle ID、命令、配置键和存储路径使用 Intatis | 默认全部保留，不做后端或源码级品牌替换 |
-| macOS 模式 | Chat / Code / Cowork 当前均存在并可见 | Mopelium 只以 Cowork 为产品面；Chat/Code 后续隐藏但保留 |
+| macOS 模式 | Chat / Code / Cowork 实现均保留；可见产品入口只有 Cowork | Mopelium 只以 Cowork 为产品面；Chat/Code 保留但不展示入口 |
 | 新功能 | 当前能力分布在三个模式 | 新增 Mopelium 产品功能只接入 Cowork |
-| iOS | 当前是 Intatis Chat 结构性子集，显示品牌文字为 Mopelium | 不扩展、删除或重构 iOS |
-| CLI | 用户可见 banner/自检文案为 Mopelium，命令与内部协议使用 `intatis` | 保持内部工具身份 |
+| iOS | 当前是 Intatis Chat 结构性子集，显示品牌为 Mopelium | 不扩展、删除或重构 iOS；品牌仍只限用户可见层 |
+| CLI | 用户可见 banner/自检文案与命令、内部协议均使用 Intatis / `intatis` | 保持内部工具身份；是否改变用户可见 banner 需单独任务确认 |
 
-显示品牌文字已按本文件边界落地；Chat/Code 隐藏及其他产品变化尚未实施。源码、构建配置和
-测试仍是“当前实现”的事实源。
+2026-08-15 的明确品牌任务已经把 macOS/iOS App 显示名称与用户可见文案恢复为 Mopelium；
+同日的产品入口任务让 macOS 默认并仅展示 Cowork。CLI、iOS、内部 Intatis 身份以及 Chat/Code
+实现均未改变。源码、构建配置和测试始终是“当前实现”的事实源。
 
 ## 3. 显示品牌边界
 
@@ -38,7 +40,8 @@ Mopelium 是构建在现有 Intatis Cowork 运行时之上的用户可见产品�
 - Logo、图标及其他明确的品牌视觉资产；
 - 面向用户的 Cowork 信息架构和领域化工作流名称。
 
-本次只落实显示名称与用户可见文字。Logo、图标及其他视觉资产仍须由用户单独授权后修改。
+当前已在本节边界内落实 macOS/iOS 显示名称和用户可见文字。Logo、图标及其他视觉资产没有随
+文字品牌任务修改，仍须由用户单独授权。
 
 ### 3.2 默认保持 Intatis 的内部层
 
@@ -74,14 +77,14 @@ EventLog 或 session runtime。
 
 ## 5. Chat 与 Code 的保留规则
 
-Chat 和 Code 当前仍是代码基线的一部分。未来隐藏时：
+Chat 和 Code 当前仍是代码基线的一部分。macOS 隐藏入口时：
 
 - 只改变面向用户的导航、入口或默认展示；
 - 不删除 App 页面、Swift target、package、runtime、EventLog 兼容或测试；
 - 不把历史 Chat/Code session 数据迁成 Cowork；
 - 不让隐藏动作改变共享 runtime 的 shutdown、recovery 或 session ownership；
 - 不把 Chat/Code 的功能复制一份到新的 Mopelium 模式；Cowork 通过既有共享模块使用所需能力；
-- 在用户明确发出隐藏实现任务前，保持当前可见性与行为不变。
+- iOS 与 CLI 的产品入口不随本次 macOS 隐藏任务改变。
 
 共享底层修复仍可同时改善 Chat/Code，但 Mopelium 产品需求不再为它们建立独立功能面。
 
@@ -106,10 +109,10 @@ Code/Git 产品代码，该结论已经被本文件取代。
 
 ## 8. 当前非目标
 
-- 不为显示品牌修改业务逻辑、运行时或数据；本次只修改 presentation 字符串与显示名称元数据；
+- 不因已落实的 macOS/iOS 显示品牌顺带修改 Logo、图标、业务逻辑、运行时或数据；
 - 不执行 `Intatis` → `Mopelium` 的全仓字符串、类型或模块替换；
 - 不新建与 Cowork 并列的 Research、Sources、Tasks 或 Mopelium runtime；
 - 不删除 Chat、Code、iOS 或 CLI；
-- 不因未来隐藏 Chat/Code 而提前削弱它们的构建和回归；
-- 不自动把快照原有的 Intatis v0.36 公证任务当作 Mopelium 当前发布目标；
+- 不因隐藏 Chat/Code 入口而削弱它们的实现、构建和回归；
+- 不自动把快照原有的 Intatis v0.48 Developer ID 公证任务当作 Mopelium 当前发布目标；
 - 不在用户指定下一实现任务前继续修改产品代码。

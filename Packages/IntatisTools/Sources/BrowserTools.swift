@@ -121,281 +121,6 @@ private enum BrowserToolConfig {
     }
 }
 
-/// Browser permissions need more semantic detail than an argument digest, but
-/// raw browser arguments are not an appropriate reviewer surface. In
-/// particular, `browser_type.value` may contain private text. Every browser
-/// tool uses this host-generated, bounded preview so the reviewer can verify
-/// the exact profile, target, and effect without receiving typed values,
-/// cookies, local storage, or profile contents.
-private enum BrowserPermissionPreview {
-    private struct Arguments {
-        let values: [String: JSONValue]
-
-        init?(_ args: ToolArgs) {
-            guard let data = args.raw.data(using: .utf8),
-                  let decoded = try? JSONDecoder().decode(JSONValue.self, from: data),
-                  case .object(let values) = decoded else {
-                return nil
-            }
-            self.values = values
-        }
-
-        func string(_ key: String) -> String? {
-            guard case .string(let value)? = values[key] else { return nil }
-            return value
-        }
-
-        func bool(_ key: String) -> Bool? {
-            guard case .bool(let value)? = values[key] else { return nil }
-            return value
-        }
-
-        func integer(_ key: String) -> Int? {
-            guard case .number(let value)? = values[key],
-                  value.isFinite,
-                  value.rounded() == value,
-                  value >= Double(Int.min),
-                  value <= Double(Int.max) else {
-                return nil
-            }
-            return Int(value)
-        }
-    }
-
-    static func make(toolName: String, args: ToolArgs) -> PermissionActionPreview? {
-        guard let arguments = Arguments(args) else { return nil }
-        var fields: [String: String] = [:]
-
-        func set(_ key: String, _ value: String?) {
-            guard let value, value.isEmpty == false else { return }
-            fields[key] = value
-        }
-
-        func set(_ key: String, _ value: Bool) {
-            fields[key] = String(value)
-        }
-
-        func set(_ key: String, _ value: Int) {
-            fields[key] = String(value)
-        }
-
-        func profile() -> String {
-            let raw = arguments.string("profile")
-            return (try? BrowserToolConfig.normalizedProfile(raw))
-                ?? raw
-                ?? BrowserToolConfig.defaultProfile
-        }
-
-        func channel() -> String {
-            BrowserToolConfig.normalizedChannel(arguments.string("channel"))
-        }
-
-        func browserMode(defaultHeadless: Bool = true) -> String {
-            (arguments.bool("headless") ?? defaultHeadless) ? "headless" : "headed"
-        }
-
-        func addTarget(defaultKind: String = "current_page") {
-            if let selector = arguments.string("selector"), selector.isEmpty == false {
-                set("target_kind", "selector")
-                set("target", selector)
-            } else if let role = arguments.string("role"), role.isEmpty == false,
-                      let name = arguments.string("name"), name.isEmpty == false {
-                set("target_kind", "role")
-                set("target", "\(role):\(name)")
-            } else if let text = arguments.string("text"), text.isEmpty == false {
-                set("target_kind", "text")
-                set("target", text)
-            } else {
-                set("target_kind", defaultKind)
-            }
-        }
-
-        func addTargetPosition() {
-            set("exact", arguments.bool("exact") ?? false)
-            set("nth", arguments.integer("nth") ?? 0)
-        }
-
-        switch toolName {
-        case "browser_diagnostics":
-            set("profile", profile())
-            set("channel", channel())
-            set("scope", "runtime_and_workspace_browser_metadata")
-
-        case "browser_profiles":
-            set("profile_filter", arguments.string("profile") ?? "all")
-            set("limit", arguments.integer("limit") ?? 20)
-            set("include_profile_size", arguments.bool("includeProfileSize") ?? false)
-            set("scope", "profile_metadata_only")
-
-        case "browser_profile_delete":
-            let selectedProfile = profile()
-            let confirmedProfile = arguments.string("confirmProfile").flatMap {
-                try? BrowserToolConfig.normalizedProfile($0)
-            }
-            set("profile", selectedProfile)
-            set("confirmation_matches", confirmedProfile == selectedProfile)
-            set("scope", "profile_state_downloads_and_history_metadata")
-
-        case "browser_history":
-            set("profile_filter", arguments.string("profile") ?? "all")
-            set("limit", arguments.integer("limit") ?? 20)
-            set("scope", "history_metadata_only")
-
-        case "browser_navigate":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            set("channel", channel())
-            set("url", arguments.string("url"))
-
-        case "browser_snapshot":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            set("channel", channel())
-            set("scope", "current_live_page")
-            set("max_characters", arguments.integer("maxCharacters")
-                ?? BrowserToolConfig.maxSnapshotCharacters)
-
-        case "browser_handoff":
-            set("profile", profile())
-            set("browser_mode", "headed")
-            set("channel", channel())
-            set("url", arguments.string("url") ?? "current_live_page")
-            set("handoff_seconds", arguments.integer("handoffSeconds") ?? 60)
-
-        case "browser_reload", "browser_back", "browser_forward":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            set("channel", channel())
-            set("scope", "current_live_page")
-
-        case "browser_click":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            set("channel", channel())
-            addTarget()
-            addTargetPosition()
-
-        case "browser_type":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            addTarget()
-            set("nth", arguments.integer("nth") ?? 0)
-            set("clear", arguments.bool("clear") ?? true)
-            set("submit", arguments.bool("submit") ?? false)
-            set("input_characters", arguments.string("value")?.count ?? 0)
-
-        case "browser_submit":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            addTarget(defaultKind: "current_form")
-            addTargetPosition()
-            set("timeout_millis", arguments.integer("timeoutMillis") ?? 5_000)
-
-        case "browser_select_option":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            addTarget()
-            addTargetPosition()
-            if let value = arguments.string("optionValue"), value.isEmpty == false {
-                set("option_kind", "value")
-                set("option", value)
-            } else if let label = arguments.string("optionLabel"), label.isEmpty == false {
-                set("option_kind", "label")
-                set("option", label)
-            } else if let index = arguments.integer("optionIndex") {
-                set("option_kind", "index")
-                set("option", index)
-            }
-
-        case "browser_press_key":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            addTarget(defaultKind: "current_focus")
-            addTargetPosition()
-            set("key", (try? normalizedBrowserKey(arguments.string("key") ?? ""))
-                ?? arguments.string("key"))
-
-        case "browser_scroll":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            addTarget()
-            addTargetPosition()
-            if let delta = try? browserScrollDelta(
-                direction: arguments.string("direction"),
-                amount: arguments.integer("amount"),
-                deltaX: arguments.integer("deltaX"),
-                deltaY: arguments.integer("deltaY")) {
-                set("delta_x", delta.x)
-                set("delta_y", delta.y)
-            }
-
-        case "browser_wait":
-            set("profile", profile())
-            addTarget(defaultKind: "timer")
-            addTargetPosition()
-            set("state", normalizedBrowserWaitState(arguments.string("state")))
-            set("timeout_millis", arguments.integer("timeoutMillis") ?? 10_000)
-
-        case "browser_screenshot":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            set("channel", channel())
-            set("url", arguments.string("url") ?? "current_live_page")
-            set("output_path", arguments.string("outputPath"))
-            set("full_page", arguments.bool("fullPage") ?? true)
-
-        case "browser_upload_file":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            addTarget()
-            addTargetPosition()
-            set("file_path", arguments.string("filePath"))
-
-        case "browser_download":
-            let selectedProfile = profile()
-            set("profile", selectedProfile)
-            set("browser_mode", browserMode())
-            addTarget()
-            addTargetPosition()
-            set("download_scope", ".intatis/browser/downloads/\(selectedProfile)")
-            set("timeout_millis", arguments.integer("downloadTimeoutMillis") ?? 15_000)
-
-        case "browser_downloads":
-            let selectedProfile = profile()
-            set("profile", selectedProfile)
-            set("limit", arguments.integer("limit") ?? 20)
-            set("scope", ".intatis/browser/downloads/\(selectedProfile)")
-
-        case "browser_search":
-            set("profile", profile())
-            set("browser_mode", browserMode())
-            set("channel", channel())
-            set("query", arguments.string("query"))
-            let engine = arguments.string("engine")?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            set("engine", ["duckduckgo", "google", "bing"].contains(engine ?? "")
-                ? engine
-                : "duckduckgo")
-
-        default:
-            return nil
-        }
-
-        return PermissionActionPreview(kind: toolName, fields: fields)
-    }
-}
-
-protocol BrowserPermissionPreviewingTool: Tool {}
-
-extension BrowserPermissionPreviewingTool {
-    public func permissionActionPreview(_ args: ToolArgs) -> PermissionActionPreview? {
-        BrowserPermissionPreview.make(
-            toolName: Self.descriptor.name,
-            args: args)
-    }
-}
-
 private struct BrowserPaths {
     let profile: String
     let profileDir: URL
@@ -449,12 +174,6 @@ private struct BrowserActionResult: Decodable {
     let downloads: [BrowserDownloadEntry]?
     let openedPage: BrowserOpenedPage?
     let pageCount: Int?
-}
-
-private struct BrowserBackendFailureResult: Decodable {
-    let marker: String?
-    let code: String?
-    let effectDisposition: String?
 }
 
 private struct BrowserHistoryEntry: Decodable {
@@ -541,23 +260,11 @@ private func browserBackendInvocation(
         "stateFile",
         "outputPath",
     ].compactMap { arguments[$0] as? String }
-    let session: BrowserBackendSessionSpec?
-    if let profileDirectory = arguments["profileDir"] as? String,
-       let action = arguments["action"] as? String,
-       action != "diagnostics" {
-        session = BrowserBackendSessionSpec(
-            profileDirectory: profileDirectory,
-            channel: arguments["channel"] as? String ?? BrowserToolConfig.defaultChannel,
-            headless: arguments["headless"] as? Bool ?? true)
-    } else {
-        session = nil
-    }
     return BrowserBackendInvocation(
         javaScript: javaScript,
         encodedArguments: encodedArguments,
         readableWorkspacePaths: Array(Set(readable)).sorted(),
-        writableWorkspacePaths: Array(Set(writable)).sorted(),
-        session: session)
+        writableWorkspacePaths: Array(Set(writable)).sorted())
 }
 
 private func browserJSONLine(from stdout: String) throws -> String {
@@ -568,38 +275,6 @@ private func browserJSONLine(from stdout: String) throws -> String {
         }
     }
     throw IntatisError.decoding("browser backend did not return JSON")
-}
-
-private func browserBackendFailure(from stdout: String) -> BrowserBackendFailureResult? {
-    guard let line = try? browserJSONLine(from: stdout) else { return nil }
-    return try? JSONDecoder().decode(
-        BrowserBackendFailureResult.self,
-        from: Data(line.utf8))
-}
-
-private func browserNoEffectRejection(
-    from result: ShellResult,
-    arguments: [String: Any]
-) -> ToolExecutionRejectedWithoutSideEffect? {
-    guard let failure = browserBackendFailure(from: result.stdout),
-          failure.marker == "intatis_browser_backend_error_v1",
-          failure.effectDisposition == ToolExecutionEffectDisposition.notStarted.rawValue,
-          let code = failure.code else {
-        return nil
-    }
-    let action = (arguments["action"] as? String) ?? "action"
-    switch code {
-    case "browser_action_target_not_found":
-        return ToolExecutionRejectedWithoutSideEffect(
-            code: code,
-            message: "browser_\(action) could not find a matching usable element before the action started; take a fresh browser_snapshot and retry using its exact selector or current role+name")
-    case "browser_sensitive_target_refused":
-        return ToolExecutionRejectedWithoutSideEffect(
-            code: code,
-            message: "browser_type refused a likely credential or secret field before typing began; use browser_handoff so the user can enter sensitive data directly")
-    default:
-        return nil
-    }
 }
 
 private func redactedBrowserText(_ text: String, redactions: [String]) -> String {
@@ -1400,24 +1075,6 @@ private func playwrightCommand(
     const maxText = Math.max(1, Math.min(args.maxCharacters || 20000, 100000));
     const waitMillis = Math.max(0, Math.min(args.waitMillis || 600, 10000));
     const handoffMillis = Math.max(1000, Math.min(args.handoffTimeoutMillis || 30000, 600000));
-    class BrowserActionNotStartedError extends Error {
-      constructor(code) {
-        super(code);
-        this.name = 'BrowserActionNotStartedError';
-        this.code = code;
-      }
-    }
-    function actionTargetNotFound() {
-      return new BrowserActionNotStartedError('browser_action_target_not_found');
-    }
-    function emitNoEffectFailure(error) {
-      if (!(error instanceof BrowserActionNotStartedError)) return;
-      console.log(JSON.stringify({
-        marker: 'intatis_browser_backend_error_v1',
-        code: error.code,
-        effectDisposition: 'not_started'
-      }));
-    }
     const commandWatchdogMillis = Math.max(60000, handoffMillis + 20000);
     const commandWatchdog = setTimeout(() => {
       console.error('browser command timed out');
@@ -1627,19 +1284,16 @@ private func playwrightCommand(
     function interactiveElementsScript() {
       return `(() => {
         function trim(value, max = 160) {
-          const normalized = Array.from(String(value || ''), (character) =>
-            character.trim() ? character : ' ').join('');
-          return normalized.split(' ').filter(Boolean).join(' ').slice(0, max);
+          return String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
         }
         function cssString(value) {
-          return JSON.stringify(String(value || '')).slice(1, -1);
+          return String(value || '').replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
         }
         function cssIdent(value) {
           try {
             if (window.CSS && CSS.escape) return CSS.escape(String(value || ''));
           } catch (_) {}
-          return String(value || '').replace(/[^A-Za-z0-9_-]/g, (ch) =>
-            String.fromCharCode(92) + ch.codePointAt(0).toString(16) + ' ');
+          return String(value || '').replace(/[^A-Za-z0-9_-]/g, (ch) => '\\\\' + ch);
         }
         function textOf(el) {
           return trim(el.innerText || el.textContent || el.value || '');
@@ -1649,7 +1303,7 @@ private func playwrightCommand(
           if (aria) return aria;
           const labelledBy = trim(el.getAttribute('aria-labelledby'));
           if (labelledBy) {
-            const text = trim(labelledBy).split(' ')
+            const text = labelledBy.split(/\\s+/)
               .map((id) => document.getElementById(id))
               .filter(Boolean)
               .map((node) => trim(node.innerText || node.textContent || ''))
@@ -1690,68 +1344,19 @@ private func playwrightCommand(
           if (el.isContentEditable) return 'textbox';
           return tag || 'element';
         }
-        function isVisible(el) {
-          if (!el || !el.isConnected || el.hidden) return false;
-          const style = window.getComputedStyle(el);
-          if (!style || style.display === 'none' || style.visibility === 'hidden'
-              || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
-          const rect = el.getBoundingClientRect();
-          return !!rect && rect.width > 0 && rect.height > 0 && el.getClientRects().length > 0;
-        }
         function selectorFor(el, index) {
           const tag = el.tagName ? el.tagName.toLowerCase() : '*';
           const id = el.getAttribute('id');
-          function uniquelyIdentifies(candidate) {
-            try {
-              const matches = document.querySelectorAll(candidate);
-              return matches.length === 1 && matches[0] === el;
-            } catch (_) {
-              return false;
-            }
-          }
-          if (id) {
-            const candidate = '#' + cssIdent(id);
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
-          for (const attribute of ['data-testid', 'data-test', 'data-qa']) {
-            const testId = el.getAttribute(attribute);
-            if (testId) {
-              const candidate = '[' + attribute + '="' + cssString(testId) + '"]';
-              if (uniquelyIdentifies(candidate)) return candidate;
-            }
-          }
+          if (id) return '#' + cssIdent(id);
+          const testId = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-qa');
+          if (testId) return '[data-testid="' + cssString(testId) + '"], [data-test="' + cssString(testId) + '"], [data-qa="' + cssString(testId) + '"]';
           const name = el.getAttribute('name');
-          if (name && tag !== '*') {
-            const candidate = tag + '[name="' + cssString(name) + '"]';
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
+          if (name && tag !== '*') return tag + '[name="' + cssString(name) + '"]';
           const placeholder = el.getAttribute('placeholder');
-          if (placeholder && tag !== '*') {
-            const candidate = tag + '[placeholder="' + cssString(placeholder) + '"]';
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
+          if (placeholder && tag !== '*') return tag + '[placeholder="' + cssString(placeholder) + '"]';
           const role = el.getAttribute('role');
-          if (role) {
-            const candidate = '[role="' + cssString(role) + '"]';
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
-          const segments = [];
-          let current = el;
-          while (current && current.nodeType === 1 && segments.length < 8) {
-            const currentTag = current.tagName.toLowerCase();
-            const parent = current.parentElement;
-            const siblings = parent
-              ? Array.from(parent.children).filter((node) => node.tagName === current.tagName)
-              : [];
-            const position = siblings.indexOf(current);
-            segments.unshift(currentTag + (siblings.length > 1 && position >= 0
-              ? ':nth-of-type(' + (position + 1) + ')'
-              : ''));
-            const candidate = segments.join(' > ');
-            if (uniquelyIdentifies(candidate)) return candidate;
-            current = parent;
-          }
-          return tag + ':nth-of-type(' + Math.max(1, index + 1) + ')';
+          if (role) return '[role="' + cssString(role) + '"]';
+          return tag + ':nth-of-type(' + (index + 1) + ')';
         }
         const selector = [
           'button',
@@ -1763,7 +1368,7 @@ private func playwrightCommand(
           '[placeholder]',
           '[contenteditable="true"]'
         ].join(',');
-        return Array.from(document.querySelectorAll(selector)).filter(isVisible).slice(0, 120).map((el, index) => {
+        return Array.from(document.querySelectorAll(selector)).slice(0, 120).map((el, index) => {
           const tag = el.tagName ? el.tagName.toLowerCase() : '';
           const type = trim(el.getAttribute('type'), 64).toLowerCase();
           const name = labelFor(el);
@@ -1796,21 +1401,15 @@ private func playwrightCommand(
         text: (a.innerText || a.textContent || '').trim().slice(0, 160),
         href: a.href || ''
       })).filter((item) => item.text || item.href)).catch(() => []);
-      const elements = await page.evaluate(interactiveElementsScript());
+      const elements = await page.evaluate(interactiveElementsScript()).catch(() => []);
       return { action, profile: args.profile, backend: 'playwright', backendDetail: playwrightInfo.resolvedFrom || '', url, title, text: text.slice(0, maxText), links: links.slice(0, 40), elements };
     }
 
-    async function openPage(context, forceNavigation = false) {
-      const pages = context.pages().filter((candidate) => !candidate.isClosed());
-      const page = pages[pages.length - 1] || await context.newPage();
+    async function openPage(context) {
+      const page = context.pages()[0] || await context.newPage();
       const targetURL = args.url ? validatedNavigationURL(args.url) : readStateURL();
-      const currentURL = page.url();
-      const currentIsUsable = /^https?:\\/\\//i.test(currentURL);
-      const shouldNavigate = forceNavigation || !Number.isInteger(args.cdpPort) || !currentIsUsable;
-      if (shouldNavigate) {
-        if (!targetURL) throw new Error('no current browser URL; call browser_navigate or browser_search first');
-        await page.goto(targetURL, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      }
+      if (!targetURL) throw new Error('no current browser URL; call browser_navigate or browser_search first');
+      await page.goto(targetURL, { waitUntil: 'domcontentloaded', timeout: 45000 });
       return page;
     }
 
@@ -1850,22 +1449,6 @@ private func playwrightCommand(
       throw new Error('selector, role+name, or text is required for this browser action');
     }
 
-    async function locatorForAction(page, options = {}) {
-      const requiresVisible = options.requiresVisible !== false;
-      const requiresEnabled = options.requiresEnabled !== false;
-      let locator;
-      try {
-        locator = locatorFor(page);
-        if (await locator.count() < 1) throw actionTargetNotFound();
-        if (requiresVisible && !(await locator.isVisible())) throw actionTargetNotFound();
-        if (requiresEnabled && !(await locator.isEnabled())) throw actionTargetNotFound();
-      } catch (error) {
-        if (error instanceof BrowserActionNotStartedError) throw error;
-        throw actionTargetNotFound();
-      }
-      return locator;
-    }
-
     function sensitiveTypeReasonForElement(el) {
       function text(value) {
         return String(value || '').toLowerCase();
@@ -1900,15 +1483,10 @@ private func playwrightCommand(
     }
 
     async function typeLocatorFor(page) {
-      const locator = await locatorForAction(page);
-      let reason;
-      try {
-        reason = await locator.evaluate(sensitiveTypeReasonForElement);
-      } catch (_) {
-        throw actionTargetNotFound();
-      }
+      const locator = locatorFor(page);
+      const reason = await locator.evaluate(sensitiveTypeReasonForElement);
       if (reason) {
-        throw new BrowserActionNotStartedError('browser_sensitive_target_refused');
+        throw new Error('browser_type refuses likely sensitive credential entry target (' + reason + '); use browser_handoff for login, password, 2FA, token, or API key entry');
       }
       return locator;
     }
@@ -1960,15 +1538,9 @@ private func playwrightCommand(
 
     async function submitCurrentPage(page) {
       const timeout = Math.max(1000, Math.min(args.timeoutMillis || 5000, 30000));
-      let target = null;
-      if (hasTargetLocator()) {
-        target = await locatorForAction(page, { requiresVisible: false });
-      } else if (await page.locator('form').count() < 1) {
-        throw actionTargetNotFound();
-      }
       const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout }).catch(() => null);
-      if (target) {
-        await target.evaluate(submitTarget);
+      if (hasTargetLocator()) {
+        await locatorFor(page).evaluate(submitTarget);
       } else {
         await page.evaluate(submitTarget);
       }
@@ -2004,14 +1576,7 @@ private func playwrightCommand(
     }
 
     (async () => {
-      const managedConnection = Number.isInteger(args.cdpPort);
-      const browser = managedConnection
-        ? await chromium.connectOverCDP(`http://127.0.0.1:${args.cdpPort}`)
-        : null;
-      const context = managedConnection
-        ? browser.contexts()[0]
-        : await chromium.launchPersistentContext(args.profileDir, launchOptions());
-      if (!context) throw new Error('managed browser did not expose its persistent context');
+      const context = await chromium.launchPersistentContext(args.profileDir, launchOptions());
       try {
         let page;
         let downloads = [];
@@ -2019,14 +1584,12 @@ private func playwrightCommand(
         switch (args.action) {
           case 'navigate':
           case 'snapshot':
-            page = await openPage(context, args.action !== 'snapshot');
-            break;
           case 'back':
           case 'forward':
-            page = await openPage(context, true);
+            page = await openPage(context);
             break;
           case 'handoff':
-            page = await openPage(context, !!args.url);
+            page = await openPage(context);
             await page.waitForTimeout(handoffMillis);
             break;
           case 'reload':
@@ -2036,9 +1599,8 @@ private func playwrightCommand(
           case 'click':
             page = await openPage(context);
             {
-              const locator = await locatorForAction(page);
               const followed = await followNewPageDuring(context, page, async () => {
-                await locator.click({ timeout: 15000 });
+                await locatorFor(page).click({ timeout: 15000 });
               });
               page = followed.page;
               openedPage = followed.openedPage;
@@ -2070,9 +1632,8 @@ private func playwrightCommand(
           case 'select':
             page = await openPage(context);
             {
-              const locator = await locatorForAction(page, { requiresVisible: false });
               const followed = await followNewPageDuring(context, page, async () => {
-                await locator.selectOption(selectOptionForAction(), { timeout: 15000 });
+                await locatorFor(page).selectOption(selectOptionForAction(), { timeout: 15000 });
               });
               page = followed.page;
               openedPage = followed.openedPage;
@@ -2091,12 +1652,9 @@ private func playwrightCommand(
           case 'press':
             page = await openPage(context);
             {
-              const locator = (args.selector || (args.role && args.name) || args.text)
-                ? await locatorForAction(page)
-                : null;
               const followed = await followNewPageDuring(context, page, async () => {
-                if (locator) {
-                  await locator.press(args.key || '', { timeout: 15000 });
+                if (args.selector || (args.role && args.name) || args.text) {
+                  await locatorFor(page).press(args.key || '', { timeout: 15000 });
                 } else {
                   await page.keyboard.press(args.key || '');
                 }
@@ -2108,7 +1666,7 @@ private func playwrightCommand(
           case 'scroll':
             page = await openPage(context);
             if (args.selector || (args.role && args.name) || args.text) {
-              const locator = await locatorForAction(page, { requiresEnabled: false });
+              const locator = locatorFor(page);
               await locator.scrollIntoViewIfNeeded({ timeout: 15000 });
               const box = await locator.boundingBox().catch(() => null);
               if (box) await page.mouse.move(box.x + Math.min(Math.max(box.width / 2, 1), 400), box.y + Math.min(Math.max(box.height / 2, 1), 400));
@@ -2127,32 +1685,16 @@ private func playwrightCommand(
             break;
           case 'upload':
             page = await openPage(context);
-            {
-              const locator = await locatorForAction(page, {
-                requiresVisible: false,
-                requiresEnabled: false
-              });
-              const isFileInput = await locator.evaluate((element) => {
-                if (element && element.tagName && element.tagName.toLowerCase() === 'input'
-                    && String(element.type || '').toLowerCase() === 'file') return true;
-                return !!(element && element.querySelector && element.querySelector('input[type="file"]'));
-              }).catch(() => false);
-              if (!isFileInput) throw actionTargetNotFound();
-              await locator.setInputFiles(args.filePath, { timeout: 15000 });
-            }
+            await locatorFor(page).setInputFiles(args.filePath, { timeout: 15000 });
             break;
           case 'download':
             page = await openPage(context);
-            {
-              const locator = await locatorForAction(page);
             downloads = await captureDownload(page, async () => {
-              await locator.click({ timeout: 15000 });
+              await locatorFor(page).click({ timeout: 15000 });
             });
-            }
             break;
           case 'search': {
-            const pages = context.pages().filter((candidate) => !candidate.isClosed());
-            page = pages[pages.length - 1] || await context.newPage();
+            page = context.pages()[0] || await context.newPage();
             const encoded = encodeURIComponent(args.query || '');
             const engine = args.engine || 'duckduckgo';
             let url = `https://duckduckgo.com/?q=${encoded}`;
@@ -2162,7 +1704,7 @@ private func playwrightCommand(
             break;
           }
           case 'screenshot':
-            page = await openPage(context, !!args.url);
+            page = await openPage(context);
             if (!args.outputPath) throw new Error('outputPath is required for browser_screenshot');
             fs.mkdirSync(path.dirname(args.outputPath), { recursive: true });
             await page.screenshot({ path: args.outputPath, fullPage: args.fullPage === true });
@@ -2178,19 +1720,14 @@ private func playwrightCommand(
         summary.pageCount = context.pages().length;
         console.log(JSON.stringify(summary));
       } finally {
-        if (!managedConnection) await context.close();
+        await context.close();
       }
     })()
     .then(() => {
       clearTimeout(commandWatchdog);
-      // Playwright has no disconnect-only API for connectOverCDP. Exiting the
-      // one-shot broker drops its WebSocket while leaving the runtime-owned
-      // browser process and live pages intact.
-      if (Number.isInteger(args.cdpPort)) process.exit(0);
     })
     .catch((error) => {
       clearTimeout(commandWatchdog);
-      emitNoEffectFailure(error);
       console.error(error && error.stack ? error.stack : String(error));
       process.exit(1);
     });
@@ -2215,24 +1752,6 @@ private func cdpCommand(
     const maxText = Math.max(1, Math.min(args.maxCharacters || 20000, 100000));
     const waitMillis = Math.max(0, Math.min(args.waitMillis || 600, 10000));
     const handoffMillis = Math.max(1000, Math.min(args.handoffTimeoutMillis || 30000, 600000));
-    class BrowserActionNotStartedError extends Error {
-      constructor(code) {
-        super(code);
-        this.name = 'BrowserActionNotStartedError';
-        this.code = code;
-      }
-    }
-    function actionTargetNotFound() {
-      return new BrowserActionNotStartedError('browser_action_target_not_found');
-    }
-    function emitNoEffectFailure(error) {
-      if (!(error instanceof BrowserActionNotStartedError)) return;
-      console.log(JSON.stringify({
-        marker: 'intatis_browser_backend_error_v1',
-        code: error.code,
-        effectDisposition: 'not_started'
-      }));
-    }
     let activeBrowser = null;
     const commandWatchdogMillis = Math.max(60000, handoffMillis + 20000);
     const commandWatchdog = setTimeout(() => {
@@ -2493,12 +2012,9 @@ private func cdpCommand(
         }));
     }
 
-    async function pageTarget(port, preferredURL) {
+    async function pageTarget(port) {
       let targets = await listPageTargets(port);
-      let target = preferredURL
-        ? targets.find((item) => item.url === preferredURL)
-        : null;
-      if (!target) target = targets[0];
+      let target = targets[0];
       if (!target) {
         try {
           target = await fetchJSON(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' });
@@ -2633,16 +2149,6 @@ private func cdpCommand(
       return undefined;
     }
 
-    function evaluationExceptionMessage(details, fallback) {
-      const summary = String(details && details.text ? details.text : fallback || 'page evaluation failed');
-      const exception = details && details.exception ? details.exception : {};
-      const description = String(
-        exception.description || exception.value || ''
-      ).trim();
-      if (!description || description === summary) return summary;
-      return `${summary}: ${description}`;
-    }
-
     async function evaluate(client, expression, timeoutMillis = 10000) {
       const result = await client.send('Runtime.evaluate', {
         expression,
@@ -2651,10 +2157,8 @@ private func cdpCommand(
         timeout: Math.max(1000, Math.min(timeoutMillis, 31000))
       });
       if (result.exceptionDetails) {
-        throw new Error(evaluationExceptionMessage(
-          result.exceptionDetails,
-          'page evaluation failed'
-        ));
+        const text = result.exceptionDetails.text || 'page evaluation failed';
+        throw new Error(text);
       }
       return jsValue(result);
     }
@@ -2667,10 +2171,7 @@ private func cdpCommand(
         timeout: 10000
       });
       if (result.exceptionDetails) {
-        throw new Error(evaluationExceptionMessage(
-          result.exceptionDetails,
-          'file input lookup failed'
-        ));
+        throw new Error(result.exceptionDetails.text || 'file input lookup failed');
       }
       const objectId = result.result && result.result.objectId;
       if (!objectId) throw new Error('file input lookup did not return a DOM object');
@@ -2798,16 +2299,6 @@ private func cdpCommand(
       if (waitMillis > 0) await wait(waitMillis);
     }
 
-    async function ensureCurrentPage(client, fallbackURL, forceNavigation = false) {
-      const currentURL = await evaluate(
-        client,
-        `(() => String(location.href || ''))()`
-      ).catch(() => '');
-      if (forceNavigation || !/^https?:\\/\\//i.test(String(currentURL || ''))) {
-        await navigate(client, fallbackURL);
-      }
-    }
-
     function actionScript(action) {
       const params = JSON.stringify({
         selector: args.selector || '',
@@ -2824,7 +2315,39 @@ private func cdpCommand(
         optionIndex: Number.isInteger(args.optionIndex) ? args.optionIndex : null
       });
       return `(() => {
-        ${locatorSupportScript(params)}
+        const args = ${params};
+        function textOf(el) {
+          return [
+            el.getAttribute && el.getAttribute('aria-label'),
+            el.getAttribute && el.getAttribute('placeholder'),
+            el.value,
+            el.innerText,
+            el.textContent,
+            el.getAttribute && el.getAttribute('name')
+          ].filter(Boolean).join(' ').trim();
+        }
+        function inferredRole(el) {
+          const explicit = el.getAttribute && el.getAttribute('role');
+          if (explicit) return explicit;
+          const tag = el.tagName ? el.tagName.toLowerCase() : '';
+          if (tag === 'button') return 'button';
+          if (tag === 'a' && el.href) return 'link';
+          if (tag === 'input' || tag === 'textarea') return 'textbox';
+          return '';
+        }
+        function nameMatches(el, value, exact) {
+          if (!value) return true;
+          const haystack = textOf(el);
+          return exact ? haystack === value : haystack.toLowerCase().includes(value.toLowerCase());
+        }
+        function findElement() {
+          if (args.selector) return Array.from(document.querySelectorAll(args.selector))[args.nth];
+          let candidates = Array.from(document.querySelectorAll('input, textarea, button, a, select, [role], [aria-label], [placeholder], label, [contenteditable="true"]'));
+          if (args.role) candidates = candidates.filter((el) => inferredRole(el) === args.role);
+          const query = args.name || args.text;
+          if (query) candidates = candidates.filter((el) => nameMatches(el, query, args.exact));
+          return candidates[args.nth];
+        }
         function sensitiveTypeReasonForElement(node) {
           function lowered(value) {
             return String(value || '').toLowerCase();
@@ -2967,48 +2490,13 @@ private func cdpCommand(
     function locatorSupportScript(paramsExpression) {
       return `
         const args = ${paramsExpression};
-        function compactText(value) {
-          const normalized = Array.from(String(value || ''), (character) =>
-            character.trim() ? character : ' ').join('');
-          return normalized.split(' ').filter(Boolean).join(' ');
-        }
-        function associatedName(el) {
-          if (!el || !el.getAttribute) return '';
-          const aria = compactText(el.getAttribute('aria-label'));
-          if (aria) return aria;
-          const labelledBy = compactText(el.getAttribute('aria-labelledby'));
-          if (labelledBy) {
-            const text = labelledBy.split(' ')
-              .map((id) => document.getElementById(id))
-              .filter(Boolean)
-              .map((node) => compactText(node.innerText || node.textContent || ''))
-              .filter(Boolean)
-              .join(' ');
-            if (text) return compactText(text);
-          }
-          if (el.labels && el.labels.length) {
-            const text = Array.from(el.labels)
-              .map((label) => compactText(label.innerText || label.textContent || ''))
-              .filter(Boolean)
-              .join(' ');
-            if (text) return compactText(text);
-          }
-          const id = el.getAttribute('id');
-          if (id) {
-            const label = Array.from(document.querySelectorAll('label'))
-              .find((candidate) => candidate.getAttribute('for') === id);
-            const text = label ? compactText(label.innerText || label.textContent || '') : '';
-            if (text) return text;
-          }
-          return compactText(el.getAttribute('placeholder') || el.getAttribute('title') || '');
-        }
         function textOf(el) {
           const tag = el.tagName ? el.tagName.toLowerCase() : '';
           const renderedText = tag === 'script' || tag === 'style' || tag === 'noscript'
             ? ''
             : (typeof el.innerText === 'string' && el.innerText.length ? el.innerText : el.textContent);
           return [
-            associatedName(el),
+            el.getAttribute && el.getAttribute('aria-label'),
             el.getAttribute && el.getAttribute('placeholder'),
             el.value,
             renderedText,
@@ -3017,132 +2505,44 @@ private func cdpCommand(
         }
         function inferredRole(el) {
           const explicit = el.getAttribute && el.getAttribute('role');
-          if (explicit) return String(explicit).toLowerCase();
+          if (explicit) return explicit;
           const tag = el.tagName ? el.tagName.toLowerCase() : '';
-          const type = String(el.getAttribute && el.getAttribute('type') || '').toLowerCase();
           if (tag === 'button') return 'button';
           if (tag === 'a' && el.href) return 'link';
           if (tag === 'select') return 'combobox';
-          if (tag === 'textarea') return 'textbox';
-          if (tag === 'input') {
-            if (['button', 'submit', 'reset', 'image', 'file'].includes(type)) return 'button';
-            if (type === 'checkbox') return 'checkbox';
-            if (type === 'radio') return 'radio';
-            return 'textbox';
-          }
-          if (el.isContentEditable) return 'textbox';
+          if (tag === 'input' || tag === 'textarea') return 'textbox';
           return '';
         }
         function nameMatches(el, value, exact) {
           if (!value) return true;
-          const expected = compactText(value);
-          const candidates = [
-            associatedName(el),
-            compactText(el.innerText || el.textContent || ''),
-            compactText(el.value),
-            compactText(el.getAttribute && el.getAttribute('name'))
-          ].filter(Boolean);
-          if (exact) return candidates.some((candidate) => candidate === expected);
-          const lowered = expected.toLowerCase();
-          return candidates.some((candidate) => candidate.toLowerCase().includes(lowered));
-        }
-        function isVisible(el) {
-          if (!el || !el.isConnected) return false;
-          const style = window.getComputedStyle(el);
-          if (!style || style.display === 'none' || style.visibility === 'hidden'
-              || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
-          const rect = el.getBoundingClientRect();
-          return !!rect && rect.width > 0 && rect.height > 0 && el.getClientRects().length > 0;
-        }
-        function isEligible(el) {
-          return args.includeHidden === true ? !!el && el.isConnected : isVisible(el);
-        }
-        function isActionable(el) {
-          const tag = el.tagName ? el.tagName.toLowerCase() : '';
-          const role = inferredRole(el);
-          return ['button', 'a', 'input', 'textarea', 'select', 'summary', 'label'].includes(tag)
-            || ['button', 'link', 'checkbox', 'radio', 'menuitem', 'option', 'tab', 'textbox', 'combobox'].includes(role)
-            || el.isContentEditable;
-        }
-        function hasMatchingDescendant(el, value, exact) {
-          return Array.from(el.children || []).some((child) =>
-            isVisible(child) && nameMatches(child, value, exact));
+          const haystack = textOf(el);
+          return exact ? haystack === value : haystack.toLowerCase().includes(value.toLowerCase());
         }
         function findElement() {
-          if (args.selector) {
-            return Array.from(document.querySelectorAll(args.selector))
-              .filter(isEligible)[args.nth];
-          }
+          if (args.selector) return Array.from(document.querySelectorAll(args.selector))[args.nth];
           let candidates;
           if (args.role || args.name) {
             candidates = Array.from(document.querySelectorAll('input, textarea, button, a, select, [role], [aria-label], [placeholder], label, [contenteditable="true"]'));
           } else if (args.text) {
-            candidates = Array.from(document.querySelectorAll('body *'))
+            candidates = Array.from(document.querySelectorAll('body, body *'))
               .filter((el) => !['script', 'style', 'noscript'].includes(el.tagName ? el.tagName.toLowerCase() : ''));
           } else {
             return null;
           }
-          candidates = candidates.filter(isEligible);
-          if (args.role) {
-            const expectedRole = String(args.role).toLowerCase();
-            candidates = candidates.filter((el) => inferredRole(el).toLowerCase() === expectedRole);
-          }
+          if (args.role) candidates = candidates.filter((el) => inferredRole(el) === args.role);
           const query = args.name || args.text;
           if (query) candidates = candidates.filter((el) => nameMatches(el, query, args.exact));
-          candidates.sort((left, right) => {
-            const leftRank = isActionable(left) ? 0
-              : (hasMatchingDescendant(left, query, args.exact) ? 2 : 1);
-            const rightRank = isActionable(right) ? 0
-              : (hasMatchingDescendant(right, query, args.exact) ? 2 : 1);
-            if (leftRank !== rightRank) return leftRank - rightRank;
-            return textOf(left).length - textOf(right).length;
-          });
           return candidates[args.nth];
         }
       `;
-    }
-
-    function actionTargetExistsScript(includeHidden = false) {
-      const params = locatorParams({ includeHidden });
-      return `(() => {
-        ${locatorSupportScript(params)}
-        return !!findElement();
-      })()`;
-    }
-
-    async function requireActionTarget(client, includeHidden = false) {
-      let found = false;
-      try {
-        found = await evaluate(client, actionTargetExistsScript(includeHidden));
-      } catch (_) {
-        throw actionTargetNotFound();
-      }
-      if (!found) throw actionTargetNotFound();
-    }
-
-    async function requireSubmitTarget(client) {
-      if (args.selector || args.text || (args.role && args.name)) {
-        await requireActionTarget(client);
-        return;
-      }
-      let found = false;
-      try {
-        found = await evaluate(client, `(() => !!document.querySelector('form'))()`);
-      } catch (_) {
-        throw actionTargetNotFound();
-      }
-      if (!found) throw actionTargetNotFound();
     }
 
     function clickPointScript() {
       const params = locatorParams();
       return `(() => {
         ${locatorSupportScript(params)}
-        const located = findElement();
-        if (!located) throw new Error('visible element not found for browser action');
-        const target = isActionable(located)
-          ? located
-          : (located.closest('button, a[href], input, select, textarea, summary, label, [role="button"], [role="link"], [role="menuitem"]') || located);
+        const target = findElement();
+        if (!target) throw new Error('element not found for browser action');
         target.scrollIntoView({ block: 'center', inline: 'center' });
         const rect = target.getBoundingClientRect();
         if (!rect || rect.width <= 0 || rect.height <= 0) {
@@ -3202,11 +2602,11 @@ private func cdpCommand(
         ? String(args.state).toLowerCase()
         : 'visible';
       const timeoutMillis = Math.max(1000, Math.min(args.timeoutMillis || 10000, 30000));
-      const params = locatorParams({ state, timeoutMillis, includeHidden: true });
+      const params = locatorParams({ state, timeoutMillis });
       return `new Promise((resolve, reject) => {
         ${locatorSupportScript(params)}
         const deadline = Date.now() + Number(args.timeoutMillis || 10000);
-        function elementIsVisibleForWait(el) {
+        function isVisible(el) {
           if (!el) return false;
           const rect = el.getBoundingClientRect();
           const style = window.getComputedStyle(el);
@@ -3216,8 +2616,8 @@ private func cdpCommand(
           const el = findElement();
           if (args.state === 'attached') return !!el;
           if (args.state === 'detached') return !el;
-          if (args.state === 'hidden') return !el || !elementIsVisibleForWait(el);
-          return !!el && elementIsVisibleForWait(el);
+          if (args.state === 'hidden') return !el || !isVisible(el);
+          return !!el && isVisible(el);
         }
         function tick() {
           if (satisfied()) {
@@ -3239,11 +2639,42 @@ private func cdpCommand(
         role: args.role || '',
         name: args.name || '',
         exact: args.exact === true,
-        nth: Math.max(0, args.nth || 0),
-        includeHidden: true
+        nth: Math.max(0, args.nth || 0)
       });
       return `(() => {
-        ${locatorSupportScript(params)}
+        const args = ${params};
+        function textOf(el) {
+          return [
+            el.getAttribute && el.getAttribute('aria-label'),
+            el.getAttribute && el.getAttribute('placeholder'),
+            el.value,
+            el.innerText,
+            el.textContent,
+            el.getAttribute && el.getAttribute('name')
+          ].filter(Boolean).join(' ').trim();
+        }
+        function inferredRole(el) {
+          const explicit = el.getAttribute && el.getAttribute('role');
+          if (explicit) return explicit;
+          const tag = el.tagName ? el.tagName.toLowerCase() : '';
+          if (tag === 'button') return 'button';
+          if (tag === 'a' && el.href) return 'link';
+          if (tag === 'input' || tag === 'textarea') return 'textbox';
+          return '';
+        }
+        function nameMatches(el, value, exact) {
+          if (!value) return true;
+          const haystack = textOf(el);
+          return exact ? haystack === value : haystack.toLowerCase().includes(value.toLowerCase());
+        }
+        function findElement() {
+          if (args.selector) return Array.from(document.querySelectorAll(args.selector))[args.nth];
+          let candidates = Array.from(document.querySelectorAll('input[type="file"], label, button, a, [role], [aria-label], [placeholder]'));
+          if (args.role) candidates = candidates.filter((el) => inferredRole(el) === args.role);
+          const query = args.name || args.text;
+          if (query) candidates = candidates.filter((el) => nameMatches(el, query, args.exact));
+          return candidates[args.nth];
+        }
         function fileInputFrom(candidate) {
           let el = candidate;
           if (el && el.tagName && el.tagName.toLowerCase() === 'label') {
@@ -3267,19 +2698,16 @@ private func cdpCommand(
     function interactiveElementsScript() {
       return `(() => {
         function trim(value, max = 160) {
-          const normalized = Array.from(String(value || ''), (character) =>
-            character.trim() ? character : ' ').join('');
-          return normalized.split(' ').filter(Boolean).join(' ').slice(0, max);
+          return String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
         }
         function cssString(value) {
-          return JSON.stringify(String(value || '')).slice(1, -1);
+          return String(value || '').replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
         }
         function cssIdent(value) {
           try {
             if (window.CSS && CSS.escape) return CSS.escape(String(value || ''));
           } catch (_) {}
-          return String(value || '').replace(/[^A-Za-z0-9_-]/g, (ch) =>
-            String.fromCharCode(92) + ch.codePointAt(0).toString(16) + ' ');
+          return String(value || '').replace(/[^A-Za-z0-9_-]/g, (ch) => '\\\\' + ch);
         }
         function textOf(el) {
           return trim(el.innerText || el.textContent || el.value || '');
@@ -3289,7 +2717,7 @@ private func cdpCommand(
           if (aria) return aria;
           const labelledBy = trim(el.getAttribute('aria-labelledby'));
           if (labelledBy) {
-            const text = trim(labelledBy).split(' ')
+            const text = labelledBy.split(/\\s+/)
               .map((id) => document.getElementById(id))
               .filter(Boolean)
               .map((node) => trim(node.innerText || node.textContent || ''))
@@ -3330,68 +2758,19 @@ private func cdpCommand(
           if (el.isContentEditable) return 'textbox';
           return tag || 'element';
         }
-        function isVisible(el) {
-          if (!el || !el.isConnected || el.hidden) return false;
-          const style = window.getComputedStyle(el);
-          if (!style || style.display === 'none' || style.visibility === 'hidden'
-              || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
-          const rect = el.getBoundingClientRect();
-          return !!rect && rect.width > 0 && rect.height > 0 && el.getClientRects().length > 0;
-        }
         function selectorFor(el, index) {
           const tag = el.tagName ? el.tagName.toLowerCase() : '*';
           const id = el.getAttribute('id');
-          function uniquelyIdentifies(candidate) {
-            try {
-              const matches = document.querySelectorAll(candidate);
-              return matches.length === 1 && matches[0] === el;
-            } catch (_) {
-              return false;
-            }
-          }
-          if (id) {
-            const candidate = '#' + cssIdent(id);
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
-          for (const attribute of ['data-testid', 'data-test', 'data-qa']) {
-            const testId = el.getAttribute(attribute);
-            if (testId) {
-              const candidate = '[' + attribute + '="' + cssString(testId) + '"]';
-              if (uniquelyIdentifies(candidate)) return candidate;
-            }
-          }
+          if (id) return '#' + cssIdent(id);
+          const testId = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-qa');
+          if (testId) return '[data-testid="' + cssString(testId) + '"], [data-test="' + cssString(testId) + '"], [data-qa="' + cssString(testId) + '"]';
           const name = el.getAttribute('name');
-          if (name && tag !== '*') {
-            const candidate = tag + '[name="' + cssString(name) + '"]';
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
+          if (name && tag !== '*') return tag + '[name="' + cssString(name) + '"]';
           const placeholder = el.getAttribute('placeholder');
-          if (placeholder && tag !== '*') {
-            const candidate = tag + '[placeholder="' + cssString(placeholder) + '"]';
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
+          if (placeholder && tag !== '*') return tag + '[placeholder="' + cssString(placeholder) + '"]';
           const role = el.getAttribute('role');
-          if (role) {
-            const candidate = '[role="' + cssString(role) + '"]';
-            if (uniquelyIdentifies(candidate)) return candidate;
-          }
-          const segments = [];
-          let current = el;
-          while (current && current.nodeType === 1 && segments.length < 8) {
-            const currentTag = current.tagName.toLowerCase();
-            const parent = current.parentElement;
-            const siblings = parent
-              ? Array.from(parent.children).filter((node) => node.tagName === current.tagName)
-              : [];
-            const position = siblings.indexOf(current);
-            segments.unshift(currentTag + (siblings.length > 1 && position >= 0
-              ? ':nth-of-type(' + (position + 1) + ')'
-              : ''));
-            const candidate = segments.join(' > ');
-            if (uniquelyIdentifies(candidate)) return candidate;
-            current = parent;
-          }
-          return tag + ':nth-of-type(' + Math.max(1, index + 1) + ')';
+          if (role) return '[role="' + cssString(role) + '"]';
+          return tag + ':nth-of-type(' + (index + 1) + ')';
         }
         const selector = [
           'button',
@@ -3403,7 +2782,7 @@ private func cdpCommand(
           '[placeholder]',
           '[contenteditable="true"]'
         ].join(',');
-        return Array.from(document.querySelectorAll(selector)).filter(isVisible).slice(0, 120).map((el, index) => {
+        return Array.from(document.querySelectorAll(selector)).slice(0, 120).map((el, index) => {
           const tag = el.tagName ? el.tagName.toLowerCase() : '';
           const type = trim(el.getAttribute('type'), 64).toLowerCase();
           const name = labelFor(el);
@@ -3441,7 +2820,7 @@ private func cdpCommand(
           links
         };
       })()`) || {};
-      const elements = await evaluate(client, interactiveElementsScript());
+      const elements = await evaluate(client, interactiveElementsScript()).catch(() => []);
       return {
         action,
         profile: args.profile,
@@ -3459,55 +2838,45 @@ private func cdpCommand(
       if (typeof WebSocket !== 'function') {
         throw new Error('Node.js WebSocket is unavailable; install Playwright or use Node 22+ for CDP fallback');
       }
-      const managedConnection = Number.isInteger(args.cdpPort);
-      const executable = managedConnection
-        ? String(args.managedBrowserExecutable || '')
-        : cdpExecutableForChannel(args.channel);
-      if (!managedConnection && !executable) {
+      const executable = cdpExecutableForChannel(args.channel);
+      if (!executable) {
         throw new Error('no Chromium/Chrome/Edge executable found for CDP fallback');
       }
-      args.executablePath = executable || 'runtime-owned browser session';
+      args.executablePath = executable;
       fs.mkdirSync(args.profileDir, { recursive: true });
       fs.mkdirSync(args.downloadsDir, { recursive: true });
+      const devToolsGeneration = prepareDevToolsActivePort(args.profileDir);
+
+      const launchArgs = [
+        `--user-data-dir=${args.profileDir}`,
+        '--remote-debugging-port=0',
+        '--remote-debugging-address=127.0.0.1',
+        '--remote-allow-origins=*',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-breakpad',
+        '--disable-crashpad-for-testing',
+        '--use-mock-keychain',
+        `--window-size=1280,900`,
+        'about:blank'
+      ];
+      if (args.headless !== false) {
+        launchArgs.unshift('--headless=new', '--disable-gpu');
+      }
+
       let stderr = '';
       let browserSpawnError = null;
-      let browser = null;
-      let devToolsEndpoint;
-      if (managedConnection) {
-        if (args.cdpPort < 1 || args.cdpPort > 65535
-            || !/^\\/devtools\\/browser\\/[A-Za-z0-9._-]+$/.test(String(args.cdpBrowserPath || ''))) {
-          throw new Error('managed browser session supplied an invalid DevTools endpoint');
-        }
-        devToolsEndpoint = {
-          port: args.cdpPort,
-          browserPath: String(args.cdpBrowserPath)
-        };
-        await validateDevToolsEndpoint(devToolsEndpoint);
-      } else {
-        const devToolsGeneration = prepareDevToolsActivePort(args.profileDir);
-        const launchArgs = [
-          `--user-data-dir=${args.profileDir}`,
-          '--remote-debugging-port=0',
-          '--remote-debugging-address=127.0.0.1',
-          '--remote-allow-origins=*',
-          '--no-first-run',
-          '--no-default-browser-check',
-          '--disable-breakpad',
-          '--disable-crashpad-for-testing',
-          '--use-mock-keychain',
-          `--window-size=1280,900`,
-          'about:blank'
-        ];
-        if (args.headless !== false) {
-          launchArgs.unshift('--headless=new', '--disable-gpu');
-        }
-        browser = childProcess.spawn(executable, launchArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
-        activeBrowser = browser;
-        browser.once('error', (error) => { browserSpawnError = error; });
-        browser.stderr.on('data', (chunk) => {
-          if (stderr.length < 4000) stderr += chunk.toString().slice(0, 4000 - stderr.length);
-        });
-        devToolsEndpoint = await waitForDevToolsActivePort(
+      const browser = childProcess.spawn(executable, launchArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+      const clients = [];
+      let client = null;
+      activeBrowser = browser;
+      browser.once('error', (error) => { browserSpawnError = error; });
+      browser.stderr.on('data', (chunk) => {
+        if (stderr.length < 4000) stderr += chunk.toString().slice(0, 4000 - stderr.length);
+      });
+
+      try {
+        const devToolsEndpoint = await waitForDevToolsActivePort(
           devToolsGeneration,
           15000,
           browser,
@@ -3516,20 +2885,15 @@ private func cdpCommand(
           if (stderr.trim()) throw new Error(`${error.message}: ${stderr.trim()}`);
           throw error;
         });
-      }
-      const clients = [];
-      let client = null;
-
-      try {
         const port = devToolsEndpoint.port;
-        const url = targetURL();
-        const target = await pageTarget(port, url);
+        const target = await pageTarget(port);
         client = new CDPClient(target.webSocketDebuggerUrl);
         clients.push(client);
         let currentTargetID = target.id;
         await client.connect();
         await enablePageClient(client);
 
+        const url = targetURL();
         let downloads = [];
         let openedNewPage = false;
         let pageCount = 1;
@@ -3548,22 +2912,18 @@ private func cdpCommand(
         }
         switch (args.action) {
           case 'navigate':
+          case 'snapshot':
+          case 'screenshot':
           case 'back':
           case 'forward':
             await navigate(client, url);
             break;
-          case 'snapshot':
-            await ensureCurrentPage(client, url);
-            break;
-          case 'screenshot':
-            await ensureCurrentPage(client, url, !!args.url);
-            break;
           case 'handoff':
-            await ensureCurrentPage(client, url, !!args.url);
+            await navigate(client, url);
             await wait(handoffMillis);
             break;
           case 'reload':
-            await ensureCurrentPage(client, url);
+            await navigate(client, url);
             {
               const loaded = client.once('Page.loadEventFired', 45000).catch(() => undefined);
               await client.send('Page.reload', { ignoreCache: args.ignoreCache === true });
@@ -3575,40 +2935,33 @@ private func cdpCommand(
             await navigate(client, searchURL());
             break;
           case 'click':
-            await ensureCurrentPage(client, url);
-            await requireActionTarget(client);
+            await navigate(client, url);
             await runAndFollowNewPage(async () => {
               await dispatchMouseClick(client);
             });
             break;
           case 'type':
-            await ensureCurrentPage(client, url);
-            await requireActionTarget(client);
+            await navigate(client, url);
             await runAndFollowNewPage(async () => {
               await evaluate(client, actionScript('type'));
               if (args.submit === true) await wait(800);
             });
             break;
           case 'select':
-            await ensureCurrentPage(client, url);
-            await requireActionTarget(client);
+            await navigate(client, url);
             await runAndFollowNewPage(async () => {
               await evaluate(client, actionScript('select'));
             });
             break;
           case 'submit':
-            await ensureCurrentPage(client, url);
-            await requireSubmitTarget(client);
+            await navigate(client, url);
             await runAndFollowNewPage(async () => {
               await evaluate(client, actionScript('submit'));
               await wait(Math.min(Math.max(waitMillis || 600, 250), 1200));
             });
             break;
           case 'press':
-            await ensureCurrentPage(client, url);
-            if (args.selector || args.text || (args.role && args.name)) {
-              await requireActionTarget(client);
-            }
+            await navigate(client, url);
             await runAndFollowNewPage(async () => {
               if (args.selector || args.text || (args.role && args.name)) {
                 await evaluate(client, actionScript('press'));
@@ -3617,14 +2970,11 @@ private func cdpCommand(
             });
             break;
           case 'scroll':
-            await ensureCurrentPage(client, url);
-            if (args.selector || args.text || (args.role && args.name)) {
-              await requireActionTarget(client);
-            }
+            await navigate(client, url);
             await evaluate(client, scrollScript());
             break;
           case 'wait':
-            await ensureCurrentPage(client, url);
+            await navigate(client, url);
             if (args.selector || args.text || (args.role && args.name)) {
               await evaluate(client, waitScript(), Math.max(1000, Math.min(args.timeoutMillis || 10000, 30000)) + 1000);
             } else {
@@ -3632,8 +2982,7 @@ private func cdpCommand(
             }
             break;
           case 'upload': {
-            await ensureCurrentPage(client, url);
-            await requireActionTarget(client, true);
+            await navigate(client, url);
             await client.send('DOM.enable');
             const objectId = await fileInputObjectId(client);
             await client.send('DOM.setFileInputFiles', {
@@ -3644,8 +2993,7 @@ private func cdpCommand(
             break;
           }
           case 'download': {
-            await ensureCurrentPage(client, url);
-            await requireActionTarget(client);
+            await navigate(client, url);
             const before = listDownloadFiles();
             await dispatchMouseClick(client);
             downloads = await waitForNewDownloads(before);
@@ -3673,17 +3021,15 @@ private func cdpCommand(
         summary.pageCount = Math.max(pageCount, targetsAfter.length || 0);
         console.log(JSON.stringify(summary));
       } finally {
-        if (!managedConnection && client) {
+        if (client) {
           try { await client.send('Browser.close', {}, 1500); } catch (_) {}
         }
         for (const item of clients) item.close();
-        if (browser) {
+        if (!(await waitForProcessExit(browser, 1500))) {
+          try { browser.kill('SIGTERM'); } catch (_) {}
           if (!(await waitForProcessExit(browser, 1500))) {
-            try { browser.kill('SIGTERM'); } catch (_) {}
-            if (!(await waitForProcessExit(browser, 1500))) {
-              try { browser.kill('SIGKILL'); } catch (_) {}
-              await waitForProcessExit(browser, 1000);
-            }
+            try { browser.kill('SIGKILL'); } catch (_) {}
+            await waitForProcessExit(browser, 1000);
           }
         }
         activeBrowser = null;
@@ -3696,10 +3042,9 @@ private func cdpCommand(
       })
       .catch((error) => {
         clearTimeout(commandWatchdog);
-        emitNoEffectFailure(error);
-        console.error(error && error.stack ? error.stack : String(error));
-        process.exit(1);
-      });
+      console.error(error && error.stack ? error.stack : String(error));
+      process.exit(1);
+    });
     """
     return browserBackendInvocation(
         javaScript: javaScript,
@@ -3765,11 +3110,6 @@ private func runPlaywrightUnlocked(arguments: [String: Any],
             cwd: context.workspaceRoot)
     }
     guard shellResult.exitCode == 0 else {
-        if let rejection = browserNoEffectRejection(
-            from: shellResult,
-            arguments: arguments) {
-            throw rejection
-        }
         var message = shellResult.stderr.isEmpty ? shellResult.stdout : shellResult.stderr
         if message.count > 10_000 { message = String(message.prefix(10_000)) + "\n[truncated]" }
         throw IntatisError.io("browser backend failed: \(message)")
@@ -3964,7 +3304,7 @@ public struct WebFetchTool: Tool {
 
 // MARK: - browser_diagnostics
 
-public struct BrowserDiagnosticsTool: BrowserPermissionPreviewingTool {
+public struct BrowserDiagnosticsTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_diagnostics",
@@ -4022,7 +3362,7 @@ public struct BrowserDiagnosticsTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_profiles
 
-public struct BrowserProfilesTool: BrowserPermissionPreviewingTool {
+public struct BrowserProfilesTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_profiles",
@@ -4080,7 +3420,7 @@ public struct BrowserProfilesTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_profile_delete
 
-public struct BrowserProfileDeleteTool: BrowserPermissionPreviewingTool {
+public struct BrowserProfileDeleteTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_profile_delete",
@@ -4119,9 +3459,6 @@ public struct BrowserProfileDeleteTool: BrowserPermissionPreviewingTool {
         let paths = try BrowserToolConfig.paths(profile: profile, workspace: context.workspaceRoot)
         let summary = try await withBrowserProfileCommandLock(paths: paths) {
             let runtimeBeforeDelete = browserProfileRuntimeMetadata(at: paths.profileDir)
-            await context.browserSession?.terminate(
-                profileDirectory: paths.profileDir,
-                reason: "browser profile deleted")
             let removedProfileData = try removeBrowserItemIfPresent(paths.profileDir)
             let removedDownloads = try removeBrowserItemIfPresent(paths.downloadsDir)
             let metadata = try removeBrowserStateAndPruneHistory(profile: profile, paths: paths)
@@ -4148,7 +3485,7 @@ public struct BrowserProfileDeleteTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_history
 
-public struct BrowserHistoryTool: BrowserPermissionPreviewingTool {
+public struct BrowserHistoryTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_history",
@@ -4197,11 +3534,11 @@ public struct BrowserHistoryTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_navigate
 
-public struct BrowserNavigateTool: BrowserPermissionPreviewingTool {
+public struct BrowserNavigateTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_navigate",
-        description: "Open an HTTP(S) URL in a live workspace-scoped Chromium/Chrome/Edge profile session and return page text plus links.",
+        description: "Open an HTTP(S) URL in a persistent Chromium/Chrome/Edge Playwright profile and return page text plus links.",
         sideEffect: .exec,
         parameters: Schema.object([
             "url": Schema.nonEmptyString,
@@ -4256,11 +3593,11 @@ public struct BrowserNavigateTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_snapshot
 
-public struct BrowserSnapshotTool: BrowserPermissionPreviewingTool {
+public struct BrowserSnapshotTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_snapshot",
-        description: "Inspect the current live page in a persistent browser profile without reloading it, and return page text plus links.",
+        description: "Reopen the current persistent browser profile and return the current page text plus links.",
         sideEffect: .exec,
         parameters: Schema.object([
             "profile": Schema.nonEmptyString,
@@ -4311,11 +3648,11 @@ public struct BrowserSnapshotTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_handoff
 
-public struct BrowserHandoffTool: BrowserPermissionPreviewingTool {
+public struct BrowserHandoffTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_handoff",
-        description: "Expose the live persistent Chromium/Chrome/Edge profile in a headed window for user login or manual interaction, then continue with that same session.",
+        description: "Open a headed persistent Chromium/Chrome/Edge browser profile for user login or manual interaction, then return the resulting page snapshot.",
         sideEffect: .exec,
         parameters: Schema.object([
             "url": Schema.nonEmptyString,
@@ -4372,7 +3709,7 @@ public struct BrowserHandoffTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_reload
 
-public struct BrowserReloadTool: BrowserPermissionPreviewingTool {
+public struct BrowserReloadTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_reload",
@@ -4475,7 +3812,7 @@ private func executeBrowserHistoryNavigation(_ args: ToolArgs,
 
 // MARK: - browser_back
 
-public struct BrowserBackTool: BrowserPermissionPreviewingTool {
+public struct BrowserBackTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_back",
@@ -4503,7 +3840,7 @@ public struct BrowserBackTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_forward
 
-public struct BrowserForwardTool: BrowserPermissionPreviewingTool {
+public struct BrowserForwardTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_forward",
@@ -4531,11 +3868,11 @@ public struct BrowserForwardTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_click
 
-public struct BrowserClickTool: BrowserPermissionPreviewingTool {
+public struct BrowserClickTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_click",
-        description: "Click an element on the current live browser page by CSS selector, visible text, or accessibility role/name without reloading first.",
+        description: "Click an element in the persistent browser profile by CSS selector, visible text, or accessibility role/name.",
         sideEffect: .exec,
         parameters: Schema.object([
             "profile": Schema.nonEmptyString,
@@ -4607,11 +3944,11 @@ public struct BrowserClickTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_type
 
-public struct BrowserTypeTool: BrowserPermissionPreviewingTool {
+public struct BrowserTypeTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_type",
-        description: "Type or fill non-secret text into an element on the current live browser page; use browser_handoff for passwords, 2FA, tokens, or other credentials.",
+        description: "Type or fill text into an element in the persistent browser profile; avoid using this for passwords unless the user explicitly approves.",
         sideEffect: .exec,
         parameters: Schema.object([
             "value": Schema.nonEmptyString,
@@ -4692,7 +4029,7 @@ public struct BrowserTypeTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_submit
 
-public struct BrowserSubmitTool: BrowserPermissionPreviewingTool {
+public struct BrowserSubmitTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_submit",
@@ -4768,7 +4105,7 @@ public struct BrowserSubmitTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_select_option
 
-public struct BrowserSelectOptionTool: BrowserPermissionPreviewingTool {
+public struct BrowserSelectOptionTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_select_option",
@@ -4861,7 +4198,7 @@ public struct BrowserSelectOptionTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_press_key
 
-public struct BrowserPressKeyTool: BrowserPermissionPreviewingTool {
+public struct BrowserPressKeyTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_press_key",
@@ -4938,7 +4275,7 @@ public struct BrowserPressKeyTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_scroll
 
-public struct BrowserScrollTool: BrowserPermissionPreviewingTool {
+public struct BrowserScrollTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_scroll",
@@ -5022,7 +4359,7 @@ public struct BrowserScrollTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_wait
 
-public struct BrowserWaitTool: BrowserPermissionPreviewingTool {
+public struct BrowserWaitTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_wait",
@@ -5101,7 +4438,7 @@ public struct BrowserWaitTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_screenshot
 
-public struct BrowserScreenshotTool: BrowserPermissionPreviewingTool {
+public struct BrowserScreenshotTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_screenshot",
@@ -5190,7 +4527,7 @@ public struct BrowserScreenshotTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_upload_file
 
-public struct BrowserUploadFileTool: BrowserPermissionPreviewingTool {
+public struct BrowserUploadFileTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_upload_file",
@@ -5286,11 +4623,11 @@ public struct BrowserUploadFileTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_download
 
-public struct BrowserDownloadTool: BrowserPermissionPreviewingTool {
+public struct BrowserDownloadTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_download",
-        description: "Click an element on the current live browser page, wait for its download to finish, and save it under the persistent profile downloads directory.",
+        description: "Click an element expected to start a download and save the file under the persistent browser profile downloads directory.",
         sideEffect: .exec,
         parameters: Schema.object([
             "profile": Schema.nonEmptyString,
@@ -5366,7 +4703,7 @@ public struct BrowserDownloadTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_downloads
 
-public struct BrowserDownloadsTool: BrowserPermissionPreviewingTool {
+public struct BrowserDownloadsTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_downloads",
@@ -5399,7 +4736,7 @@ public struct BrowserDownloadsTool: BrowserPermissionPreviewingTool {
 
 // MARK: - browser_search
 
-public struct BrowserSearchTool: BrowserPermissionPreviewingTool {
+public struct BrowserSearchTool: Tool {
     public init() {}
     public static let descriptor = ToolDescriptor(
         name: "browser_search",

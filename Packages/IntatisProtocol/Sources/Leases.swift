@@ -5,31 +5,48 @@ public enum ToolCapability: String, Codable, Sendable, Hashable {
     case readWorkspace = "read_workspace"
     case listWorkspace = "list_workspace"
     case searchWorkspace = "search_workspace"
+    case searchKnowledge = "search_knowledge"
+    case buildKnowledge = "build_knowledge"
     case runShell = "run_shell"
     case gitControl = "git_control"
     case gitRemote = "git_remote"
     case proposePatch = "propose_patch"
     case applyPatch = "apply_patch"
     case readPDF = "read_pdf"
+    case readDOCX = "read_docx"
+    case readPPTX = "read_pptx"
+    case readXLSX = "read_xlsx"
+    case readHTML = "read_html"
+    case readEPUB = "read_epub"
+    case documentOCR = "document_ocr"
+    case documentRender = "document_render"
+    case documentExportPDF = "document_export_pdf"
+    case documentWrite = "document_write"
+    // Legacy capabilities. Fresh leases must not issue them. Cowork may map
+    // `documentRead` to the exact replacement readers when replaying an old
+    // default lease; the other cases remain decode-only.
+    case documentRead = "document_read"
     case readDocument = "read_document"
     case editPDF = "edit_pdf"
     case reconstructDocument = "reconstruct_document"
     case compileLaTeX = "compile_latex"
     case generateMedia = "generate_media"
     case browseWeb = "browse_web"
+    /// Provider-hosted model search. This is intentionally independent from
+    /// browser profiles, URL fetching, and local/MCP search implementations.
+    case hostedWebSearch = "hosted_web_search"
     case sendMessage = "send_message"
     case requestInformation = "request_information"
     case replyMessage = "reply_message"
-    case requestDelegation = "request_delegation"
     case delegateTask = "delegate_task"
     case attachWorkspace = "attach_workspace"
     case readWorkTasks = "read_work_tasks"
-    case updateOwnedWorkTask = "update_owned_work_task"
+    case updateBoundWorkTask = "update_bound_work_task"
     case manageWorkTasks = "manage_work_tasks"
     case readGoal = "read_goal"
-    case createGoal = "create_goal"
     case submitGoalVerdict = "submit_goal_verdict"
     case renameSession = "rename_session"
+    case controlRun = "control_run"
 }
 
 public struct DelegationBudget: Codable, Sendable, Hashable {
@@ -44,7 +61,6 @@ public struct DelegationBudget: Codable, Sendable, Hashable {
 
 public enum DelegationGrant: Codable, Sendable, Hashable {
     case none
-    case requestOnly
     case granted(DelegationBudget)
 }
 
@@ -123,10 +139,16 @@ public struct CapabilityLease: Codable, Sendable, Hashable {
             .listWorkspace,
             .searchWorkspace,
             .readPDF,
+            .readDOCX,
+            .readPPTX,
+            .readXLSX,
+            .readHTML,
+            .readEPUB,
+            .documentOCR,
+            .requestInformation,
             .replyMessage,
-            .requestDelegation,
             .readWorkTasks,
-            .updateOwnedWorkTask,
+            .updateBoundWorkTask,
             .readGoal,
         ]
         if workspaceAccess == .readWrite {
@@ -135,19 +157,20 @@ public struct CapabilityLease: Codable, Sendable, Hashable {
                 .gitControl,
                 .gitRemote,
                 .applyPatch,
-                .readDocument,
-                .editPDF,
-                .reconstructDocument,
+                .documentRender,
+                .documentExportPDF,
+                .documentWrite,
                 .compileLaTeX,
                 .generateMedia,
                 .browseWeb,
+                .hostedWebSearch,
             ])
         }
         return CapabilityLease(
             taskID: taskID,
             tools: tools,
             communication: .replyOnly,
-            delegation: .requestOnly)
+            delegation: .none)
     }
 
     public static func coordinator(taskID: TaskID? = nil,
@@ -158,11 +181,9 @@ public struct CapabilityLease: Codable, Sendable, Hashable {
             .sendMessage,
             .requestInformation,
             .replyMessage,
-            .requestDelegation,
             .delegateTask,
             .attachWorkspace,
             .manageWorkTasks,
-            .createGoal,
         ])
         return CapabilityLease(
             taskID: taskID,
@@ -227,6 +248,17 @@ public struct WorkspaceRootIdentity: Codable, Sendable, Hashable {
 }
 
 public struct WorkspaceLease: Codable, Sendable, Hashable {
+    /// Host-owned Knowledge publication components are never ordinary
+    /// workspace files. This floor is re-applied at executor boundaries so a
+    /// legacy or explicitly decoded lease cannot grant file, Git, document,
+    /// browser, or managed-terminal mutation authority over a published
+    /// snapshot, pointer, or coordination record.
+    public static let mandatoryManagedStoreDeniedPatterns: [String] = [
+        ".intatis-rag-store.json",
+        ".intatis-rag-snapshots",
+        ".intatis-rag-host",
+    ]
+
     /// Sensitive path floor for a model-facing general-purpose terminal. A
     /// caller may add narrower denied patterns to a lease, but the terminal
     /// execution boundary must always union this complete list back in so an
@@ -270,7 +302,7 @@ public struct WorkspaceLease: Codable, Sendable, Hashable {
         "**/.git/config",
         "**/.git/config.worktree",
         "Library/Keychains",
-    ]
+    ] + mandatoryManagedStoreDeniedPatterns
 
     /// New leases persist the same floor for clear previews and replay. The
     /// executor still unions `mandatoryTerminalDeniedPatterns` independently,

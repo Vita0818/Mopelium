@@ -521,6 +521,13 @@ public struct ContextProjector: Sendable {
                                        events: [Envelope],
                                        duplicateTexts: Set<String>,
                                        budget: ContextProjectionBudget) -> [ContextEventSummary] {
+        let frozenMailboxMessageIDs: Set<MessageID>? = {
+            guard taskContract?.kind == .mailboxDelivery,
+                  let ids = taskContract?.mailboxMessageIDs else {
+                return nil
+            }
+            return Set(ids.prefix(budget.maxDirectMessages))
+        }()
         let settledAt = events.reduce(into: [MessageID: Int]()) { result, envelope in
             let settlement: (MessageID, AgentID)?
             switch envelope.event {
@@ -537,6 +544,10 @@ public struct ContextProjector: Sendable {
         let candidates = events.compactMap { envelope -> ContextEventSummary? in
             switch envelope.event {
             case .agentToAgentMessage(let payload) where payload.to == agentID:
+                // This legacy event shape has no stable MessageID. A new
+                // mailbox contract with an exact frozen set must not absorb it
+                // merely because it happens to be in the same task window.
+                guard frozenMailboxMessageIDs == nil else { return nil }
                 guard isWithinTaskWindow(
                     sequence: envelope.seq,
                     taskID: nil,
@@ -551,6 +562,9 @@ public struct ContextProjector: Sendable {
                     recipient: payload.to,
                     content: payload.content)
             case .agentMessage(let payload) where payload.to == agentID:
+                guard frozenMailboxMessageIDs.map({
+                    $0.contains(payload.messageId)
+                }) ?? true else { return nil }
                 guard settledAt[payload.messageId].map({ $0 > envelope.seq }) != true else { return nil }
                 guard isRelevant(payload.taskID, taskContract: taskContract, relevantTaskIDs: relevantTaskIDs) else {
                     return nil
@@ -564,6 +578,9 @@ public struct ContextProjector: Sendable {
                     taskID: payload.taskID,
                     content: payload.content)
             case .informationRequested(let payload) where payload.to == agentID:
+                guard frozenMailboxMessageIDs.map({
+                    $0.contains(payload.requestID)
+                }) ?? true else { return nil }
                 guard settledAt[payload.requestID].map({ $0 > envelope.seq }) != true else { return nil }
                 guard isRelevant(payload.taskID, taskContract: taskContract, relevantTaskIDs: relevantTaskIDs) else {
                     return nil
@@ -577,6 +594,9 @@ public struct ContextProjector: Sendable {
                     taskID: payload.taskID,
                     content: payload.question)
             case .informationReplied(let payload) where payload.to == agentID:
+                guard frozenMailboxMessageIDs.map({
+                    $0.contains(payload.replyID)
+                }) ?? true else { return nil }
                 guard settledAt[payload.replyID].map({ $0 > envelope.seq }) != true else { return nil }
                 guard isRelevant(payload.taskID, taskContract: taskContract, relevantTaskIDs: relevantTaskIDs) else {
                     return nil
@@ -680,24 +700,6 @@ public struct ContextProjector: Sendable {
                     recipient: payload.to,
                     taskID: payload.taskID,
                     content: payload.content)
-            case .delegationRequested(let payload) where payload.requester == agentID:
-                guard isRelevant(payload.parentTaskID, taskContract: taskContract, relevantTaskIDs: relevantTaskIDs) else {
-                    return nil
-                }
-                guard isWithinTaskWindow(
-                    sequence: envelope.seq,
-                    taskID: payload.parentTaskID,
-                    taskContract: taskContract,
-                    taskAnchor: taskAnchor) else {
-                    return nil
-                }
-                return ContextEventSummary(
-                    seq: envelope.seq,
-                    kind: "delegation_requested",
-                    sender: payload.requester,
-                    recipient: payload.recipient,
-                    taskID: payload.parentTaskID,
-                    content: "\(payload.objective) — \(payload.reason)")
             case .messageCompleted(let payload) where payload.agent == agentID:
                 guard isWithinTaskWindow(
                     sequence: envelope.seq,
@@ -842,8 +844,6 @@ public struct ContextProjector: Sendable {
                 return allows(taskID: payload.taskID)
             case .informationReplied(let payload):
                 return allows(taskID: payload.taskID)
-            case .delegationRequested(let payload):
-                return allows(taskID: payload.parentTaskID)
             case .taskCreated(let payload):
                 return allows(taskID: payload.contract.id)
             case .taskAssigned(let payload):
@@ -1080,7 +1080,11 @@ public struct ContextProjector: Sendable {
         var directOutputKeys = Set<ModelHistoryToolKey>()
         for envelope in events {
             guard case .modelHistoryItem(let payload) = envelope.event,
-                  payload.schemaVersion == ModelHistoryItemPayload.currentSchemaVersion,
+                  payload.schemaVersion
+                    == ModelHistoryItemPayload.currentSchemaVersion
+                    || payload.schemaVersion
+                        == ModelHistoryItemPayload.mediaSchemaVersion,
+                  (try? payload.validate()) != nil,
                   payload.agent == agentID,
                   let taskID = payload.taskID else {
                 continue

@@ -376,7 +376,6 @@ public struct CoworkWorkTaskLine: Identifiable, Equatable, Sendable {
     public let title: String
     public let detail: String
     public let status: String
-    public let owner: String?
     public let dependencySummary: String?
     public let statusReason: String?
     public let acceptanceCriteria: [String]
@@ -389,7 +388,6 @@ public struct CoworkWorkTaskLine: Identifiable, Equatable, Sendable {
                 title: String,
                 detail: String = "",
                 status: String,
-                owner: String? = nil,
                 dependencySummary: String? = nil,
                 statusReason: String? = nil,
                 acceptanceCriteria: [String] = [],
@@ -401,7 +399,6 @@ public struct CoworkWorkTaskLine: Identifiable, Equatable, Sendable {
         self.title = title
         self.detail = detail
         self.status = status
-        self.owner = owner
         self.dependencySummary = dependencySummary
         self.statusReason = statusReason
         self.acceptanceCriteria = acceptanceCriteria
@@ -557,6 +554,7 @@ struct CoworkStatusRailRenderSnapshot: Equatable {
     let permissionNotice: PermissionResolutionNotice?
     let goal: CoworkGoalCardInfo?
     let workTasks: CoworkWorkTaskSummary
+    let errors: [IntatisThreadErrorEntry]
     let colorScheme: ColorScheme
 }
 
@@ -648,7 +646,7 @@ public struct CoworkShell: View {
     private let project: CoworkProjectInfo
     private let goal: CoworkGoalCardInfo?
     private let workTasks: CoworkWorkTaskSummary
-    private let composerError: String?
+    private let errorTexts: [String]
     private let isWorking: Bool
     private let isAcceptingSubmission: Bool
     private let hasDraftAttachments: Bool
@@ -698,7 +696,7 @@ public struct CoworkShell: View {
                 project: CoworkProjectInfo = CoworkProjectInfo(),
                 goal: CoworkGoalCardInfo? = nil,
                 workTasks: CoworkWorkTaskSummary = CoworkWorkTaskSummary(),
-                composerError: String?,
+                errorTexts: [String] = [],
                 isWorking: Bool,
                 isAcceptingSubmission: Bool = false,
                 hasDraftAttachments: Bool = false,
@@ -744,7 +742,7 @@ public struct CoworkShell: View {
         self.project = project
         self.goal = goal
         self.workTasks = workTasks
-        self.composerError = composerError
+        self.errorTexts = errorTexts
         self.isWorking = isWorking
         self.isAcceptingSubmission = isAcceptingSubmission
         self.hasDraftAttachments = hasDraftAttachments
@@ -795,6 +793,12 @@ public struct CoworkShell: View {
         agents.first { $0.id == selectedAgentID }
     }
 
+    private var threadErrors: [IntatisThreadErrorEntry] {
+        IntatisThreadErrorPresentation.errors(
+            items: threadPage.items,
+            errorTexts: errorTexts)
+    }
+
     private var inspectorRenderSnapshot: CoworkStatusRailRenderSnapshot {
         CoworkStatusRailRenderSnapshot(
             agents: agents,
@@ -802,6 +806,7 @@ public struct CoworkShell: View {
             permissionNotice: permissionNotice,
             goal: goal,
             workTasks: workTasks,
+            errors: threadErrors,
             colorScheme: colorScheme)
     }
 
@@ -996,6 +1001,17 @@ public struct CoworkShell: View {
                 if !workTasks.tasks.isEmpty {
                     workTasksSection
                 }
+                if !threadErrors.isEmpty {
+                    rightRailSection("Error Information", systemImage: "exclamationmark.triangle") {
+                        IntatisThreadErrorList(
+                            errors: threadErrors,
+                            style: threadStyle,
+                            onRetrySubmission: onRetrySubmission == nil
+                                ? nil
+                                : retrySubmission)
+                    }
+                    .accessibilityIdentifier("cowork.error.card")
+                }
             }
             .frame(width: IntatisCoworkStatusRailLayoutPolicy.cardWidth)
             .padding(
@@ -1134,7 +1150,7 @@ public struct CoworkShell: View {
     }
 
     private var workTasksSection: some View {
-        rightRailSection("Tasks", systemImage: "checklist") {
+        rightRailSection("Session Tasks", systemImage: "checklist") {
             workTasksContent
         }
         .accessibilityIdentifier("cowork.tasks.card")
@@ -2208,7 +2224,8 @@ public struct CoworkShell: View {
 
     private var threadHistoryWindow: IntatisThreadHistoryWindow<CodeItem> {
         IntatisThreadHistoryWindow(
-            items: threadPage.items,
+            items: IntatisThreadErrorPresentation.transcriptItems(
+                threadPage.items),
             lowerBound: threadPage.lowerBound,
             upperBound: threadPage.upperBound,
             totalCount: threadPage.totalCount,
@@ -2294,12 +2311,6 @@ public struct CoworkShell: View {
 
     private func composerArea(layout: IntatisThreadContentLayout) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let composerError {
-                Text(composerError)
-                    .font(.caption)
-                    .foregroundStyle(threadStyle.error)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
             IntatisThreadComposer(
                 placeholder: IntatisLocalization.string("Give Main a project task..."),
                 input: $input,
@@ -2374,20 +2385,10 @@ private struct CoworkWorkTaskRow: View {
                         .font(.caption.bold())
                         .foregroundStyle(statusColor)
                         .lineLimit(1)
-                    if let owner = task.owner, !owner.isEmpty {
-                        Text("· \(displayOwner(owner))")
-                            .font(.caption)
-                            .foregroundStyle(style.tertiaryText)
-                            .lineLimit(1)
-                    }
                 }
             }
             Spacer(minLength: 0)
         }
-    }
-
-    private func displayOwner(_ owner: String) -> String {
-        owner.hasPrefix("@") ? owner : "@\(owner)"
     }
 
     @ViewBuilder private var taskMarker: some View {

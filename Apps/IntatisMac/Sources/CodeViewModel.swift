@@ -69,6 +69,8 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
     @Published private(set) var latestTurnStats: TurnStatsSnapshot?
     @Published private(set) var composerError: String?
     @Published private(set) var pendingMCPExternalContextCount = 0
+    @Published private(set) var draftAttachments:
+        [IntatisComposerDraftAttachment] = []
 
     #if canImport(AVFoundation)
     let voiceInput: ComposerVoiceInputController
@@ -89,8 +91,9 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
     private var workspaceAccess: WorkspaceAccessLease?
     private let log: EventLog
     private let artifactStore: ArtifactStore
+    private let composerAttachmentStore:
+        IntatisComposerAttachmentStore
     private let sessionNaming: SessionNamingService
-    private let browserSession = ProcessBrowserSessionManager()
     private let terminal = ProcessTerminalSessionManager()
     private var registry: ProviderRegistry
     private var subscription: Task<Void, Never>?
@@ -103,6 +106,8 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
     private var permissionWaiters: [RequestID: CodePermissionWaiter] = [:]
     private var permissionQueue: [PendingPermission] = []
     private var runningOperation: Task<Void, Never>?
+    private var attachmentImportOperations:
+        [UUID: Task<Void, Never>] = [:]
     private var shutdownTask: Task<Void, Never>?
     private var isShutdown = false
     private var pendingMCPExternalContexts:
@@ -112,6 +117,12 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
     private let mcpSnapshots:
         (@MainActor @Sendable () async throws
             -> MCPAgentRequestToolSnapshotSource)?
+    /// Optional host-owned internal tools. The default is nil; product UI and
+    /// ordinary Code sessions therefore retain their existing registry.
+    private let internalToolRegistryAugmenter:
+        HostToolRegistryAugmenter?
+    private var mcpInternalToolRegistryLease:
+        HostToolRegistryAugmentationLease?
 
     init(sessionID: SessionID,
          workspaceAccess: WorkspaceAccessLease,
@@ -122,19 +133,28 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
          mcpSnapshots:
             (@MainActor @Sendable () async throws
                 -> MCPAgentRequestToolSnapshotSource)?
-                = nil) {
+                = nil,
+         internalToolRegistryAugmenter:
+            HostToolRegistryAugmenter? = nil,
+         initialConfigurationNotice: String? = nil) {
         self.sessionID = sessionID
         self.workspaceAccess = workspaceAccess
         self.workspaceRoot = workspaceAccess.canonicalURL
         self.workspaceName = workspaceAccess.canonicalURL.lastPathComponent
         self.log = log
         self.artifactStore = artifactStore
+        self.composerAttachmentStore =
+            IntatisComposerAttachmentStore(
+                store: artifactStore)
         self.sessionNaming = sessionNaming
         self.registry = registry
         #if canImport(AVFoundation)
         self.voiceInput = ComposerVoiceInputController(registry: registry)
         #endif
         self.mcpSnapshots = mcpSnapshots
+        self.internalToolRegistryAugmenter =
+            internalToolRegistryAugmenter
+        self.composerError = initialConfigurationNotice
         #if canImport(AVFoundation)
         observeVoiceInput()
         #endif
@@ -143,6 +163,9 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
     deinit {
         subscription?.cancel()
         runningOperation?.cancel()
+        for operation in attachmentImportOperations.values {
+            operation.cancel()
+        }
         workspaceAccess?.release()
     }
 
@@ -337,6 +360,51 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
         pendingMCPExternalContextCount = 0
     }
 
+    func importDraftAttachments(_ urls: [URL]) {
+        guard !isShutdown, !urls.isEmpty else { return }
+        let operationID = UUID()
+        let operation = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.attachmentImportOperations
+                    .removeValue(forKey: operationID)
+            }
+            for url in urls {
+                guard !Task.isCancelled,
+                      !self.isShutdown else {
+                    return
+                }
+                do {
+                    let file = try IntatisComposerAttachmentFileReader
+                        .read(url)
+                    let attachment = try await self
+                        .composerAttachmentStore
+                        .preserve(file)
+                    self.draftAttachments.append(attachment)
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    self.composerError = IntatisLocalization.format(
+                        "Attachment %@ could not be preserved: %@",
+                        url.lastPathComponent,
+                        error.localizedDescription)
+                }
+            }
+        }
+        attachmentImportOperations[operationID] = operation
+    }
+
+    func removeDraftAttachment(_ id: ArtifactID) {
+        guard !isShutdown else { return }
+        draftAttachments.removeAll { $0.id == id }
+    }
+
+    func reportAttachmentImportFailure(_ error: Error) {
+        guard !isShutdown else { return }
+        composerError = IntatisLocalization.format(
+            "Attachments could not be selected: %@",
+            error.localizedDescription)
+    }
+
     /// Permanently stops this session runtime and waits until the active turn,
     /// permission waiters, projection subscription, and workspace scope have
     /// all settled. Page/session switching must never call this method.
@@ -357,15 +425,22 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
         subscription = nil
         let operation = runningOperation
         operation?.cancel()
+        let attachmentOperations =
+            Array(attachmentImportOperations.values)
+        for attachmentOperation in attachmentOperations {
+            attachmentOperation.cancel()
+        }
         let task = Task { @MainActor [weak self] in
             if let self {
                 #if canImport(AVFoundation)
                 await self.voiceInput.shutdown()
                 #endif
-                await self.browserSession.shutdown(reason: reason)
                 await self.terminal.shutdown(reason: reason)
             }
             if let operation { await operation.value }
+            for attachmentOperation in attachmentOperations {
+                await attachmentOperation.value
+            }
             if let runningSubscription { await runningSubscription.value }
             guard let self else { return }
             for (requestID, waiter) in self.permissionWaiters {
@@ -380,9 +455,24 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                 self.pendingPermission = pending
             }
             self.runningOperation = nil
+            self.attachmentImportOperations.removeAll()
             self.isWorking = false
             self.projectionPump = nil
             self.projectionCommitFence = nil
+            let internalLease =
+                self.mcpInternalToolRegistryLease
+            self.mcpInternalToolRegistryLease = nil
+            if let internalLease {
+                do {
+                    try await internalLease.closeRequiringDrain()
+                } catch {
+                    self.composerError = error.localizedDescription
+                    try? await self.log.append(.error(
+                        RuntimeErrorPresentation.payload(
+                            for: error,
+                            fallbackCode: "internal_tool_drain")))
+                }
+            }
             self.workspaceAccess?.release()
             self.workspaceAccess = nil
         }
@@ -396,6 +486,7 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
         guard !voiceInput.isEngaged else { return }
         #endif
         let originalInput = input
+        let originalAttachments = draftAttachments
         let frozenExternalContexts =
             pendingMCPExternalContexts
         let parsed: ParsedUserInput
@@ -403,7 +494,8 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
             .trimmingCharacters(
                 in: .whitespacesAndNewlines)
             .isEmpty,
-           !frozenExternalContexts.isEmpty {
+           !originalAttachments.isEmpty
+                || !frozenExternalContexts.isEmpty {
             parsed = ParsedUserInput(text: "")
         } else {
             switch GoalInputParser.parse(originalInput) {
@@ -421,6 +513,10 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
         durableUserMessage.submissionID =
             SubmissionID.new()
         durableUserMessage.turnID = TurnID.new()
+        durableUserMessage.attachments =
+            originalAttachments.isEmpty
+                ? nil
+                : originalAttachments.map(\.id)
         durableUserMessage.untrustedExternalContexts =
             frozenExternalContexts.isEmpty
                 ? nil
@@ -431,6 +527,8 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
         let operation = Task { @MainActor [weak self] in
             guard let self else { return }
             var didEnterAgentLoop = false
+            var internalToolLease:
+                HostToolRegistryAugmentationLease?
             do {
                 let route =
                     try await self.registry.defaultAgentRuntimeRoute()
@@ -446,6 +544,11 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                         "clease_code_\(self.sessionID.rawValue)")
                 capabilityLease.expiresAtTaskCompletion =
                     false
+                if let augmenter =
+                    self.internalToolRegistryAugmenter {
+                    capabilityLease.tools.formUnion(
+                        augmenter.additionalCapabilities)
+                }
                 let durableMCP =
                     try await MCPDurableSessionState.load(
                         from: self.log)
@@ -472,9 +575,32 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                         catalogBudget:
                             route.modelContextPolicy
                                 .skillCatalogMetadataBudget)
-                let baseRegistry = skillSnapshot.augmenting(
+                let hostedWebSearch = capabilityLease.tools.contains(
+                    .hostedWebSearch)
+                    ? route.hostedWebSearch.map {
+                        ProviderHostedWebSearchToolService(route: $0)
+                    }
+                    : nil
+                let unaugmentedRegistry = skillSnapshot.augmenting(
                     ToolRegistry.standard(
-                        includesTerminal: allowsShell))
+                        includesTerminal: allowsShell,
+                        hostedWebSearch: hostedWebSearch))
+                let baseRegistry: ToolRegistry
+                if let augmenter =
+                    self.internalToolRegistryAugmenter {
+                    let lease = try await augmenter.augment(
+                        HostToolRegistryAugmentationInput(
+                            sessionID: self.sessionID,
+                            agentID: agent.name,
+                            taskID: nil,
+                            capabilityLease: capabilityLease,
+                            workspaceLease: workspaceLease,
+                            baseRegistry: unaugmentedRegistry))
+                    internalToolLease = lease
+                    baseRegistry = lease.registry
+                } else {
+                    baseRegistry = unaugmentedRegistry
+                }
                 let runtime = AgentRuntime.code(
                     registry: baseRegistry,
                     allowsShell: allowsShell,
@@ -527,9 +653,10 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                     context: ContextBuilder(
                         skillSnapshot: skillSnapshot,
                         runtimeEnvironment: .code),
-                    browserSession: self.browserSession,
                     terminal: self.terminal,
                     imageGenerator: ProviderImageGenerationToolService(registry: self.registry),
+                    imageResolver: AgentImageResolution.resolver(
+                        store: self.artifactStore),
                     sessionNaming: self.sessionNaming,
                     capabilityLease: capabilityLease,
                     workspaceLease: workspaceLease,
@@ -537,6 +664,10 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                         toolSnapshotProvider)
                 try await self.log.append(
                     .userMessage(durableUserMessage))
+                if self.draftAttachments.map(\.id)
+                    == originalAttachments.map(\.id) {
+                    self.draftAttachments = []
+                }
                 self.consumeMCPExternalContexts(
                     frozenExternalContexts)
                 didEnterAgentLoop = true
@@ -546,14 +677,34 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                     recordUserMessage: false,
                     submissionID:
                         durableUserMessage.submissionID)
-            } catch {
-                let isInterruption = error is AgentTurnInterruptedError
-                    || IntatisCancellation.isCurrentTaskCancellation(error)
-                let message = error.localizedDescription
+                if let lease = internalToolLease {
+                    try await lease.closeRequiringDrain()
+                    internalToolLease = nil
+                }
+            } catch let runError {
+                var effectiveError: Error = runError
+                var drainFailed = false
+                if let lease = internalToolLease {
+                    do {
+                        try await lease.closeRequiringDrain()
+                    } catch {
+                        effectiveError = error
+                        drainFailed = true
+                    }
+                    internalToolLease = nil
+                }
+                let isInterruption = effectiveError is AgentTurnInterruptedError
+                    || IntatisCancellation.isCurrentTaskCancellation(
+                        effectiveError)
+                let message = effectiveError.localizedDescription
                 self.composerError = isInterruption ? nil : message
-                if !didEnterAgentLoop {
+                if !didEnterAgentLoop || drainFailed {
                     try? await self.log.append(.error(
-                        RuntimeErrorPresentation.payload(for: error, fallbackCode: "agent")))
+                        RuntimeErrorPresentation.payload(
+                            for: effectiveError,
+                            fallbackCode: drainFailed
+                                ? "internal_tool_drain"
+                                : "agent")))
                 }
             }
             self.isWorking = false
@@ -659,6 +810,11 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
             descriptor.capabilityLeaseID
         capabilityLease.expiresAtTaskCompletion =
             false
+        if let augmenter =
+            internalToolRegistryAugmenter {
+            capabilityLease.tools.formUnion(
+                augmenter.additionalCapabilities)
+        }
         let durable =
             try await MCPDurableSessionState.load(
                 from: log)
@@ -680,20 +836,52 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
             access: .readWrite)
         let allowsShell =
             PlatformProfile.current.allowsShell
+        let route =
+            try await registry.defaultAgentRuntimeRoute()
         let skillSnapshot =
             try await SkillCatalogService.shared.snapshot(
                 configuration: .standard(
                     workspaceRoot: workspaceRoot,
-                    access: AppConfig.skillRootAccess))
+                    access: AppConfig.skillRootAccess),
+                catalogBudget:
+                    route.modelContextPolicy
+                        .skillCatalogMetadataBudget)
+        let hostedWebSearch = capabilityLease.tools.contains(
+            .hostedWebSearch)
+            ? route.hostedWebSearch.map {
+                ProviderHostedWebSearchToolService(route: $0)
+            }
+            : nil
+        let unaugmentedRegistry = skillSnapshot.augmenting(
+            ToolRegistry.standard(
+                includesTerminal:
+                    allowsShell,
+                hostedWebSearch: hostedWebSearch))
+        if let previous = mcpInternalToolRegistryLease {
+            mcpInternalToolRegistryLease = nil
+            try await previous.closeRequiringDrain()
+        }
+        let baseRegistry: ToolRegistry
+        if let augmenter = internalToolRegistryAugmenter {
+            let lease = try await augmenter.augment(
+                HostToolRegistryAugmentationInput(
+                    sessionID: sessionID,
+                    agentID: descriptor.agentID,
+                    taskID: descriptor.taskID,
+                    capabilityLease: capabilityLease,
+                    workspaceLease: workspaceLease,
+                    baseRegistry: unaugmentedRegistry))
+            mcpInternalToolRegistryLease = lease
+            baseRegistry = lease.registry
+        } else {
+            baseRegistry = unaugmentedRegistry
+        }
         return MCPAgentDispatchInput(
             agentID: descriptor.agentID,
             capabilityLease:
                 capabilityLease,
             workspaceLease: workspaceLease,
-            baseRegistry: skillSnapshot.augmenting(
-                ToolRegistry.standard(
-                    includesTerminal:
-                        allowsShell)),
+            baseRegistry: baseRegistry,
             activationReason: reason)
     }
 

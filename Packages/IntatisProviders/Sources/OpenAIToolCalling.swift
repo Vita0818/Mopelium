@@ -158,18 +158,36 @@ private func validatedToolCallArguments(_ arguments: String,
 extension OpenAIWireProvider: ToolCallingProvider {
 
     public func stream(_ request: AgentRequest) -> AsyncThrowingStream<AgentChunk, Error> {
-        if request.requiresResponsesAPI {
-            guard toolCallingCapabilities.supportsToolSearch else {
-                return AsyncThrowingStream { continuation in
-                    continuation.finish(
-                        throwing:
-                            ToolCallingProviderCapabilityError
-                                .toolSearchUnsupported)
-                }
+        if let capabilityError = toolCallingCapabilityError(
+            for: request)
+        {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: capabilityError)
             }
+        }
+        if request.requiresResponsesAPI {
             return streamResponses(request)
         }
         return streamChatCompletions(request)
+    }
+
+    private func toolCallingCapabilityError(
+        for request: AgentRequest
+    ) -> ToolCallingProviderCapabilityError? {
+        if request.requiresToolSearchCapability,
+           !toolCallingCapabilities.supportsToolSearch {
+            return .toolSearchUnsupported
+        }
+        if request.containsUserImageInput,
+           !toolCallingCapabilities.supportsUserImageInput {
+            return .userImageInputUnsupported
+        }
+        if request.containsFunctionOutputImageInput,
+           !toolCallingCapabilities
+            .supportsFunctionOutputImageInput {
+            return .functionOutputImageInputUnsupported
+        }
+        return nil
     }
 
     private func streamChatCompletions(
@@ -185,12 +203,12 @@ extension OpenAIWireProvider: ToolCallingProvider {
                         let parser = SSEParser()
                         var acc: [ToolCallAccumKey: ToolCallAccum] = [:]
                         var finished = false
-                        var receivedAcceptedPayload = false
+                        var deliveredSemanticOutput = false
 
                         func handle(_ payload: String) throws -> Bool {
                             if payload == "[DONE]" {
-                                receivedAcceptedPayload = true
                                 if !finished {
+                                    deliveredSemanticOutput = true
                                     continuation.yield(.done(finishReason: nil))
                                     finished = true
                                 }
@@ -210,12 +228,8 @@ extension OpenAIWireProvider: ToolCallingProvider {
                             } catch {
                                 throw ProviderErrorFormatting.invalidStreamPayload(trimmed, underlying: error)
                             }
-                            // A structured provider error is not a successful
-                            // response payload. Until one of these chunks is
-                            // accepted, retrying cannot duplicate model output
-                            // or a tool call.
-                            receivedAcceptedPayload = true
                             if let u = chunk.usage {
+                                deliveredSemanticOutput = true
                                 continuation.yield(.usage(u.usage))
                             }
                             var finishReason: String?
@@ -223,6 +237,7 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                 for (choiceOffset, choice) in choices.enumerated() {
                                     let choiceIndex = choice.index ?? choiceOffset
                                     if let content = choice.delta?.content, !content.isEmpty {
+                                        deliveredSemanticOutput = true
                                         continuation.yield(.textDelta(content))
                                     }
                                     if let frags = choice.delta?.tool_calls {
@@ -274,7 +289,11 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                     return ToolCall(id: e.id.isEmpty ? fallbackID : e.id,
                                                     name: e.name, arguments: arguments)
                                 }
-                                if !calls.isEmpty { continuation.yield(.toolCalls(calls)) }
+                                if !calls.isEmpty {
+                                    deliveredSemanticOutput = true
+                                    continuation.yield(.toolCalls(calls))
+                                }
+                                deliveredSemanticOutput = true
                                 continuation.yield(.done(finishReason: reason))
                                 finished = true
                             }
@@ -301,7 +320,7 @@ extension OpenAIWireProvider: ToolCallingProvider {
                             if ProviderRuntime.shouldRetry(error: error,
                                                            attempt: attempt,
                                                            policy: runtimePolicy,
-                                                           receivedResponseBytes: receivedAcceptedPayload) {
+                                                           deliveredSemanticOutput: deliveredSemanticOutput) {
                                 attempt += 1
                                 try await ProviderRuntime.sleepBeforeRetry(
                                     nextAttempt: attempt,
@@ -336,12 +355,11 @@ extension OpenAIWireProvider: ToolCallingProvider {
                     while true {
                         let parser = SSEParser()
                         var completed = false
-                        var receivedAcceptedPayload = false
+                        var deliveredSemanticOutput = false
                         var emittedText = ""
 
                         func handle(_ payload: String) throws -> Bool {
                             if payload == "[DONE]" {
-                                receivedAcceptedPayload = true
                                 guard completed else {
                                     throw ProviderErrorFormatting
                                         .incompleteStream(
@@ -386,6 +404,7 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                 if case .string(let delta)? = event["delta"],
                                    !delta.isEmpty {
                                     emittedText += delta
+                                    deliveredSemanticOutput = true
                                     continuation.yield(.textDelta(delta))
                                 }
 
@@ -399,15 +418,15 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                 }
                                 switch itemType {
                                 case "function_call":
-                                    continuation.yield(.toolCalls([
-                                        try Self.responsesFunctionCall(
-                                            item),
-                                    ]))
+                                    let call = try Self.responsesFunctionCall(
+                                        item)
+                                    deliveredSemanticOutput = true
+                                    continuation.yield(.toolCalls([call]))
                                 case "tool_search_call":
-                                    continuation.yield(.toolCalls([
-                                        try Self.responsesToolSearchCall(
-                                            item),
-                                    ]))
+                                    let call = try Self.responsesToolSearchCall(
+                                        item)
+                                    deliveredSemanticOutput = true
+                                    continuation.yield(.toolCalls([call]))
                                 case "message":
                                     let fullText =
                                         Self.responsesMessageText(item)
@@ -418,12 +437,14 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                                 emittedText.count))
                                         if !suffix.isEmpty {
                                             emittedText += suffix
+                                            deliveredSemanticOutput = true
                                             continuation.yield(
                                                 .textDelta(suffix))
                                         }
                                     } else if emittedText.isEmpty,
                                               !fullText.isEmpty {
                                         emittedText = fullText
+                                        deliveredSemanticOutput = true
                                         continuation.yield(
                                             .textDelta(fullText))
                                     }
@@ -440,11 +461,12 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                     throw IntatisError.decoding(
                                         "Responses completion is missing its response ID.")
                                 }
-                                receivedAcceptedPayload = true
                                 if let usage =
                                     Self.responsesUsage(response) {
+                                    deliveredSemanticOutput = true
                                     continuation.yield(.usage(usage))
                                 }
+                                deliveredSemanticOutput = true
                                 continuation.yield(
                                     .done(finishReason: "completed"))
                                 completed = true
@@ -475,7 +497,6 @@ extension OpenAIWireProvider: ToolCallingProvider {
                             default:
                                 break
                             }
-                            receivedAcceptedPayload = true
                             return false
                         }
 
@@ -503,8 +524,8 @@ extension OpenAIWireProvider: ToolCallingProvider {
                                 error: error,
                                 attempt: attempt,
                                 policy: runtimePolicy,
-                                receivedResponseBytes:
-                                    receivedAcceptedPayload) {
+                                deliveredSemanticOutput:
+                                    deliveredSemanticOutput) {
                                 attempt += 1
                                 try await ProviderRuntime.sleepBeforeRetry(
                                     nextAttempt: attempt,
@@ -532,11 +553,12 @@ extension OpenAIWireProvider: ToolCallingProvider {
     }
 
     func buildAgentRequest(_ request: AgentRequest) throws -> URLRequest {
+        if let capabilityError = toolCallingCapabilityError(
+            for: request)
+        {
+            throw capabilityError
+        }
         if request.requiresResponsesAPI {
-            guard toolCallingCapabilities.supportsToolSearch else {
-                throw ToolCallingProviderCapabilityError
-                    .toolSearchUnsupported
-            }
             return try buildResponsesAgentRequest(request)
         }
         return try buildChatCompletionsAgentRequest(request)
@@ -554,7 +576,8 @@ extension OpenAIWireProvider: ToolCallingProvider {
         root["messages"] = .array(request.messages.map(Self.messageJSON))
         root["stream"] = .bool(true)
         if !request.tools.isEmpty {
-            root["tools"] = .array(request.tools.map(Self.toolJSON))
+            root["tools"] = .array(
+                request.tools.map(Self.chatCompletionsToolJSON))
         }
         try Self.applyChatCompletionsInvocationControls(
             to: &root,
@@ -726,11 +749,31 @@ extension OpenAIWireProvider: ToolCallingProvider {
             }
             return .object(object)
 
-        case .functionCallOutput(let callID, let output):
+        case .functionCallOutput(let callID, let output, let images):
+            guard !images.isEmpty else {
+                return .object([
+                    "type": .string("function_call_output"),
+                    "call_id": .string(callID),
+                    "output": .string(output),
+                ])
+            }
+            var parts: [JSONValue] = []
+            if !output.isEmpty {
+                parts.append(.object([
+                    "type": .string("input_text"),
+                    "text": .string(output),
+                ]))
+            }
+            parts.append(contentsOf: images.map {
+                .object([
+                    "type": .string("input_image"),
+                    "image_url": .string($0.url),
+                ])
+            })
             return .object([
                 "type": .string("function_call_output"),
                 "call_id": .string(callID),
-                "output": .string(output),
+                "output": .array(parts),
             ])
 
         case .toolSearchCall(
@@ -777,6 +820,29 @@ extension OpenAIWireProvider: ToolCallingProvider {
             })
         case .namespace, .toolSearch:
             // These two shapes are already Responses-native.
+            return toolJSON(tool)
+        }
+    }
+
+    static func chatCompletionsToolJSON(_ tool: ToolSpec) -> JSONValue {
+        switch tool.kind {
+        case .function:
+            var function: [String: JSONValue] = [
+                "name": .string(tool.name),
+                "description": .string(tool.description),
+                "parameters": tool.parameters,
+            ]
+            if let strict = tool.strict {
+                function["strict"] = .bool(strict)
+            }
+            return .object([
+                "type": .string("function"),
+                "function": .object(function),
+            ])
+        case .namespace, .toolSearch:
+            // AgentRequest routes Responses-native tool kinds through the
+            // Responses API. Keep this fallback deterministic for callers
+            // constructing a request directly.
             return toolJSON(tool)
         }
     }

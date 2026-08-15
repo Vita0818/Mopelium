@@ -1,8 +1,8 @@
 # AI_PROVIDER_MODEL_CONFIGURATION
 
 文档状态：当前 AI 配置操作合同
-最后核对：2026-08-06
-产品代码基线：Intatis v0.36（build 36）
+最后核对：2026-08-14
+产品代码基线：Intatis v0.48（build 48；来源 commit 标题 v0.54）
 
 ## 1. 适用范围
 
@@ -46,13 +46,25 @@ intatis.json/jsonc
   -> immutable InferenceCatalog connection/profile revisions
   -> durable AgentInferenceBinding for each Cowork agent
   -> frozen binding in submitted intent / TaskContract
+
+top-level model
+  -> future/default data-plane selection
+
+top-level permission_reviewer_model
+  -> independently frozen Permission Reviewer base-profile binding
 ```
 
 - 修改配置只改变可供未来选择的 profile definitions，不重写现有 agent。
 - catalog 语义变化创建新 revision；旧 agent 继续引用旧 revision。
 - 现有 ordinary agent 只能通过 host-approved、idle-only rebind 改变未来 invocation。
 - 当前 queued/running invocation 和 submitted intent 保持原 frozen binding。
-- reviewer 与 GoalVerifier 是控制面，不参与普通 agent rebind。
+- `permission_reviewer_model` 只接受已配置的 `<provider>/<model-id>` base route。字段缺失时只在
+  配置解析层一次性继承同一 JSON 文档的顶层 `model`；显式空值、错误类型、无法解析的 route，
+  或所选配置整体损坏/不可读，都必须让 reviewer fail closed。
+- reviewer 不能回退到 UI/UserDefaults selection、session default、live/historical `@main`、
+  `INTATIS_MODEL` 或 ordinary-agent rebind；当前产品也没有 reviewer model picker。
+- GoalVerifier 另行冻结首个可解析的 exact `@main` binding；它与 reviewer 是两个独立控制面，
+  均不参与普通 agent rebind，也不能互相替代。
 - `spawn_agent` 未显式指定 profile 时精确继承 issuer binding，不重新读取 current default。
 
 AI 不得直接编辑 `inference-catalog-v1.json`、`events.jsonl`、`session.json`、outbox、roster、
@@ -118,6 +130,7 @@ CLI modern config 同样优先使用 `INTATIS_CONFIG` 和 Intatis-owned modern p
   "$schema": "https://opencode.ai/config.json",
   "enabled_providers": ["primary-route", "secondary-route"],
   "model": "primary-route/reasoning-model",
+  "permission_reviewer_model": "secondary-route/review-model",
   "provider": {
     "primary-route": {
       "npm": "@ai-sdk/openai-compatible",
@@ -197,6 +210,8 @@ Cowork 已支持。
 macOS Cowork：
 
 - 新 session 的 `@main` 使用创建边界选择的 exact profile；
+- runtime 创建边界从 canonical 顶层 `permission_reviewer_model` 独立冻结 reviewer base binding；
+  后续 `@main` 或 ordinary-agent rebind 不得重定向 reviewer；
 - composer profile selector 只暂存下一次 `@main` submission；
 - Send 时冻结 exact binding，FIFO 执行边界才做 main-only durable rebind；
 - Project Settings default 只影响未来 agent；
@@ -240,8 +255,10 @@ JSONC 必须使用 Intatis loader/catalog refresh 验证。CLI 的无网络配�
 INTATIS_CONFIG=/absolute/path/to/intatis.json swift run intatis config
 ```
 
-完整 Cowork catalog 验证通过 macOS refresh 或已获准 session 的 `/profiles`。如果操作会创建 session、
-写 durable state、rebind agent 或发送网络请求，必须先确认用户授权范围。
+完整 Cowork catalog 验证通过 macOS refresh 或已获准 session 的 `/profiles`。验证 reviewer 时还必须
+确认 canonical 配置中的 `permission_reviewer_model` 成功解析为 exact base profile；不能只看到
+`@main` 可用就推断 reviewer 可用。如果操作会创建 session、写 durable state、rebind agent 或发送
+网络请求，必须先确认用户授权范围。
 
 修改解析源码或 durable option schema 时至少运行相关 focused tests；只改用户配置时不要把离线
 `intatis selftest` 冒充真实 provider E2E。
@@ -275,4 +292,5 @@ SECRETS_EXPOSED=NO
 - `Packages/IntatisProviders/Sources/InferenceCatalog.swift`
 - `Packages/IntatisProtocol/Sources/InferenceProfile.swift`
 - `Packages/IntatisCowork/Sources/Orchestrator.swift`
+- `Packages/IntatisCowork/Sources/PermissionReviewControlPlane.swift`
 - `docs/PER_AGENT_INFERENCE_PROFILES.md`

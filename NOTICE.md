@@ -13,6 +13,45 @@ third-party names, logos, icons, screenshots, UI assets, trademarks, or brand
 copy as its product identity. Open-source reuse does not bypass Intatis'
 permission, workspace, event-log, secret, or Apple-platform boundaries.
 
+## Open Knowledge Format v0.2 standard
+
+Intatis pins the unmodified, self-contained Open Knowledge Format v0.2
+specification from `GoogleCloudPlatform/knowledge-catalog` at commit
+`3fcbb9f828c2f23d109c855ee403c3a4c81f3a96`. The adopted documentation is
+Apache License 2.0. The exact specification, license, upstream identities, and
+SHA-256 inventory are stored under
+`ThirdPartyStandards/OpenKnowledgeFormat/0.2/`; detailed scope and exclusions
+are recorded in `ThirdPartyNotices/OpenKnowledgeFormat.md`. The upstream
+reference agent, prompts, samples, viewer, Python runtime, and data bundles are
+not copied, linked, or executed.
+
+## Knowledge retrieval parser dependency
+
+The non-iOS `IntatisKnowledge` target uses **Yams 6.2.2**
+(`jpsim/Yams`, commit `a27b21e0c81c5bf42049b897a62aaf387e80f279`),
+including its in-package CYaml/libYAML sources, under the MIT License. It is an
+exact SwiftPM dependency with no external package dependencies. Provenance,
+runtime scope, parser-hardening boundaries, and the complete license are in
+`ThirdPartyNotices/KnowledgeRetrieval.md` and
+`ThirdPartyNotices/Licenses/Yams-6.2.2-MIT.txt`.
+
+## EPUB document helper dependency
+
+The macOS/Linux document-tool source tree contains a separately built,
+fixed-protocol Rust helper at `Packages/IntatisTools/Runtime/rbook-helper`.
+It uses **rbook 0.7.10** (`DevinSterling/rbook`) under the Apache License 2.0
+to implement the declared EPUB metadata/resource/spine/ToC write subset.
+The helper is an `external-runtime` component: it remains behind Intatis'
+typed invocation, workspace lease, sandbox, staging, validation, and atomic
+commit boundaries, and is not linked into iOS.
+
+The exact Cargo manifest, lockfile SHA-256 values, crates.io checksums,
+complete resolved dependency/license inventory, audit checkout identity,
+scope, and runtime-distribution gate are recorded in
+`ThirdPartyNotices/DocumentRBookHelper.md`. This implementation task adds the
+reproducible source/build closure; it does not claim that a universal signed
+helper binary or its release license bundle is already shipped in the App.
+
 ## OpenAI Codex Skill Creator derivative
 
 The project-local `.agents/skills/intatis-skill-creator/` Skill is a modified

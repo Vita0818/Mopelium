@@ -85,10 +85,24 @@ public struct MessageDeltaPayload: Codable, Equatable, Sendable {
 public struct MessageCitation: Codable, Equatable, Hashable, Sendable {
     public var url: String
     public var title: String
+    /// Provider-exposed search evidence, when the exact hosted-search dialect
+    /// returns it. This is the excerpt supplied to the inner model, not a page
+    /// fetched independently by Intatis.
+    public var content: String?
+    /// Optional offsets tying this citation to the provider-generated answer.
+    public var startIndex: Int?
+    public var endIndex: Int?
 
-    public init(url: String, title: String) {
+    public init(url: String,
+                title: String,
+                content: String? = nil,
+                startIndex: Int? = nil,
+                endIndex: Int? = nil) {
         self.url = url
         self.title = title
+        self.content = content
+        self.startIndex = startIndex
+        self.endIndex = endIndex
     }
 }
 
@@ -612,7 +626,6 @@ public enum Event: Equatable, Sendable {
     case agentToAgentMessage(AgentToAgentMessagePayload)
     case informationRequested(InformationRequestedPayload)
     case informationReplied(InformationRepliedPayload)
-    case delegationRequested(DelegationRequestedPayload)
     case delegationApproved(DelegationApprovedPayload)
     case delegationRejected(DelegationRejectedPayload)
     case taskDelegated(TaskDelegatedPayload)
@@ -637,7 +650,6 @@ public enum Event: Equatable, Sendable {
     // durable user-visible WorkTask plan
     case workTaskCreated(WorkTaskCreatedPayload)
     case workTaskUpdated(WorkTaskUpdatedPayload)
-    case workTaskOwnerChanged(WorkTaskOwnerChangedPayload)
     case workTaskDependencyChanged(WorkTaskDependencyChangedPayload)
     case workTaskReady(WorkTaskReadyPayload)
     case workTaskStarted(WorkTaskStartedPayload)
@@ -648,7 +660,6 @@ public enum Event: Equatable, Sendable {
     case workTaskCancelled(WorkTaskCancelledPayload)
     case workTaskInvocationLinked(WorkTaskInvocationLinkedPayload)
     case workTaskEvidenceAdded(WorkTaskEvidenceAddedPayload)
-    case workTaskCarriedForward(WorkTaskCarriedForwardPayload)
     // durable Goal lifecycle
     case goalCreated(GoalCreatedPayload)
     case goalEdited(GoalEditedPayload)
@@ -666,9 +677,10 @@ public enum Event: Equatable, Sendable {
     case continuationRunCreated(ContinuationRunCreatedPayload)
     case continuationRunStarted(ContinuationRunStartedPayload)
     case continuationRunCheckpointed(ContinuationRunCheckpointedPayload)
+    case continuationRunCloseRequested(ContinuationRunCloseRequestedPayload)
     case continuationRunCompleted(ContinuationRunCompletedPayload)
+    case continuationRunInterrupted(ContinuationRunInterruptedPayload)
     case continuationRunCancelled(ContinuationRunCancelledPayload)
-    case continuationRunRecovered(ContinuationRunRecoveredPayload)
     // v0.4 (Multimodal)
     case artifactAdded(ArtifactAddedPayload)
     case artifactProgress(ArtifactProgressPayload)
@@ -741,7 +753,6 @@ public enum Event: Equatable, Sendable {
         case agentToAgentMessage = "agent_to_agent_message"
         case informationRequested = "information_requested"
         case informationReplied = "information_replied"
-        case delegationRequested = "delegation_requested"
         case delegationApproved = "delegation_approved"
         case delegationRejected = "delegation_rejected"
         case taskDelegated = "task_delegated"
@@ -764,7 +775,6 @@ public enum Event: Equatable, Sendable {
         case taskRejected = "task_rejected"
         case workTaskCreated = "work_task_created"
         case workTaskUpdated = "work_task_updated"
-        case workTaskOwnerChanged = "work_task_owner_changed"
         case workTaskDependencyChanged = "work_task_dependency_changed"
         case workTaskReady = "work_task_ready"
         case workTaskStarted = "work_task_started"
@@ -775,7 +785,6 @@ public enum Event: Equatable, Sendable {
         case workTaskCancelled = "work_task_cancelled"
         case workTaskInvocationLinked = "work_task_invocation_linked"
         case workTaskEvidenceAdded = "work_task_evidence_added"
-        case workTaskCarriedForward = "work_task_carried_forward"
         case goalCreated = "goal_created"
         case goalEdited = "goal_edited"
         case goalPaused = "goal_paused"
@@ -791,9 +800,10 @@ public enum Event: Equatable, Sendable {
         case continuationRunCreated = "continuation_run_created"
         case continuationRunStarted = "continuation_run_started"
         case continuationRunCheckpointed = "continuation_run_checkpointed"
+        case continuationRunCloseRequested = "continuation_run_close_requested"
         case continuationRunCompleted = "continuation_run_completed"
+        case continuationRunInterrupted = "continuation_run_interrupted"
         case continuationRunCancelled = "continuation_run_cancelled"
-        case continuationRunRecovered = "continuation_run_recovered"
         case artifactAdded = "artifact_added"
         case artifactProgress = "artifact_progress"
         case mcpServerAttached = "mcp_server_attached"
@@ -863,7 +873,6 @@ public enum Event: Equatable, Sendable {
         case .agentToAgentMessage: return .agentToAgentMessage
         case .informationRequested: return .informationRequested
         case .informationReplied:   return .informationReplied
-        case .delegationRequested:  return .delegationRequested
         case .delegationApproved:   return .delegationApproved
         case .delegationRejected:   return .delegationRejected
         case .taskDelegated:        return .taskDelegated
@@ -886,7 +895,6 @@ public enum Event: Equatable, Sendable {
         case .taskRejected:        return .taskRejected
         case .workTaskCreated:     return .workTaskCreated
         case .workTaskUpdated:     return .workTaskUpdated
-        case .workTaskOwnerChanged: return .workTaskOwnerChanged
         case .workTaskDependencyChanged: return .workTaskDependencyChanged
         case .workTaskReady:       return .workTaskReady
         case .workTaskStarted:     return .workTaskStarted
@@ -897,7 +905,6 @@ public enum Event: Equatable, Sendable {
         case .workTaskCancelled:   return .workTaskCancelled
         case .workTaskInvocationLinked: return .workTaskInvocationLinked
         case .workTaskEvidenceAdded: return .workTaskEvidenceAdded
-        case .workTaskCarriedForward: return .workTaskCarriedForward
         case .goalCreated:         return .goalCreated
         case .goalEdited:          return .goalEdited
         case .goalPaused:          return .goalPaused
@@ -913,9 +920,10 @@ public enum Event: Equatable, Sendable {
         case .continuationRunCreated: return .continuationRunCreated
         case .continuationRunStarted: return .continuationRunStarted
         case .continuationRunCheckpointed: return .continuationRunCheckpointed
+        case .continuationRunCloseRequested: return .continuationRunCloseRequested
         case .continuationRunCompleted: return .continuationRunCompleted
+        case .continuationRunInterrupted: return .continuationRunInterrupted
         case .continuationRunCancelled: return .continuationRunCancelled
-        case .continuationRunRecovered: return .continuationRunRecovered
         case .artifactAdded:       return .artifactAdded
         case .artifactProgress:    return .artifactProgress
         case .mcpServerAttached: return .mcpServerAttached

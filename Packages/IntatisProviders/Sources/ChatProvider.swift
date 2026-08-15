@@ -55,13 +55,33 @@ public struct ChatWebSearchConfiguration: Equatable, Sendable {
         case low, medium, high
     }
 
+    /// Chat may preserve its transparent-search behavior by retrying one
+    /// ordinary request when an endpoint rejects the hosted-search shape.
+    /// Explicit agent tools must fail closed instead of returning an ordinary
+    /// model answer under a successful search-tool result.
+    public enum UnsupportedBehavior: Equatable, Sendable {
+        case retryOrdinaryChat
+        case failClosed
+    }
+
+    public enum ToolChoice: String, Equatable, Sendable {
+        case automatic = "auto"
+        case required
+    }
+
     public var dialect: ChatHostedWebSearchDialect
     public var contextSize: ContextSize
+    public var unsupportedBehavior: UnsupportedBehavior
+    public var toolChoice: ToolChoice
 
     public init(dialect: ChatHostedWebSearchDialect,
-                contextSize: ContextSize = .medium) {
+                contextSize: ContextSize = .medium,
+                unsupportedBehavior: UnsupportedBehavior = .retryOrdinaryChat,
+                toolChoice: ToolChoice = .automatic) {
         self.dialect = dialect
         self.contextSize = contextSize
+        self.unsupportedBehavior = unsupportedBehavior
+        self.toolChoice = toolChoice
     }
 }
 
@@ -165,6 +185,14 @@ public enum ChatChunk: Equatable, Sendable {
 
 /// A model that can stream a chat completion. The only `Capability.chat` surface
 /// v0.1 needs. Concrete adapters (e.g. `OpenAIWireProvider`) conform per wire.
+///
+/// `stream(_:)` must return promptly with a request-owned stream. Conformers
+/// must move blocking network/provider work into that stream's producer and
+/// propagate consumer termination to the producer. Synchronously blocking in
+/// this method is outside the protocol contract: Chat hosts use the return as
+/// the request-dispatch boundary for cancellation, timeout, and attempt
+/// accounting. Propagation is cooperative and does not imply that an arbitrary
+/// transport can physically stop remote work instantaneously.
 public protocol ChatProvider: Sendable {
     func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatChunk, Error>
 }

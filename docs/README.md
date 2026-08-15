@@ -1,16 +1,30 @@
-# Mopelium 项目文档索引
+# Intatis 文档索引
 
-当前产品基线：**v0.36**（build 36）
-最近核对：2026-08-06
+当前产品基线：**v0.48**（build 48）
+最近核对：2026-08-14
 
 这个索引区分“当前规范”和“历史证据”。版本、产品状态或下一步判断只允许从当前规范
 读取；带旧版本号的历史文件保留用于解释迁移和兼容性，不能覆盖当前源码。
+
+## Mopelium 项目覆盖层
+
+当前仓库直接采用 Intatis 快照作为活动源码，但保留以下项目专属文档：
+
+| 文档 | 权威范围 |
+|---|---|
+| 根 `SNAPSHOT.md` | 来源 exact commit、复制/排除范围、gitlink 和刷新规则 |
+| `MOPELIUM_PRODUCT_DIRECTION.md` | Mopelium 显示品牌边界、Cowork-only 新功能方向、Chat/Code 保留规则 |
+| `AI_PROVIDER_MODEL_CONFIGURATION.md` | 维护本项目时的 provider/model/variant 与凭据操作合同 |
+| `INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md` | 历史迁移审计；不是当前实现计划或事实源 |
+
+根 `AGENTS.md` 是本仓库的操作入口。两份 `Codex-report/` 事故报告也作为项目历史证据保留。
+若覆盖层历史材料与当前源码、构建配置或下方 Intatis 当前规范冲突，以源码/配置和当前规范为准；
+产品方向冲突则以 `MOPELIUM_PRODUCT_DIRECTION.md` 为准。
 
 ## 当前规范
 
 | 文档 | 权威范围 |
 |---|---|
-| `MOPELIUM_PRODUCT_DIRECTION.md` | 显示品牌、内部 Intatis 身份、Cowork-only 新功能和 Chat/Code 保留规则 |
 | `VERSIONING.md` | 产品版本与 build number 的唯一治理规则 |
 | `CURRENT_STATE.md` | 当前能力、验证状态、已知缺口 |
 | `PROJECT_MAP.md` | 当前目录、target、入口、关键文件和脚本 |
@@ -23,20 +37,10 @@
 | `COWORK_PRINCIPLES.md` | 当前 Cowork/AgentKernel 编排原则 |
 | `PER_AGENT_INFERENCE_PROFILES.md` | per-agent exact inference binding 契约 |
 | `CURRENT_UI_COLOR_SYSTEM.md` | 当前 Apple 原生表面与 Liquid Glass 规范 |
+| `NEXT_TARGET.md` | 来源快照携带的 Intatis 上游发行目标；当前明确不是 Mopelium 活跃目标 |
 
 根 `README.md` 是产品入口；根 `ARCHITECTURE.md` 仅为兼容链接，架构正文只维护在
 `docs/ARCHITECTURE.md`。`AGENTS.md` 及 Claude/Gemini shims 是操作政策，不表达产品版本。
-
-## Mopelium 项目独有文档
-
-根源码提升为 Intatis 快照基线后，以下文档保存 Mopelium 自己的产品决策和历史：
-
-- `MOPELIUM_PRODUCT_DIRECTION.md`：当前权威产品方向；
-- `AI_PROVIDER_MODEL_CONFIGURATION.md`：沿用 Intatis 内部身份的 provider/model/variant 与 AI 安全写入合同；
-- `INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md`：已被完整快照落地取代的历史迁移审计。
-
-历史审计中的旧路径、模块、数量、选择性迁移方案和全量内部改名建议均不再有效。当前实现以
-源码/配置为准，产品方向以 `MOPELIUM_PRODUCT_DIRECTION.md` 为准。
 
 ## 操作政策与供应链资料
 
@@ -62,7 +66,6 @@
 - `COWORK_V0_10_SMOKE.md`
 - `COWORK_V0_10_STATUS.md`
 - `UI_COLOR_SYSTEM.md`
-- `INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md`
 - 根 `design-qa.md`
 - `codex-report/`、`claude-report/`、`gemini-report/` 中的 dated reports
 
@@ -72,7 +75,7 @@
 ## 维护纪律
 
 - 当前状态文档保持摘要化；完成事项留在 Git 历史和 dated report，不继续无限追加。
-- 当前没有 active `NEXT_TARGET.md`；只有用户明确下达新的单一实现或发行目标时才创建。
+- `NEXT_TARGET.md` 只保留一个正在推进的目标，完成后删除或替换。
 - `TESTING.md` 保存当前命令和最新证据；旧性能数字或事故细节留在报告中。
 - 不批量替换依赖、协议、schema、历史里程碑中的版本号。
 - 修改产品版本后必须运行 `scripts/check-version-consistency.sh`。

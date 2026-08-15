@@ -168,8 +168,6 @@ public struct Envelope: Codable, Equatable, Sendable {
             return .informationRequested(try c.decode(InformationRequestedPayload.self, forKey: .payload))
         case .informationReplied:
             return .informationReplied(try c.decode(InformationRepliedPayload.self, forKey: .payload))
-        case .delegationRequested:
-            return .delegationRequested(try c.decode(DelegationRequestedPayload.self, forKey: .payload))
         case .delegationApproved:
             return .delegationApproved(try c.decode(DelegationApprovedPayload.self, forKey: .payload))
         case .delegationRejected:
@@ -214,8 +212,6 @@ public struct Envelope: Codable, Equatable, Sendable {
             return .workTaskCreated(try c.decode(WorkTaskCreatedPayload.self, forKey: .payload))
         case .workTaskUpdated:
             return .workTaskUpdated(try c.decode(WorkTaskUpdatedPayload.self, forKey: .payload))
-        case .workTaskOwnerChanged:
-            return .workTaskOwnerChanged(try c.decode(WorkTaskOwnerChangedPayload.self, forKey: .payload))
         case .workTaskDependencyChanged:
             return .workTaskDependencyChanged(try c.decode(WorkTaskDependencyChangedPayload.self, forKey: .payload))
         case .workTaskReady:
@@ -236,8 +232,6 @@ public struct Envelope: Codable, Equatable, Sendable {
             return .workTaskInvocationLinked(try c.decode(WorkTaskInvocationLinkedPayload.self, forKey: .payload))
         case .workTaskEvidenceAdded:
             return .workTaskEvidenceAdded(try c.decode(WorkTaskEvidenceAddedPayload.self, forKey: .payload))
-        case .workTaskCarriedForward:
-            return .workTaskCarriedForward(try c.decode(WorkTaskCarriedForwardPayload.self, forKey: .payload))
         case .goalCreated:
             return .goalCreated(try c.decode(GoalCreatedPayload.self, forKey: .payload))
         case .goalEdited:
@@ -268,12 +262,14 @@ public struct Envelope: Codable, Equatable, Sendable {
             return .continuationRunStarted(try c.decode(ContinuationRunStartedPayload.self, forKey: .payload))
         case .continuationRunCheckpointed:
             return .continuationRunCheckpointed(try c.decode(ContinuationRunCheckpointedPayload.self, forKey: .payload))
+        case .continuationRunCloseRequested:
+            return .continuationRunCloseRequested(try c.decode(ContinuationRunCloseRequestedPayload.self, forKey: .payload))
         case .continuationRunCompleted:
             return .continuationRunCompleted(try c.decode(ContinuationRunCompletedPayload.self, forKey: .payload))
+        case .continuationRunInterrupted:
+            return .continuationRunInterrupted(try c.decode(ContinuationRunInterruptedPayload.self, forKey: .payload))
         case .continuationRunCancelled:
             return .continuationRunCancelled(try c.decode(ContinuationRunCancelledPayload.self, forKey: .payload))
-        case .continuationRunRecovered:
-            return .continuationRunRecovered(try c.decode(ContinuationRunRecoveredPayload.self, forKey: .payload))
         case .artifactAdded:
             return .artifactAdded(try c.decode(ArtifactAddedPayload.self, forKey: .payload))
         case .artifactProgress:
@@ -390,7 +386,6 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .agentToAgentMessage(let p): try c.encode(p, forKey: .payload)
         case .informationRequested(let p): try c.encode(p, forKey: .payload)
         case .informationReplied(let p):   try c.encode(p, forKey: .payload)
-        case .delegationRequested(let p):  try c.encode(p, forKey: .payload)
         case .delegationApproved(let p):   try c.encode(p, forKey: .payload)
         case .delegationRejected(let p):   try c.encode(p, forKey: .payload)
         case .taskDelegated(let p):        try c.encode(p, forKey: .payload)
@@ -413,7 +408,6 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .taskRejected(let p):         try c.encode(p, forKey: .payload)
         case .workTaskCreated(let p):       try c.encode(p, forKey: .payload)
         case .workTaskUpdated(let p):       try c.encode(p, forKey: .payload)
-        case .workTaskOwnerChanged(let p):  try c.encode(p, forKey: .payload)
         case .workTaskDependencyChanged(let p): try c.encode(p, forKey: .payload)
         case .workTaskReady(let p):         try c.encode(p, forKey: .payload)
         case .workTaskStarted(let p):       try c.encode(p, forKey: .payload)
@@ -424,7 +418,6 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .workTaskCancelled(let p):     try c.encode(p, forKey: .payload)
         case .workTaskInvocationLinked(let p): try c.encode(p, forKey: .payload)
         case .workTaskEvidenceAdded(let p): try c.encode(p, forKey: .payload)
-        case .workTaskCarriedForward(let p): try c.encode(p, forKey: .payload)
         case .goalCreated(let p):           try c.encode(p, forKey: .payload)
         case .goalEdited(let p):            try c.encode(p, forKey: .payload)
         case .goalPaused(let p):            try c.encode(p, forKey: .payload)
@@ -440,9 +433,10 @@ public struct Envelope: Codable, Equatable, Sendable {
         case .continuationRunCreated(let p): try c.encode(p, forKey: .payload)
         case .continuationRunStarted(let p): try c.encode(p, forKey: .payload)
         case .continuationRunCheckpointed(let p): try c.encode(p, forKey: .payload)
+        case .continuationRunCloseRequested(let p): try c.encode(p, forKey: .payload)
         case .continuationRunCompleted(let p): try c.encode(p, forKey: .payload)
+        case .continuationRunInterrupted(let p): try c.encode(p, forKey: .payload)
         case .continuationRunCancelled(let p): try c.encode(p, forKey: .payload)
-        case .continuationRunRecovered(let p): try c.encode(p, forKey: .payload)
         case .artifactAdded(let p):       try c.encode(p, forKey: .payload)
         case .artifactProgress(let p):    try c.encode(p, forKey: .payload)
         case .mcpServerAttached(let p): try c.encode(p, forKey: .payload)

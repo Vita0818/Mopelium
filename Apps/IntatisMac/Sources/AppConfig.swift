@@ -276,6 +276,14 @@ struct AppProviderCatalog: Codable, Equatable {
     var selectedProviderID: String
     var selectedModelID: String
     var selectedVariantID: String? = nil
+    /// Host-owned route for the Cowork permission reviewer. The external
+    /// configuration key is `permission_reviewer_model`; it is intentionally
+    /// independent from the mutable Chat/Cowork model selection.
+    var permissionReviewerModel: ModelRef? = nil
+    /// Distinguishes an explicitly configured but invalid reviewer value from
+    /// an older catalog that predates the role. Only the latter may inherit the
+    /// configuration file's top-level `model` during normalization.
+    var permissionReviewerModelWasExplicitlyConfigured: Bool? = nil
     /// Host-owned default for image generation and editing. Model-facing image
     /// tools never receive or select this route.
     var imageModel: ModelRef? = nil
@@ -283,18 +291,52 @@ struct AppProviderCatalog: Codable, Equatable {
     /// the top-level `transcription_model` field and never follows Chat model
     /// selection implicitly.
     var transcriptionModel: ModelRef? = nil
+    /// Host-owned Knowledge embedding route. It is independent from Chat and
+    /// Agent inference and has no hidden fallback.
+    var embeddingModel: ModelRef? = nil
+    /// Host-owned semantic reranker route. It is required together with the
+    /// embedding route before Knowledge tools can be composed.
+    var rerankerModel: ModelRef? = nil
     /// Legacy field retained only so existing configuration can be decoded and
     /// preserved. Chat runtime routing deliberately ignores it.
     var webSearchModel: ModelRef? = nil
     var providers: [AppProviderSettings]
 
+    func isKnowledgeRoleModel(
+        providerID: String,
+        modelID: String
+    ) -> Bool {
+        func normalized(_ value: String) -> String {
+            value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        return [embeddingModel, rerankerModel].compactMap { $0 }.contains {
+            normalized($0.endpoint) == normalized(providerID)
+                && $0.model.rawValue == modelID
+        }
+    }
+
+    func inferenceModels(for provider: AppProviderSettings)
+        -> [AppProviderModel] {
+        provider.models.filter {
+            !isKnowledgeRoleModel(
+                providerID: provider.id,
+                modelID: $0.id)
+        }
+    }
+
     var selectedProvider: AppProviderSettings? {
-        providers.first { $0.id == selectedProviderID } ?? providers.first
+        if let selected = providers.first(where: { $0.id == selectedProviderID }),
+           !inferenceModels(for: selected).isEmpty {
+            return selected
+        }
+        return providers.first { !inferenceModels(for: $0).isEmpty }
+            ?? providers.first
     }
 
     var selectedModel: AppProviderModel? {
         guard let provider = selectedProvider else { return nil }
-        return provider.models.first { $0.id == selectedModelID } ?? provider.models.first
+        let models = inferenceModels(for: provider)
+        return models.first { $0.id == selectedModelID } ?? models.first
     }
 
     var selectedVariant: AppProviderModelVariant? {
@@ -428,12 +470,13 @@ enum AppConfig {
         guard let provider = catalog.providers.first(where: { $0.id == providerID }) else {
             return catalog
         }
-        let selectedModelID = provider.models.first { $0.id == modelID }?.id
-            ?? provider.models.first?.id
+        let models = catalog.inferenceModels(for: provider)
+        let selectedModelID = models.first { $0.id == modelID }?.id
+            ?? models.first?.id
             ?? defaultModel
         catalog.selectedProviderID = provider.id
         catalog.selectedModelID = selectedModelID
-        catalog.selectedVariantID = provider.models
+        catalog.selectedVariantID = models
             .first(where: { $0.id == selectedModelID })?
             .variants.first(where: { $0.id == variantID })?.id
         providerCatalog = catalog
@@ -520,7 +563,8 @@ enum AppConfig {
     static func providerConfig() -> ProviderConfig {
         let catalog = providerCatalog
         let selectedProvider = catalog.selectedProvider ?? defaultProvider()
-        let selectedModel = catalog.selectedModel ?? selectedProvider.models.first
+        let selectedModel = catalog.selectedModel
+            ?? catalog.inferenceModels(for: selectedProvider).first
             ?? AppProviderModel(id: defaultModel, displayName: defaultDisplayName(for: defaultModel))
 
         let endpoints = catalog.providers.map { provider in
@@ -547,13 +591,16 @@ enum AppConfig {
         var models = ResolvedModels(
             chat: chat,
             webSearch: catalog.webSearchModel,
-            agent: chat)
+            agent: chat,
+            reviewer: catalog.permissionReviewerModel)
         // Image generation is an explicit role-specific route. Missing config
         // stays nil so the tool fails closed instead of selecting a hidden model.
         models.imageGen = catalog.imageModel
         // Composer voice input uses only the explicit host route. Missing
         // configuration stays nil and never falls back to the Chat selection.
         models.transcription = catalog.transcriptionModel
+        models.embedding = catalog.embeddingModel
+        models.reranker = catalog.rerankerModel
         return ProviderConfig(endpoints: endpoints.isEmpty ? [endpoint(for: selectedProvider)] : endpoints,
                               models: models)
     }
@@ -575,8 +622,11 @@ enum AppConfig {
             guard !id.isEmpty, !seenProviders.contains(id) else { return nil }
             seenProviders.insert(id)
             let isDedicatedRoleProvider = [
+                catalog.permissionReviewerModel,
                 catalog.imageModel,
                 catalog.transcriptionModel,
+                catalog.embeddingModel,
+                catalog.rerankerModel,
             ].compactMap { $0 }.contains {
                 normalizedProviderID($0.endpoint) == normalizedProviderID(id)
             }
@@ -622,23 +672,51 @@ enum AppConfig {
             providers = [defaultProvider()]
         }
 
-        let selectedProviderID = providers.first { $0.id == catalog.selectedProviderID }?.id
+        let selectedProviderID = providers.first {
+                $0.id == catalog.selectedProviderID
+                    && !catalog.inferenceModels(for: $0).isEmpty
+            }?.id
             ?? providers.first {
                 normalizedProviderID($0.id) == normalizedProviderID(catalog.selectedProviderID)
+                    && !catalog.inferenceModels(for: $0).isEmpty
+            }?.id
+            ?? providers.first {
+                !catalog.inferenceModels(for: $0).isEmpty
             }?.id
             ?? providers[0].id
         let selectedProvider = providers.first { $0.id == selectedProviderID } ?? providers[0]
-        let selectedModelID = selectedProvider.models.contains { $0.id == catalog.selectedModelID }
+        let selectableModels = catalog.inferenceModels(for: selectedProvider)
+        let selectedModelID = selectableModels.contains { $0.id == catalog.selectedModelID }
             ? catalog.selectedModelID
-            : selectedProvider.models[0].id
-        let selectedModel = selectedProvider.models.first { $0.id == selectedModelID }
+            : selectableModels.first?.id ?? defaultModel
+        let selectedModel = selectableModels.first { $0.id == selectedModelID }
         let selectedVariantID = selectedModel?.variants
             .first(where: { $0.id == catalog.selectedVariantID })?.id
+        let permissionReviewerFallback = ModelRef(
+            endpoint: selectedProviderID,
+            model: ModelID(rawValue: selectedModelID))
+        let permissionReviewerModel = normalizedRoleModelRef(
+            catalog.permissionReviewerModel
+                // A nil marker means this is a legacy internal catalog that
+                // predates the reviewer role. A parsed modern configuration
+                // always writes true/false: false means the canonical field
+                // was absent and its JSON top-level model was already resolved
+                // (or proved unavailable) before UI selection is applied.
+                ?? (catalog.permissionReviewerModelWasExplicitlyConfigured == nil
+                    ? permissionReviewerFallback
+                    : nil),
+            providers: providers)
         let imageModel = normalizedRoleModelRef(
             catalog.imageModel,
             providers: providers)
         let transcriptionModel = normalizedRoleModelRef(
             catalog.transcriptionModel,
+            providers: providers)
+        let embeddingModel = normalizedRoleModelRef(
+            catalog.embeddingModel,
+            providers: providers)
+        let rerankerModel = normalizedRoleModelRef(
+            catalog.rerankerModel,
             providers: providers)
         let webSearchModel = normalizedRoleModelRef(
             catalog.webSearchModel,
@@ -648,8 +726,13 @@ enum AppConfig {
             selectedProviderID: selectedProviderID,
             selectedModelID: selectedModelID,
             selectedVariantID: selectedVariantID,
+            permissionReviewerModel: permissionReviewerModel,
+            permissionReviewerModelWasExplicitlyConfigured:
+                catalog.permissionReviewerModelWasExplicitlyConfigured ?? false,
             imageModel: imageModel,
             transcriptionModel: transcriptionModel,
+            embeddingModel: embeddingModel,
+            rerankerModel: rerankerModel,
             webSearchModel: webSearchModel,
             providers: providers)
     }
@@ -712,19 +795,24 @@ enum AppConfig {
             models: [AppProviderModel(id: model, displayName: defaultDisplayName(for: model))])
         return AppProviderCatalog(selectedProviderID: provider.id,
                                   selectedModelID: model,
+                                  permissionReviewerModel: ModelRef(
+                                      endpoint: provider.id,
+                                      model: ModelID(rawValue: model)),
+                                  permissionReviewerModelWasExplicitlyConfigured: false,
                                   providers: [provider])
     }
 
     private static func applyingStoredSelection(to catalog: AppProviderCatalog) -> AppProviderCatalog {
         guard let selection = storedSelection(),
               let provider = catalog.providers.first(where: { $0.id == selection.providerID }),
-              provider.models.contains(where: { $0.id == selection.modelID }) else {
+              catalog.inferenceModels(for: provider)
+                .contains(where: { $0.id == selection.modelID }) else {
             return catalog
         }
         var selected = catalog
         selected.selectedProviderID = selection.providerID
         selected.selectedModelID = selection.modelID
-        selected.selectedVariantID = provider.models
+        selected.selectedVariantID = catalog.inferenceModels(for: provider)
             .first(where: { $0.id == selection.modelID })?
             .variants.first(where: { $0.id == selection.variantID })?.id
         return selected
@@ -950,19 +1038,62 @@ enum AppConfig {
     }
 
     private static func fileProviderCatalog() -> AppProviderCatalog? {
-        guard let url = existingConfigFileURL(),
-              let data = try? Data(contentsOf: url) else {
+        guard let url = existingConfigFileURL() else {
             return nil
+        }
+        guard let data = try? Data(contentsOf: url) else {
+            return catalogWithPermissionReviewerFailedClosed()
         }
         let configData = jsonCompatibleData(from: data)
         let decoder = JSONDecoder()
+        let permissionReviewerFieldWasPresent: Bool?
+        if case .object(let root)? = try? decoder.decode(
+            JSONValue.self,
+            from: configData) {
+            permissionReviewerFieldWasPresent =
+                root.keys.contains("permission_reviewer_model")
+        } else {
+            permissionReviewerFieldWasPresent = nil
+        }
         if let compatible = try? decoder.decode(
             AppProviderConfigFile.self,
             from: configData),
-           let catalog = compatible.catalog(configFileURL: url) {
+           let catalog = compatible.catalog(
+               configFileURL: url,
+               permissionReviewerFieldWasPresent:
+                   permissionReviewerFieldWasPresent) {
             return catalog
         }
-        return try? decoder.decode(AppProviderCatalog.self, from: configData)
+        if permissionReviewerFieldWasPresent != true,
+           let direct = try? decoder.decode(
+            AppProviderCatalog.self,
+            from: configData) {
+            return direct
+        }
+        // A selected configuration file that cannot produce a catalog cannot
+        // prove either the canonical reviewer value or its top-level-model
+        // compatibility source. Preserve the app's existing cached-provider
+        // fallback for ordinary data-plane use, but leave this authorization
+        // role explicitly unavailable instead of retargeting it to stale UI or
+        // @main state.
+        return catalogWithPermissionReviewerFailedClosed()
+    }
+
+    private static func catalogWithPermissionReviewerFailedClosed()
+        -> AppProviderCatalog {
+        let fallback: AppProviderCatalog
+        if let data = UserDefaults.standard.data(forKey: providerCatalogKey),
+           let decoded = try? JSONDecoder().decode(
+            AppProviderCatalog.self,
+            from: data) {
+            fallback = decoded
+        } else {
+            fallback = legacyProviderCatalog()
+        }
+        var failClosed = fallback
+        failClosed.permissionReviewerModel = nil
+        failClosed.permissionReviewerModelWasExplicitlyConfigured = true
+        return failClosed
     }
 
     private static func existingConfigFileURL() -> URL? {
@@ -1084,6 +1215,16 @@ enum AppConfig {
         root["$schema"] = "https://opencode.ai/config.json"
         root["enabled_providers"] = catalog.providers.map(\.id)
         root["model"] = selectedOpenCodeModel(in: catalog)
+        if let permissionReviewerModel = catalog.permissionReviewerModel {
+            root["permission_reviewer_model"] = openCodeModelReference(
+                permissionReviewerModel)
+        } else {
+            // Nil is a fail-closed authorization state even when the source
+            // key was merely absent but its top-level compatibility model
+            // could not be proved. Persist null so rewriting the ordinary
+            // selected model cannot silently enable review on the next load.
+            root["permission_reviewer_model"] = NSNull()
+        }
         if let imageModel = catalog.imageModel {
             root.removeValue(forKey: "imageModel")
             root["image_model"] = openCodeModelReference(imageModel)
@@ -1093,6 +1234,18 @@ enum AppConfig {
                 transcriptionModel)
         } else {
             root.removeValue(forKey: "transcription_model")
+        }
+        if let embeddingModel = catalog.embeddingModel {
+            root["embedding_model"] = openCodeModelReference(
+                embeddingModel)
+        } else {
+            root.removeValue(forKey: "embedding_model")
+        }
+        if let rerankerModel = catalog.rerankerModel {
+            root["reranker_model"] = openCodeModelReference(
+                rerankerModel)
+        } else {
+            root.removeValue(forKey: "reranker_model")
         }
 
         var providerMap = root["provider"] as? [String: Any] ?? [:]
@@ -1132,8 +1285,9 @@ enum AppConfig {
         let selectedProvider = catalog.providers.first { $0.id == catalog.selectedProviderID }
             ?? catalog.providers.first
         guard let selectedProvider else { return defaultModel }
-        let selectedModel = selectedProvider.models.first { $0.id == catalog.selectedModelID }
-            ?? selectedProvider.models.first
+        let models = catalog.inferenceModels(for: selectedProvider)
+        let selectedModel = models.first { $0.id == catalog.selectedModelID }
+            ?? models.first
         return "\(selectedProvider.id)/\(selectedModel?.id ?? defaultModel)"
     }
 
@@ -1342,16 +1496,22 @@ private struct AppProviderConfigTemplate: Encodable {
     var schema = "https://opencode.ai/config.json"
     var enabledProviders: [String]
     var model: String
+    var permissionReviewerModel: JSONValue?
     var imageModel: String?
     var transcriptionModel: String?
+    var embeddingModel: String?
+    var rerankerModel: String?
     var provider: [String: AppProviderConfigTemplateProvider]
 
     enum CodingKeys: String, CodingKey {
         case schema = "$schema"
         case enabledProviders = "enabled_providers"
         case model
+        case permissionReviewerModel = "permission_reviewer_model"
         case imageModel = "image_model"
         case transcriptionModel = "transcription_model"
+        case embeddingModel = "embedding_model"
+        case rerankerModel = "reranker_model"
         case provider
     }
 
@@ -1361,17 +1521,34 @@ private struct AppProviderConfigTemplate: Encodable {
         let selectedProvider = catalog.providers.first { $0.id == catalog.selectedProviderID }
             ?? catalog.providers.first
         if let selectedProvider {
-            let selectedModel = selectedProvider.models.first { $0.id == catalog.selectedModelID }
-                ?? selectedProvider.models.first
+            let models = catalog.inferenceModels(for: selectedProvider)
+            let selectedModel = models.first { $0.id == catalog.selectedModelID }
+                ?? models.first
             let modelID = selectedModel?.id ?? AppConfig.defaultModel
             self.model = "\(selectedProvider.id)/\(modelID)"
         } else {
             self.model = AppConfig.defaultModel
         }
+        if let reviewer = catalog.permissionReviewerModel {
+            self.permissionReviewerModel = .string(
+                "\(reviewer.endpoint)/\(reviewer.model.rawValue)")
+        } else {
+            // Preserve every unresolved authorization route as explicit null.
+            // Omitting the key after rewriting the ordinary selected model
+            // would turn a fail-closed state into compatibility inheritance on
+            // the next launch.
+            self.permissionReviewerModel = .null
+        }
         self.imageModel = catalog.imageModel.map {
             "\($0.endpoint)/\($0.model.rawValue)"
         }
         self.transcriptionModel = catalog.transcriptionModel.map {
+            "\($0.endpoint)/\($0.model.rawValue)"
+        }
+        self.embeddingModel = catalog.embeddingModel.map {
+            "\($0.endpoint)/\($0.model.rawValue)"
+        }
+        self.rerankerModel = catalog.rerankerModel.map {
             "\($0.endpoint)/\($0.model.rawValue)"
         }
         self.provider = Dictionary(uniqueKeysWithValues: catalog.providers.map { provider in
@@ -1431,9 +1608,12 @@ private struct AppProviderConfigFile: Decodable {
     var model: String?
     var smallModel: String?
     var small_model: String?
+    var permission_reviewer_model: JSONValue?
     var imageModel: String?
     var image_model: String?
     var transcription_model: String?
+    var embedding_model: String?
+    var reranker_model: String?
     var webSearchModel: String?
     var web_search_model: String?
     var enabledProviders: [String]?
@@ -1443,25 +1623,52 @@ private struct AppProviderConfigFile: Decodable {
     var providers: [AppProviderSettings]?
     var provider: [String: AppProviderConfigFileProvider]?
 
-    func catalog(configFileURL: URL?) -> AppProviderCatalog? {
+    func catalog(
+        configFileURL: URL?,
+        permissionReviewerFieldWasPresent: Bool? = nil
+    ) -> AppProviderCatalog? {
         let configDirectory = configFileURL?.deletingLastPathComponent()
         var entries = providers ?? []
         let enabled = enabledProviders ?? enabled_providers
         let disabled = disabledProviders ?? disabled_providers
         let resolvedModel = resolvedConfigValue(model ?? smallModel ?? small_model,
                                                 configDirectory: configDirectory)
+        let permissionReviewerWasExplicitlyConfigured =
+            permissionReviewerFieldWasPresent
+                ?? (permission_reviewer_model != nil)
+        let rawPermissionReviewerModel: String?
+        if case .string(let value)? = permission_reviewer_model {
+            rawPermissionReviewerModel = value
+        } else {
+            rawPermissionReviewerModel = nil
+        }
+        let resolvedPermissionReviewerModel = resolvedConfigValue(
+            permissionReviewerWasExplicitlyConfigured
+                ? rawPermissionReviewerModel
+                : resolvedModel,
+            configDirectory: configDirectory)
         let resolvedImageModel = resolvedConfigValue(
             image_model ?? imageModel,
             configDirectory: configDirectory)
         let resolvedTranscriptionModel = resolvedConfigValue(
             transcription_model,
             configDirectory: configDirectory)
+        let resolvedEmbeddingModel = resolvedConfigValue(
+            embedding_model,
+            configDirectory: configDirectory)
+        let resolvedRerankerModel = resolvedConfigValue(
+            reranker_model,
+            configDirectory: configDirectory)
         let resolvedWebSearchModel = resolvedConfigValue(
             webSearchModel ?? web_search_model,
             configDirectory: configDirectory)
         let split = splitModel(resolvedModel)
+        let permissionReviewerSplit = splitModel(
+            resolvedPermissionReviewerModel)
         let imageSplit = splitModel(resolvedImageModel)
         let transcriptionSplit = splitModel(resolvedTranscriptionModel)
+        let embeddingSplit = splitModel(resolvedEmbeddingModel)
+        let rerankerSplit = splitModel(resolvedRerankerModel)
         if !entries.isEmpty {
             entries = entries.filter {
                 shouldIncludeProvider(id: $0.id, enabled: enabled, disabled: disabled)
@@ -1476,9 +1683,18 @@ private struct AppProviderConfigFile: Decodable {
                     id: id,
                     selectedModelID: providerIDsMatch(split.providerID, id) ? split.modelID : nil,
                     allowsEmptyModels:
-                        providerIDsMatch(imageSplit.providerID, id)
+                        providerIDsMatch(
+                            permissionReviewerSplit.providerID,
+                            id)
+                        || providerIDsMatch(imageSplit.providerID, id)
                         || providerIDsMatch(
                             transcriptionSplit.providerID,
+                            id)
+                        || providerIDsMatch(
+                            embeddingSplit.providerID,
+                            id)
+                        || providerIDsMatch(
+                            rerankerSplit.providerID,
                             id),
                     configDirectory: configDirectory,
                     configFileURL: configFileURL)
@@ -1517,6 +1733,40 @@ private struct AppProviderConfigFile: Decodable {
             ?? entries.first(where: { $0.id == selectedProvider })?.models.first?.id
             ?? entries[0].models.first?.id
             ?? AppConfig.defaultModel
+        let permissionReviewerRef: ModelRef?
+        if permissionReviewerWasExplicitlyConfigured {
+            permissionReviewerRef = explicitProviderModelRef(
+                resolvedPermissionReviewerModel,
+                entries: entries)
+        } else if let configuredProviderID,
+                  let configuredModelID,
+                  let actualProviderID = actualProviderID(
+                      matching: configuredProviderID,
+                      in: entries) {
+            // Compatibility follows the JSON document's resolved top-level
+            // model selection exactly once, including a uniquely resolvable
+            // unqualified model ID. It never consults the later UI selection.
+            permissionReviewerRef = ModelRef(
+                endpoint: actualProviderID,
+                model: ModelID(rawValue: configuredModelID))
+        } else {
+            permissionReviewerRef = nil
+        }
+        if let permissionReviewerRef,
+           let actualProviderID = actualProviderID(
+               matching: permissionReviewerRef.endpoint,
+               in: entries),
+           let index = entries.firstIndex(where: {
+               $0.id == actualProviderID
+           }),
+           !entries[index].models.contains(where: {
+               $0.id == permissionReviewerRef.model.rawValue
+           }) {
+            entries[index].models.append(AppProviderModel(
+                id: permissionReviewerRef.model.rawValue,
+                displayName: AppConfig.defaultDisplayName(
+                    for: permissionReviewerRef.model.rawValue)))
+        }
         let imageRef = backgroundModelRef(
             resolvedImageModel,
             preferredProviderID: selectedProvider,
@@ -1524,6 +1774,12 @@ private struct AppProviderConfigFile: Decodable {
         let transcriptionRef = backgroundModelRef(
             resolvedTranscriptionModel,
             preferredProviderID: selectedProvider,
+            entries: entries)
+        let embeddingRef = knowledgeModelRef(
+            resolvedEmbeddingModel,
+            entries: entries)
+        let rerankerRef = knowledgeModelRef(
+            resolvedRerankerModel,
             entries: entries)
         let webSearchRef = backgroundModelRef(
             resolvedWebSearchModel,
@@ -1533,8 +1789,13 @@ private struct AppProviderConfigFile: Decodable {
         return AppProviderCatalog(selectedProviderID: selectedProvider,
                                   selectedModelID: selectedModel,
                                   selectedVariantID: selectedVariantID,
+                                  permissionReviewerModel: permissionReviewerRef,
+                                  permissionReviewerModelWasExplicitlyConfigured:
+                                      permissionReviewerWasExplicitlyConfigured,
                                   imageModel: imageRef,
                                   transcriptionModel: transcriptionRef,
+                                  embeddingModel: embeddingRef,
+                                  rerankerModel: rerankerRef,
                                   webSearchModel: webSearchRef,
                                   providers: entries)
     }
@@ -1568,6 +1829,58 @@ private struct AppProviderConfigFile: Decodable {
         return ModelRef(
             endpoint: endpointID,
             model: ModelID(rawValue: selection.modelID))
+    }
+
+    /// Authorization-role routes must name an enabled provider explicitly.
+    /// Unlike the ordinary background-role parser, this never borrows the
+    /// mutable selected provider for an unqualified value.
+    private func explicitProviderModelRef(
+        _ raw: String?,
+        entries: [AppProviderSettings]
+    ) -> ModelRef? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        for entry in entries.sorted(by: { $0.id.count > $1.id.count }) {
+            let prefix = entry.id + "/"
+            guard raw.hasPrefix(prefix) else { continue }
+            let modelID = String(raw.dropFirst(prefix.count))
+            guard !modelID.isEmpty,
+                  entry.models.contains(where: { $0.id == modelID }) else {
+                return nil
+            }
+            return ModelRef(
+                endpoint: entry.id,
+                model: ModelID(rawValue: modelID))
+        }
+        return nil
+    }
+
+    /// Knowledge roles never inherit the currently selected Chat provider.
+    /// Only the canonical `<provider-id>/<model-id>` spelling produces a
+    /// binding; malformed or unqualified values leave the tools unavailable.
+    private func knowledgeModelRef(
+        _ raw: String?,
+        entries: [AppProviderSettings]
+    ) -> ModelRef? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        let split = splitModel(raw)
+        guard let providerID = split.providerID,
+              let modelID = split.modelID,
+              !providerID.isEmpty,
+              !modelID.isEmpty else {
+            return nil
+        }
+        let endpointID = actualProviderID(
+            matching: providerID,
+            in: entries) ?? providerID
+        return ModelRef(
+            endpoint: endpointID,
+            model: ModelID(rawValue: modelID))
     }
 
     private func fallbackProviderSettings(id: String, modelID: String) -> AppProviderSettings? {

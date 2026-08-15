@@ -75,12 +75,17 @@ private struct IntatisChatSessionScreen: View {
     let sessionTitle: String
     @Environment(\.colorScheme) private var scheme
     @State private var historyWindowUpperBound: Int?
+    @State private var showAttachmentImporter = false
     private static let bottomAnchorID = "intatis-chat-thread-bottom"
 
     var body: some View {
         GeometryReader { proxy in
             content(layout: IntatisMacScreenLayout(rawWidth: proxy.size.width))
         }
+        .intatisComposerAttachmentImport(
+            isPresented: $showAttachmentImporter,
+            onImport: { model.importDraftAttachments($0) },
+            onFailure: { model.reportAttachmentImportFailure($0) })
     }
 
     private func content(layout: IntatisMacScreenLayout) -> some View {
@@ -101,6 +106,9 @@ private struct IntatisChatSessionScreen: View {
             IntatisComposer(model: model,
                             catalog: env.providerCatalog,
                             onSelectModel: env.selectProviderModel(providerID:modelID:variantID:),
+                            onAttach: {
+                                showAttachmentImporter = true
+                            },
                             onSend: {
                                 historyWindowUpperBound = nil
                                 model.send()
@@ -289,11 +297,13 @@ struct IntatisChatModelMenu: View {
 
     private var selectedModel: AppProviderModel? { catalog.selectedModel }
     private var menuProviders: [ProviderModelMenuProvider] {
-        catalog.providers.map { provider in
-            ProviderModelMenuProvider(
+        catalog.providers.compactMap { provider in
+            let models = catalog.inferenceModels(for: provider)
+            guard !models.isEmpty else { return nil }
+            return ProviderModelMenuProvider(
                 id: provider.id,
                 title: provider.title,
-                models: provider.models.flatMap { model in
+                models: models.flatMap { model in
                     let base = ProviderModelMenuModel(
                         id: model.id,
                         modelID: model.id,
@@ -437,11 +447,6 @@ struct IntatisMessageBubble: View {
 
     private var isUser: Bool { message.role == .user }
 
-    private var isUninterruptedAgentReply: Bool {
-        (message.role == .assistant || message.role == .agent)
-            && message.recoveryAdvice == nil
-    }
-
     private var roleLabel: String? {
         switch message.role {
         case .user:      return nil
@@ -467,15 +472,14 @@ struct IntatisMessageBubble: View {
     }
 
     @ViewBuilder private var bubble: some View {
-        if isUninterruptedAgentReply {
-            bubbleBody
-                .padding(.vertical, 8)
-        } else {
+        if isUser {
             bubbleBody
                 .padding(.horizontal, 15)
                 .padding(.vertical, 11)
-                .intatisContentSurface(cornerRadius: 16)
-                .overlay { userSelectionStroke }
+                .intatisLiquidGlass(cornerRadius: 16)
+        } else {
+            bubbleBody
+                .padding(.vertical, 8)
         }
     }
 
@@ -514,19 +518,27 @@ struct IntatisMessageBubble: View {
                         citations: message.citations)
                 }
             } else {
-                Text(displayText)
-                    .font(IntatisType.chat(15))
-                    .foregroundStyle(IntatisTheme.deepText(scheme))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                if !displayText.isEmpty {
+                    Text(displayText)
+                        .font(IntatisType.chat(15))
+                        .foregroundStyle(IntatisTheme.deepText(scheme))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if isUser, !message.attachments.isEmpty {
+                    Label(
+                        message.attachments.count == 1
+                            ? IntatisLocalization.format(
+                                "%lld attachment",
+                                Int64(message.attachments.count))
+                            : IntatisLocalization.format(
+                                "%lld attachments",
+                                Int64(message.attachments.count)),
+                        systemImage: "paperclip")
+                        .font(IntatisType.caption(12))
+                        .foregroundStyle(IntatisTheme.softText(scheme))
+                }
             }
-        }
-    }
-
-    @ViewBuilder private var userSelectionStroke: some View {
-        if isUser {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(IntatisTheme.selectedStroke(scheme), lineWidth: 1)
         }
     }
 
@@ -548,13 +560,15 @@ struct IntatisComposer: View {
     @ObservedObject var model: ChatViewModel
     let catalog: AppProviderCatalog
     let onSelectModel: (String, String, String?) -> Void
+    let onAttach: () -> Void
     let onSend: () -> Void
     @Environment(\.colorScheme) private var scheme
 
     private var canSend: Bool {
         !model.isBusy
             && !model.voiceInput.isEngaged
-            && !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !model.draftAttachments.isEmpty)
     }
 
     var body: some View {
@@ -564,16 +578,20 @@ struct IntatisComposer: View {
             canSend: canSend,
             isInputDisabled: model.isBusy,
             style: .intatisMac(scheme),
-            secondaryAction: IntatisThreadComposerSecondaryAction(
-                systemImage: "photo",
-                help: IntatisLocalization.string("Generate image from prompt"),
-                isBusy: model.isGeneratingArtifact,
-                isDisabled: !canSend,
-                action: { model.generateImage() }),
             leadingAccessory: AnyView(IntatisComposerModelControl(
                 catalog: catalog,
                 isBusy: model.isBusy,
                 onSelectModel: onSelectModel)),
+            inputLeadingAccessory: AnyView(
+                IntatisMacComposerAttachmentAccessory(
+                    attachments: model.draftAttachments,
+                    accessibilityPrefix: "chat",
+                    isBusy: model.isImportingAttachments,
+                    isDisabled: model.isBusy,
+                    onAttach: onAttach,
+                    onRemove: {
+                        model.removeDraftAttachment($0)
+                    })),
             trailingAction: IntatisThreadComposerSecondaryAction(
                 systemImage: model.voiceInput.buttonSystemImage,
                 help: model.voiceInput.buttonHelp,
@@ -1291,8 +1309,9 @@ struct IntatisSettingsPanel: View {
         catalog.selectedProviderID = provider.id
         isProviderConnectionExpanded = false
         isModelManagementExpanded = false
-        if !provider.models.contains(where: { $0.id == catalog.selectedModelID }) {
-            catalog.selectedModelID = provider.models.first?.id ?? AppConfig.defaultModel
+        let models = catalog.inferenceModels(for: provider)
+        if !models.contains(where: { $0.id == catalog.selectedModelID }) {
+            catalog.selectedModelID = models.first?.id ?? AppConfig.defaultModel
         }
         saved = false
     }

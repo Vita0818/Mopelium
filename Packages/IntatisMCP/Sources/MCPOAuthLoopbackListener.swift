@@ -409,7 +409,7 @@ public final class MCPOAuthLoopbackCallbackListener:
         status: String
     ) throws {
         let body =
-            "<!doctype html><meta charset=\"utf-8\"><title>Mopelium</title><p>Authorization received. You may close this window.</p>"
+            "<!doctype html><meta charset=\"utf-8\"><title>Intatis</title><p>Authorization received. You may close this window.</p>"
         let response =
             "HTTP/1.1 \(status)\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nPragma: no-cache\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
         let data = Data(response.utf8)
