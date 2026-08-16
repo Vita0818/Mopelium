@@ -142,7 +142,14 @@ final class CapabilityLeaseTests: XCTestCase {
     }
 
     func testSplitDocumentReadToolsDeriveDocumentReadAction() {
-        for toolName in ["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"] {
+        for toolName in [
+            "inspect_pdf", "read_pdf",
+            "read_docx", "continue_docx_read",
+            "read_pptx", "continue_pptx_read",
+            "read_xlsx", "continue_xlsx_read",
+            "read_html", "continue_html_read",
+            "read_epub", "continue_epub_read",
+        ] {
             let intent = PermissionIntent.derived(
                 toolName: toolName,
                 sideEffect: .exec,

@@ -6,11 +6,60 @@ enum LibreOfficeDocumentBackend {
     static let expectedProductName = "LibreOfficeDev"
     static let expectedVersion = "26.8.0.0.beta1"
 
-    static func exportPDF(
+    static func exportDOCXPDF(
         actualInput: URL,
         reviewedInputPath: String,
         stagedPDF: URL,
         reviewedOutputPath: String,
+        in context: ToolContext
+    ) async throws -> [String: String] {
+        try await exportPDF(
+            actualInput: actualInput,
+            reviewedInputPath: reviewedInputPath,
+            stagedPDF: stagedPDF,
+            reviewedOutputPath: reviewedOutputPath,
+            exportFilter: "pdf:writer_pdf_Export",
+            in: context)
+    }
+
+    static func exportPPTXPDF(
+        actualInput: URL,
+        reviewedInputPath: String,
+        stagedPDF: URL,
+        reviewedOutputPath: String,
+        in context: ToolContext
+    ) async throws -> [String: String] {
+        try await exportPDF(
+            actualInput: actualInput,
+            reviewedInputPath: reviewedInputPath,
+            stagedPDF: stagedPDF,
+            reviewedOutputPath: reviewedOutputPath,
+            exportFilter: "pdf:impress_pdf_Export",
+            in: context)
+    }
+
+    static func exportXLSXPDF(
+        actualInput: URL,
+        reviewedInputPath: String,
+        stagedPDF: URL,
+        reviewedOutputPath: String,
+        in context: ToolContext
+    ) async throws -> [String: String] {
+        try await exportPDF(
+            actualInput: actualInput,
+            reviewedInputPath: reviewedInputPath,
+            stagedPDF: stagedPDF,
+            reviewedOutputPath: reviewedOutputPath,
+            exportFilter: "pdf:calc_pdf_Export",
+            in: context)
+    }
+
+    private static func exportPDF(
+        actualInput: URL,
+        reviewedInputPath: String,
+        stagedPDF: URL,
+        reviewedOutputPath: String,
+        exportFilter: String,
         in context: ToolContext
     ) async throws -> [String: String] {
         let version = try await requireVersion(in: context)
@@ -19,19 +68,6 @@ enum LibreOfficeDocumentBackend {
         let profileDirectory = stageRoot.appendingPathComponent("libreoffice-profile", isDirectory: true)
         try createPrivateBackendDirectory(outputDirectory)
         try prepareSafeLibreOfficeProfile(profileDirectory)
-        let exportFilter: String
-        switch actualInput.pathExtension.lowercased() {
-        case "docx":
-            exportFilter = "pdf:writer_pdf_Export"
-        case "pptx":
-            exportFilter = "pdf:impress_pdf_Export"
-        case "xlsx":
-            exportFilter = "pdf:calc_pdf_Export"
-        default:
-            throw DocumentToolError(
-                .unsupportedOperation,
-                "LibreOffice PDF export accepts only DOCX, PPTX, or XLSX")
-        }
         let profileArgument = "-env:UserInstallation=\(profileDirectory.absoluteString)"
         let inputIsInternal = actualInput.path != stageRoot.path
             && PathConfinement.isWithin(actualInput.path, root: stageRoot)
@@ -70,76 +106,6 @@ enum LibreOfficeDocumentBackend {
             throw DocumentToolError(.backendFailed, "LibreOffice PDF output could not be staged")
         }
         return ["libreoffice": version]
-    }
-
-    /// Calc owns the final XLSX round trip. A newly written formula is accepted
-    /// only after the caller's data-only verifier proves that LibreOffice wrote
-    /// a readable cached value, so this route does not infer recalculation from
-    /// a successful conversion alone.
-    static func recalculateAndSaveXLSX(
-        editedInput: URL,
-        stagedXLSX: URL,
-        previewPDF: URL,
-        reviewedInputPath: String,
-        reviewedOutputPath: String,
-        in context: ToolContext
-    ) async throws -> [String: String] {
-        let version = try await requireVersion(in: context)
-        let stageRoot = stagedXLSX.deletingLastPathComponent()
-        let outputDirectory = stageRoot.appendingPathComponent(
-            "libreoffice-calc-output",
-            isDirectory: true)
-        let profile = stageRoot.appendingPathComponent(
-            "libreoffice-calc-profile",
-            isDirectory: true)
-        try createPrivateBackendDirectory(outputDirectory)
-        try prepareSafeLibreOfficeProfile(profile)
-        let profileArgument = "-env:UserInstallation=\(profile.absoluteString)"
-        let invocation = DocumentBackendInvocation(
-            executable: .libreOffice,
-            arguments: [
-                "--headless",
-                "--nologo",
-                "--nodefault",
-                "--nofirststartwizard",
-                "--nolockcheck",
-                "--norestore",
-                profileArgument,
-                "--convert-to", "xlsx:Calc MS Excel 2007 XML",
-                "--outdir", outputDirectory.path,
-                editedInput.path,
-            ],
-            readableWorkspacePaths: [reviewedInputPath],
-            writableWorkspacePaths: [reviewedOutputPath],
-            internalWritableWorkspacePaths: [stageRoot.path],
-            internalReadOnlyWorkspacePaths: [editedInput.path])
-        let result = try await run(invocation, in: context)
-        guard result.exitCode == 0 else {
-            throw DocumentToolError(.backendFailed, "LibreOffice Calc XLSX round trip failed")
-        }
-        let candidates = try safeRegularFiles(in: outputDirectory).filter {
-            $0.pathExtension.lowercased() == "xlsx"
-        }
-        guard candidates.count == 1,
-              FileManager.default.fileExists(atPath: stagedXLSX.path) == false else {
-            throw DocumentToolError(
-                .validationFailed,
-                "LibreOffice Calc did not produce exactly one XLSX")
-        }
-        do {
-            try FileManager.default.moveItem(at: candidates[0], to: stagedXLSX)
-        } catch {
-            throw DocumentToolError(.backendFailed, "LibreOffice Calc output could not be staged")
-        }
-        var versions = try await exportPDF(
-            actualInput: stagedXLSX,
-            reviewedInputPath: reviewedOutputPath,
-            stagedPDF: previewPDF,
-            reviewedOutputPath: reviewedOutputPath,
-            in: context)
-        versions["libreoffice"] = version
-        versions["xlsx_recalculation"] = "calc_roundtrip_cache_verified"
-        return versions
     }
 
     private static func requireVersion(in context: ToolContext) async throws -> String {

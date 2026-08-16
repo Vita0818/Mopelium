@@ -1,8 +1,8 @@
 # TESTING
 
 文档状态：当前验证矩阵
-最近核对：2026-08-15
-产品基线：v0.48（build 48）
+最近核对：2026-08-16
+产品基线：v0.10（build 49）
 
 历史测试数量、性能数字和事故复验保留在 Git 历史及 dated reports；它们不能替代当前
 working tree 的验证。这里只记录现行命令、release gate 和最近一次真实结果。
@@ -27,11 +27,11 @@ scripts/check-version-consistency.sh
 
 必须同时满足：
 
-- `project.yml`：`MARKETING_VERSION=0.48`，`CURRENT_PROJECT_VERSION=48`；
-- macOS/iOS 参考 Info.plist：`0.48 (48)`；
+- `project.yml`：`MARKETING_VERSION=0.10`，`CURRENT_PROJECT_VERSION=49`；
+- macOS/iOS 参考 Info.plist：`0.10 (49)`；
 - 生成的 `Intatis.xcodeproj`：相同版本；
 - README、文档索引、CURRENT_STATE 和 PROJECT_MAP：相同当前基线；
-- 最终 App bundle：`CFBundleShortVersionString=0.48`、`CFBundleVersion=48`。
+- 最终 App bundle：`CFBundleShortVersionString=0.10`、`CFBundleVersion=49`。
 
 旧设计文档、依赖版本、协议 schema 和 dated reports 中的其他 v0.x 不属于该一致性检查。
 
@@ -246,13 +246,10 @@ swift test --filter AgentLoopPolicyTests
 ```sh
 swift build --target IntatisToolsTests-product --disable-automatic-resolution
 INTATIS_REAL_DOCUMENT_RUNTIME_SMOKE=1 xcrun xctest \
-  -XCTest IntatisToolsTests.DocumentToolsIntegrationTests/testInstalledDocumentRuntimeEPUBWriteWhenEnabled \
-  .build/out/Products/Debug/IntatisToolsTests.xctest
-INTATIS_REAL_DOCUMENT_RUNTIME_SMOKE=1 xcrun xctest \
   -XCTest IntatisToolsTests.DocumentToolsIntegrationTests/testInstalledDocumentRuntimePDFCPUAndOCRWhenEnabled \
   .build/out/Products/Debug/IntatisToolsTests.xctest
 INTATIS_REAL_DOCUMENT_RUNTIME_SMOKE=1 xcrun xctest \
-  -XCTest IntatisToolsTests.DocumentToolsIntegrationTests/testInstalledDocumentRuntimeCoreToolChainWhenEnabled \
+  -XCTest IntatisToolsTests.DocumentToolsIntegrationTests/testInstalledDocumentRuntimeExactDOCXChainWhenEnabled \
   .build/out/Products/Debug/IntatisToolsTests.xctest
 ```
 
@@ -262,43 +259,82 @@ workspace，不得修改源目录，也不得把个人绝对路径写进仓库�
 ```sh
 INTATIS_REAL_DOCUMENT_CORPUS_ROOT=<external-corpus-root> \
   swift test --filter DocumentToolsIntegrationTests/testInstalledDocumentRuntimeReadsUserCorpusWhenConfigured
+
+swift test --filter DocumentReadToolSplitTests
+swift test --filter DocumentToolsIntegrationTests/testInstalledDoclingReaderReturnsSourceBoundContinuationAndLandmarkCursors
+swift test --filter DocumentToolsIntegrationTests/testInspectPDFReturnsHostIdentityUsableByExplicitOCRContract
+swift test --filter DocumentToolsIntegrationTests/testShippingDocumentRuntimeSelectionNeverFallsBackToUserManagedRoot
+swift test --filter DocumentToolsIntegrationTests/testDocumentBackendStopsWhenProcessTreeExceedsResidentMemoryBudget
 ```
 
-第三个 runtime smoke 包含 DOCX write/read、LibreOffice PDF preview/export、PDF read/render，PPTX
-write/read/preview/export/PDF read，以及 XLSX write/Calc round-trip/formula-cache/preview/export；
-任一中途失败都不得把前面的 Python write 或直接无沙箱 LibreOffice 基准记为整条文档链通过。
+第二个 runtime smoke 严格按相邻 ToolResult 串行执行 `docx_create_document` →
+`docx_add_paragraph` → `read_docx` → `docx_export_pdf` → `pdf_render_page`；任一中途失败都不得把
+前面的单步外部 API 调用或直接无沙箱 LibreOffice 基准记为整条 exact chain 通过。
 专项至少证明：
 
-- production registry 暴露 `read_pdf`、`read_docx`、`read_pptx`、`read_xlsx`、`read_html`、
-  `read_epub`、`document_ocr`、`document_render`、`document_export_pdf`、`document_write`；
-  `document_read` 与旧自动读取/PDF mutation/reconstruct 工具不可见，standard/Cowork registry
-  分别为 v3；
-- 五个格式 reader 的 schema 只有 `path` 与可选 `maxCharacters`，格式由工具名固定；它们通过
-  exact one-format Docling high-level converter 返回有界 Markdown，不接受 `format`、`options`、
-  sheet/range/xpath/backend，不返回 raw Docling dict 或嵌入图片 data URI；
-- image-only PDF 返回 typed `ocr_required`；PDF 页面 PNG 的尺寸、SHA-256、字节数和 manifest
-  一致，真实渲染页经视觉检查；
+- production registry 暴露 `inspect_pdf` / `read_pdf`、五个 `read_*` 初读工具及对应五个
+  `continue_*_read` 工具、`ocr_pdf`、`pdf_render_page`、四个 exact PDF export、17 个 DOCX、7 个
+  PPTX 与 5 个 XLSX exact write tools；`document_read` / `document_ocr` / `document_render` /
+  `document_export_pdf` / `document_write` 与旧自动读取/PDF mutation/reconstruct 工具不可见，
+  standard/Cowork registry 分别为 `intatis.standard.v7` / `intatis.cowork.v7`；
+- 五个初读 reader 的 schema 只有 `path` 与可选 `maxCharacters`；五个继续工具的 schema 只有
+  `path`、required opaque `cursor` 与可选 `maxCharacters`。格式由工具名固定；内容、结构和 landmark
+  必须来自 exact one-format external Docling converter、`iterate_items`、ranged Markdown serializer 与
+  `HierarchicalChunker`，不接受 `format`、`options`、sheet/range/xpath/backend，不返回 raw Docling
+  dict 或嵌入图片 data URI；
+- 初读必须返回 source SHA-256、bounded Markdown、next cursor 与 bounded section/page/slide/sheet
+  landmarks；next cursor 可连续覆盖超长单元素，landmark cursor 可跳转，任一 cursor 在源字节变化或
+  format 不匹配后必须 fail closed；不能只验证 tool 名称或 fake backend envelope；
+- image-only PDF 的 `read_pdf` 返回 typed `ocr_required`；`inspect_pdf` 不返回正文或执行 OCR，但返回
+  host-computed source SHA-256/byte count/page count/OCR status，该 SHA 可直接通过
+  `ocr_pdf.expected_source_sha256` schema；`ocr_pdf` 不接受 pages/language/PSM/backend；
+  `pdf_render_page` 每次只提交一个 PNG，真实渲染页经视觉检查；
 - source/destination/辅助资产 CAS、默认 no-clobber、precommit cancellation、backend/validator failure
   均不改原目标；辅助资产 symlink/hardlink/授权后替换 fail closed，目标父目录身份在 terminal commit
-  前后固定，目录 bundle 不暴露 partial pages 或 staging 文件；
+  前后固定；旧目录 bundle transaction API 不再存在，单页 PNG 和每次 Office mutation 都只提交一个文件；
 - 缺失/版本不符 backend 明确返回 `backend_missing` / `backend_version_mismatch`，不触发 fallback；
-- DOCX/PPTX/XLSX/HTML 每个公开 operation 都有真实 runtime corpus；write 后重新打开并按声明
-  postcondition 验证。XLSX 的此项必须发生在 LibreOffice Calc round-trip/save 之后，并同时用
-  formula 与 data-only 两种视图证明目标公式文本保留且存在可读非公式缓存；不能只断言转换成功；
+- 四个 export tool 各自只接受 fixed input extension，并在 fake runner 断言唯一 LibreOffice filter 或
+  WebKit route；每个 exact DOCX/PPTX/XLSX write schema 只包含 source/output CAS 字段与该 external API
+  的直接参数，Python route 名与 model tool 名相同，不得出现 generic `write` / `verify_write`、
+  `format` / `mode` / `operations[]`、preview 或 Calc recalc；
+- PPTX add slide/shape/table 不得顺带写 title/text/cells；XLSX 只保留 workbook/sheet/title/cell-value/
+  append-row，formula、range/style/table/name/chart 均须被 schema 或 semantic validation 拒绝；
 - 生成 PDF 经 strict pdfcpu validation 和 PDFKit reopen/render smoke；validator 不能被描述为视觉保真、
   任意无损往返或 secure redaction 证明；
-- EPUB write 的 Rust helper 必须通过 `cargo fmt -- --check`、`cargo check --locked`、
-  `cargo test --locked` 与 `cargo clippy --locked --all-targets -- -D warnings`；普通 EPUB read 走与
-  其他格式一致的 Docling reader，不再经过 rbook。生产 write 成功还要求正式 EPUBCheck artifact
-  与 round-trip corpus。EPUB render/export 在 full-spine gate 前必须从 schema 删除；
-- stdout/stderr 限制不得误作生成文件限制；单文件、聚合生成字节与 entry 数预算必须在进程运行期及
-  退出后都生效，不能只在 backend 完成后检查 staging；
-- read-only worker 只拿 `read_pdf`、五个 exact reader capability 与 `document_ocr`；五个普通 reader
-  只能通过 exact `structured_read_only + safeToReplay` 权限形状执行。首个 reader 解析失败必须写
+- 普通 EPUB read 走与其他格式一致的 Docling reader，不经过 rbook；production registry 必须没有
+  EPUB/HTML write 与 EPUB render/export。保留的 rbook/EPUBCheck runtime provenance 测试不能被解释为
+  model-facing write route；
+- stdout/stderr 限制不得误作生成文件限制；model-facing transaction 每次只提交一个文件，但 runner
+  仍须在进程运行期及退出后同时约束私有 staging root 的 aggregate generated bytes、file/entry count，
+  不能只在 backend 完成后检查最终文件；独立 2 GiB aggregate RSS ceiling 必须能终止超限 process
+  tree，并返回 resident-memory budget 错误；
+- read-only worker 只拿同一 `readPDF` capability 下的 `inspect_pdf` / `read_pdf`、五个 exact reader
+  capability 对应的初读+继续工具与 `ocr_pdf`；十个 Docling reader tool 只能通过 exact
+  `structured_read_only + safeToReplay` 权限形状执行。首个 reader 解析失败必须写
   failed/unknown settlement、允许同批后续 reader 继续并允许模型给出最终回答；其他 executor error
   同样必须把 failed/unknown observation 返回模型，不得升级成通用整轮终止。read-write
-  worker/coordinator 才拿 render/export/write。
+  worker/coordinator 才拿 `pdf_render_page`、四个 exact export 与 DOCX/PPTX/XLSX exact write。
   iOS target 依赖图仍不含 Tools/Permission/AgentKernel/Cowork/文档 runtime。
+
+发行 runtime 验证还必须独立运行：
+
+```sh
+zsh -n scripts/validate-document-runtime.sh
+plutil -convert xml1 -o /dev/null Packages/IntatisTools/Runtime/document-runtime/release-spec.json
+scripts/validate-document-runtime.sh <absolute-arm64-root> arm64 '<exact Developer ID identity>'
+scripts/validate-document-runtime.sh <absolute-x86_64-root> x86_64 '<exact Developer ID identity>'
+```
+
+两套 root 必须来自已审查的 external runtime 构建，不是仓库自动下载或现场拼装；每套都要通过
+manifest/spec parity、完整 SHA-256 inventory、project-owned EPUBCheck wrapper 与 Heron/tessdata fixed
+hash、target Mach-O architecture、无 build-machine/Homebrew/user-framework absolute dependency/RPATH、
+SPDX-2.3/license inventory 与 bottom-up exact Developer ID signature。上述命令默认只做 `static` 验证，
+不运行 runtime 内容；只有打包脚本先验证 outer App strict resource seal 与 exact identity 后，才对 final
+App 内的两个 root 使用 `execute` 阶段检查 direct executable versions，并把 HOME/TMPDIR 限制在临时
+验证目录。SPDX JSON 合法、package array 非空不等于 transitive closure 已经完整，发行 review 必须另行
+对照 resolved binaries 和 license texts。
+shipping App 缺 bundle runtime 时必须返回 unavailable，不能回退用户 Application Support、Homebrew、
+系统 Java 或在线下载。当前仓库只包含 release contract/validator，不包含双架构 runtime binary roots。
 
 2026-08-11 的本地回归中，外部 corpus opt-in 用例将 1 份稀疏 XLSX 与 3 份 PPTX 复制到临时
 workspace 后全部读取成功；完整 `IntatisToolsTests` 为 223 tests、0 failures、19 skipped，真实 core
@@ -403,6 +439,8 @@ inventory 证明没有本地 workspace stack。
 
 ```sh
 zsh -n scripts/package-macos-release.sh
+zsh -n scripts/validate-document-runtime.sh
+plutil -convert xml1 -o /dev/null Packages/IntatisTools/Runtime/document-runtime/release-spec.json
 security find-identity -v -p codesigning
 xcrun notarytool --version
 ```
@@ -410,13 +448,18 @@ xcrun notarytool --version
 正式执行：
 
 ```sh
-INTATIS_NOTARY_PROFILE=<profile> scripts/package-macos-release.sh
+INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT=<absolute-reviewed-arm64-root> \
+INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT=<absolute-reviewed-x86_64-root> \
+INTATIS_NOTARY_PROFILE=<profile> \
+  scripts/package-macos-release.sh
 ```
 
 如果访问 GitHub 必须开启代理/VPN，而 Apple notarization 必须关闭它，则运行：
 
 ```sh
 INTATIS_PAUSE_BEFORE_NOTARIZATION=1 \
+INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT=<absolute-reviewed-arm64-root> \
+INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT=<absolute-reviewed-x86_64-root> \
 INTATIS_NOTARY_PROFILE=<profile> \
   scripts/package-macos-release.sh
 ```
@@ -443,14 +486,16 @@ recovery App metadata/architecture/signature/entitlements 重新验证；超时�
 
 发行脚本必须在输出 `dist/` 前完成：
 
-1. v0.48/build 48 一致性检查；
-2. `IntatisMac` universal Release；
-3. Developer ID Application + secure timestamp + Hardened Runtime；
-4. signed entitlements 不含 App Sandbox；
-5. App notarization Accepted、staple/validate、strict codesign、Gatekeeper assessment；
-6. 带 `/Applications` 拖放入口的 Developer ID signed DMG；
-7. DMG notarization、staple/validate、codesign、Gatekeeper assessment；
-8. ZIP/DMG SHA-256 清单。
+1. v0.10/build 49 一致性检查；
+2. 独立 arm64/x86_64 external document runtime roots 均通过 manifest/hash/SBOM/license/architecture/
+   bottom-up exact Developer ID signature validator，并在入 App 后复验；
+3. `IntatisMac` universal Release，bundle 同时携带两套 runtime，active slice 只选择对应 architecture；
+4. Developer ID Application + secure timestamp + Hardened Runtime；
+5. signed entitlements 不含 App Sandbox；
+6. App notarization Accepted、staple/validate、strict codesign、Gatekeeper assessment；
+7. 带 `/Applications` 拖放入口的 Developer ID signed DMG；
+8. DMG notarization、staple/validate、codesign、Gatekeeper assessment；
+9. ZIP/DMG SHA-256 清单，以及 clean-machine 文档初读/继续读/PDF inspect→OCR smoke。
 
 任一门槛失败都不得发布 ad-hoc、unsigned、未公证或未通过 Gatekeeper 的包。
 
@@ -593,7 +638,7 @@ Code/Cowork/CLI 的显式 `hosted_web_search` 包装至少追加验证：
 - `CapabilityLeaseTests` / `ToolRegistryLeaseTests`：fresh read-write lease 有独立
   `ToolCapability.hostedWebSearch`，read-only/reviewer/旧 lease 无；concrete tool 必须同时有 lease 与
   bound service，且不得因此出现 `browser_search` / `web_fetch`。registry identity 固定为
-  `intatis.standard.v4` / `intatis.cowork.v4`。
+  `intatis.standard.v7` / `intatis.cowork.v7`。
 - 至少构建 SwiftPM 全图，并编译 macOS Code/Cowork 与 CLI composition root；iOS 继续不链接
   Tools/Permission/AgentKernel/Cowork。真实 provider smoke 必须显式 opt in 并记录 exact
   provider/model/dialect、tool choice、是否返回 citation、usage/cost 与失败形状，不得隐式读取凭据或
@@ -641,6 +686,7 @@ exact test 单独重跑 1/1 通过。不得把该运行记为完整 suite 通过
 
 ```sh
 swift test --filter ArtifactImageResolverTests
+swift test --filter WorkspaceImageToolTests
 swift test --filter IntatisProvidersToolCallingTests
 swift test --filter ModelHistory
 swift test --filter DurableMultimodalAgentLoopTests
@@ -660,6 +706,11 @@ INTATIS_REAL_MULTIMODAL_SMOKE=1 swift test \
 
 专项必须证明：
 
+- `view_image` schema 只有 required `path`，只向注入的 exact-session service 转发已通过
+  WorkspaceLease/PathConfinement 的路径；PNG/JPEG 的实际解码复用 ImageIO resolver，不存在 OCR、
+  编辑、缩放、转换、自写 parser 或自动 `pdf_render_page` 链。端到端测试必须证明真实 workspace PNG
+  经 ArtifactStore 形成 durable image reference，并作为同一 call 的 function output 像素进入下一次
+  provider request；
 - 用户图先进入 exact-session ArtifactStore；`AgentLoop.send`拒绝调用方直接传provider-ready
   `images`/data URL，task-scoped current、stable current/next/restart与legacy ID路径都使用同一bounded
   resolver；
@@ -735,6 +786,76 @@ INTATIS_REAL_MULTIMODAL_SMOKE=1 swift test \
 
 ## 最近一次真实结果
 
+2026-08-16 `v0.10 (49)` 版本调整的当前直接证据：
+
+- `xcodegen generate` 通过；`scripts/check-version-consistency.sh` 通过并输出
+  `Intatis version is consistent: 0.10 (build 49)`；
+- `IntatisMac` unsigned universal Release 构建退出 0，最终 bundle 为 `0.10 (49)`，可执行文件
+  包含 `x86_64 arm64`；
+- `IntatisiOS` generic Simulator Debug unsigned build 退出 0，最终 bundle 为 `0.10 (49)`；
+- 两个构建只出现仓库既有的 unused-result / deprecated API warning，以及 macOS 双架构构建中
+  Xcode 27 已知的 exit-code-0 “produced no further output” 噪声诊断；
+- 本次是版本元数据与当前文档调整，未运行 SwiftPM 单元测试，未安装 App，也未运行 Developer ID
+  正式签名、公证、staple、Gatekeeper、DMG/ZIP 打包或启动后 UI/真实 provider smoke。
+
+2026-08-16 `view_image` 当前直接证据：
+
+- `WorkspaceImageToolTests` 3/3、`ArtifactImageResolverTests` 10/10、
+  `DurableMultimodalAgentLoopTests` 10/10，以及 registry/capability/mailbox/受影响文档目录汇总回归
+  57/57，合计 80/80、0 failures；其中端到端用例使用真实 1×1 PNG，证明 workspace path 经
+  ImageIO/ArtifactStore 变为同一 call 的 durable image reference，并在下一次 provider request 中恢复
+  为 exact data URL 像素；
+- `swift build --disable-automatic-resolution` 与 `xcodegen generate` 通过；`IntatisMac` macOS Debug
+  unsigned、`IntatisiOS` generic Simulator Debug unsigned build 均退出 0，最终 v0.48 bundle executable
+  均存在。Xcode 27 同时打印既有 warning 和 exit-code-0 的“command failed ... no further output”
+  beta diagnostic，因此只能记为退出码与产物均通过，不能记为 warning-free；
+- 未运行真实 provider/key、GUI 手动图片观察、付费 function-output image smoke、签名、公证或
+  clean-machine 验收。
+
+2026-08-15 文档工具一对一打薄后的当前直接证据：
+
+- `swift build --target IntatisTools --disable-automatic-resolution` 与
+  `swift build --target IntatisCowork --disable-automatic-resolution` 均通过；只出现仓库既有 warning；
+- 文档 focused suites 共选择 63 个 case：60 通过、3 个显式 opt-in runtime smoke 按设计跳过、
+  0 failures。其中 `DocumentToolContractTests` 9/9、`DocumentPythonWriteBackendTests` 8/8；其余
+  `DocumentFixedBackendsTests`、`DocumentReadToolSplitTests`、`PDFNativeDocumentServiceTests`、
+  `DocumentInfrastructureTests`、`DocumentToolsIntegrationTests` 共 46 个 case，43 通过、3 跳过；
+- `CapabilityLeaseTests` 7/7、`MessageDelegationSplitTests` 9/9、`ToolRegistryLeaseTests` 27/27、
+  `AgentLoopPolicyTests` 37/37，合计 80/80、0 failures；standard/Cowork registry 当前为 v6，旧
+  aggregate document tool 只保留 durable history/capability decode，不在 production registry；
+- 显式启用已安装外部 runtime 后，exact DOCX create → add paragraph → Docling read → LibreOffice
+  export → PDFKit single-page render 1/1，以及 pdfcpu + Docling/Tesseract OCR 1/1，均通过；普通测试轮次
+  中已安装 Docling 的 HTML continuation/landmark/source-mutation smoke 也通过；
+- `zsh -n scripts/validate-document-runtime.sh`、`zsh -n scripts/package-macos-release.sh`、
+  `python3 -m json.tool Packages/IntatisTools/Runtime/document-runtime/release-spec.json` 与
+  `git diff --check` 均通过。macOS 自带 `plutil -lint` 不接受这份普通 JSON，因而不作为 JSON gate；
+- 未运行整仓全量 SwiftPM test、macOS/iOS App build、Developer ID release、公证、staple、Gatekeeper
+  或 clean-machine 验收；当前结果不能外推为双架构 shipping runtime closure 已完成。
+
+2026-08-15 文档工具一对一打薄之前的第 3、4、6 项直接证据（以下 v5 名称只记录当时结果，
+不代表当前 registry）：
+
+- `DocumentReadToolSplitTests` 5/5：初读 schema 未扩宽；五个 continuation schema 只有
+  `path/cursor/maxCharacters`；聚合 reader 不可见；standard registry 为 v5；
+- `DocumentToolsIntegrationTests` 20 executed / 4 explicit opt-in skipped / 0 failures。其中开发机已安装
+  Docling 的真实 HTML conversion + sequential continuation + landmark jump + source mutation rejection
+  1/1（约 10 秒），PDFKit `inspect_pdf`→`document_ocr.expected_source_sha256` contract 1/1，shipping
+  runtime 不回退用户 root 1/1，8 MiB 测试阈值下的 process-tree resident-memory termination 1/1；
+- `ToolRegistryLeaseTests` 27/27、`CapabilityLeaseTests` 7/7、`GoalRuntimeControllerTests` 32/32、
+  `HostedWebSearchToolTests` 4/4、`IntatisToolsTests/testStandardRegistry` 1/1；继续工具复用既有 format
+  capability，`inspect_pdf` 复用 `readPDF`；default read-only worker 直接可见 inspect/read PDF、五组
+  初读+续读和 `document_ocr`，canonical permission/evidence/registry v5 一致；
+- `swift build --disable-automatic-resolution`、`scripts/check-version-consistency.sh`、两份 release/wrapper
+  shell syntax、release-spec JSON parse 与 `git diff --check` 均通过。release gate 把无执行的 static
+  validation 与 outer App 验签后的 execute validation 分开，固定 wrapper/model/tessdata hashes，并验证
+  SPDX-2.3 core structure；开发机历史 user-managed runtime 因缺 release manifest 被新 validator 按预期
+  拒绝，证明它不能冒充 shipping closure；临时 shipping-layout wrapper probe 在 bundled JRE 缺失时以
+  exit 69 fail closed，没有落到 `/usr/bin/java`；
+- 本轮没有运行 4 个显式 opt-in 的完整 EPUB write、pdfcpu+真实 OCR、DOCX/PPTX/XLSX write/export 或
+  外部用户 corpus smoke；既有 2026-08-11 证据仍单独保留。本轮也没有双架构签名 runtime roots，未运行
+  Xcode App build、Developer ID release、公证、staple、Gatekeeper 或 clean-machine 验收，因而第六项
+  只能记为 integration + fail-closed release gate 已完成，binary distribution closure 仍未完成。
+
 2026-08-11 本机 LibreOffice 26.8 替换与真实链路证据：
 
 - 官方 `LibreOfficeDev_26.8.0.0.beta1_MacOS_aarch64.dmg` 为 298,129,546 bytes，SHA-256
@@ -756,8 +877,7 @@ INTATIS_REAL_MULTIMODAL_SMOKE=1 swift test \
   current-UID、非 symlink、`0700` 目录。Seatbelt 只允许该 root 的文件读写、本地 `OSL_PIPE_*`
   Unix socket bind/connect，并继续拒绝 IP 网络和其他 Unix socket；调用结束清理 exact root。对应
   profile 单元测试 1/1、`DocumentFixedBackendsTests` 4/4；
-- `INTATIS_REAL_DOCUMENT_RUNTIME_SMOKE=1 swift test --filter DocumentToolsIntegrationTests/testInstalledDocumentRuntimeCoreToolChainWhenEnabled`
-  在干净副本上 1/1：
+- 当时的 legacy aggregate core-chain smoke（该测试现已删除）在干净副本上 1/1：
   DOCX write/read/preview/export/PDF read/render；PPTX write/read/preview/export/PDF read；XLSX write、
   LibreOffice Calc round-trip、公式文本保留、data-only cache 值 `4`、preview/export。真实测试后再次
   `codesign --verify --deep --strict` 与 `spctl`，结果仍为 valid/accepted，证明 Intatis 路径没有修改
@@ -1350,7 +1470,7 @@ INTATIS_REAL_MULTIMODAL_SMOKE=1 swift test \
 只有以下条件同时满足才能写 release GO：
 
 - 当前 working tree 相关 tests/builds 通过，已知失败有明确处置；
-- 最终 App/ZIP/DMG 元数据为 `0.48 (48)`；
+- 最终 App/ZIP/DMG 元数据为 `0.10 (49)`；
 - Developer ID、notarization、staple、codesign、Gatekeeper 全部通过；
 - NOTICE/ThirdPartyNotices 和最终 bundle resource/link inventory 一致；
 - 关键真实环境矩阵完成，未完成项以明确的风险接受记录处理。

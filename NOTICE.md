@@ -52,6 +52,29 @@ scope, and runtime-distribution gate are recorded in
 reproducible source/build closure; it does not claim that a universal signed
 helper binary or its release license bundle is already shipped in the App.
 
+## Structured document reading runtime dependencies
+
+The macOS/non-iOS document tools use a pinned external runtime rather than
+Intatis-authored Office/HTML/EPUB/PDF/OCR parsers. Ordinary DOCX, PPTX, XLSX,
+HTML, and EPUB reading calls Docling 2.117.0 and docling-core 2.89.0 public
+conversion, document-iteration, ranged Markdown-serialization, and
+hierarchical-chunking APIs. Explicit PDF OCR uses the pinned Docling PDF path,
+Tesseract 5.5.3, allowlisted tessdata, and the fixed Apache-2.0 Heron model at
+revision `8f39ad3c0b4c58e9c2d2c84a38465abf757272d8`.
+
+The release closure additionally pins CPython 3.11.9, format dependencies,
+pypdfium2 5.12.1, pdfcpu 0.13.0, EPUBCheck 5.3.0, Eclipse Temurin JRE
+21.0.11+10, and LibreOfficeDev 26.8.0.0.beta1. Exact source identities,
+direct license metadata, model/data hashes, exclusions, execution boundaries,
+and the mandatory transitive SBOM/license/signature gate are recorded in
+`ThirdPartyNotices/DocumentReadingRuntime.md` and
+`Packages/IntatisTools/Runtime/document-runtime/release-spec.json`.
+
+This working tree adds the integration and fail-closed release gate; it does
+not claim that reviewed, signed dual-architecture runtime roots or a notarized
+clean-machine distribution have already been produced. A release must carry
+the complete license/NOTICE closure inside each validated runtime root.
+
 ## OpenAI Codex Skill Creator derivative
 
 The project-local `.agents/skills/intatis-skill-creator/` Skill is a modified

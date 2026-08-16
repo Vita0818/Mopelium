@@ -1622,7 +1622,7 @@ final class IntatisToolsTests: XCTestCase {
             git: FakeGit(statusText: "", diffText: ""))
 
         let obs = try await CompileLaTeXTool().execute(
-            ToolArgs(raw: #"{"inputPath":"main.tex","outputDir":"build","engine":"tectonic"}"#),
+            ToolArgs(raw: #"{"inputPath":"main.tex","outputDir":"build"}"#),
             in: ctx)
 
         XCTAssertEqual(obs.changedFiles, ["build/main.pdf"])
@@ -1630,11 +1630,11 @@ final class IntatisToolsTests: XCTestCase {
     }
 
     #if canImport(Darwin)
-    func testCompileLatexIgnoresWorkspaceRCAndDisablesShellEscape() async throws {
+    func testCompileLatexUsesOnlyTectonicAndDisablesShellEscape() async throws {
         guard ProcessShellRunner.supportsWorkspaceSandbox,
-              FileManager.default.isExecutableFile(atPath: "/Library/TeX/texbin/latexmk"),
-              FileManager.default.isExecutableFile(atPath: "/Library/TeX/texbin/pdflatex") else {
-            throw XCTSkip("latexmk/pdflatex and the workspace sandbox are required")
+              ["/opt/homebrew/bin/tectonic", "/usr/local/bin/tectonic"]
+                .contains(where: FileManager.default.isExecutableFile(atPath:)) else {
+            throw XCTSkip("Tectonic and the workspace sandbox are required")
         }
         let ws = try tempWorkspace()
         defer { try? FileManager.default.removeItem(at: ws) }
@@ -1650,7 +1650,7 @@ final class IntatisToolsTests: XCTestCase {
         try Data(source.utf8).write(to: ws.appendingPathComponent("main.tex"))
 
         let observation = try await CompileLaTeXTool().execute(
-            ToolArgs(raw: #"{"inputPath":"main.tex","outputDir":"build","engine":"latexmk"}"#),
+            ToolArgs(raw: #"{"inputPath":"main.tex","outputDir":"build"}"#),
             in: ToolContext(workspaceRoot: ws))
 
         XCTAssertEqual(observation.changedFiles, ["build/main.pdf"])
@@ -1660,8 +1660,9 @@ final class IntatisToolsTests: XCTestCase {
 
     func testCompileLatexCannotReadOutsideWorkspace() async throws {
         guard ProcessShellRunner.supportsWorkspaceSandbox,
-              FileManager.default.isExecutableFile(atPath: "/Library/TeX/texbin/pdflatex") else {
-            throw XCTSkip("pdflatex and the workspace sandbox are required")
+              ["/opt/homebrew/bin/tectonic", "/usr/local/bin/tectonic"]
+                .contains(where: FileManager.default.isExecutableFile(atPath:)) else {
+            throw XCTSkip("Tectonic and the workspace sandbox are required")
         }
         let ws = try tempWorkspace()
         let outside = ws.deletingLastPathComponent().appendingPathComponent("intatis-tex-outside-\(UUID().uuidString).tex")
@@ -1680,7 +1681,7 @@ final class IntatisToolsTests: XCTestCase {
 
         do {
             _ = try await CompileLaTeXTool().execute(
-                ToolArgs(raw: #"{"inputPath":"main.tex","outputDir":"build","engine":"pdflatex"}"#),
+                ToolArgs(raw: #"{"inputPath":"main.tex","outputDir":"build"}"#),
                 in: ToolContext(workspaceRoot: ws))
             XCTFail("TeX unexpectedly read an outside-workspace input")
         } catch {
@@ -1692,7 +1693,7 @@ final class IntatisToolsTests: XCTestCase {
     func testDocumentToolDescriptionsDefineNonOverlappingSelectionContract() {
         let pdf = ReadPDFTool.descriptor.description
         XCTAssertTrue(pdf.contains("never performs OCR"))
-        XCTAssertTrue(pdf.contains("document_ocr"))
+        XCTAssertTrue(pdf.contains("ocr_pdf"))
 
         let readers = [
             ReadDOCXTool.descriptor,
@@ -1706,21 +1707,22 @@ final class IntatisToolsTests: XCTestCase {
             XCTAssertTrue(reader.description.contains("no fallback"), reader.name)
         }
 
-        let ocr = DocumentOCRTool.descriptor.description
-        XCTAssertTrue(ocr.contains("explicit offline OCR"))
-        XCTAssertTrue(ocr.contains("never chooses an OCR engine automatically"))
+        let ocr = OCRPDFTool.descriptor.description
+        XCTAssertTrue(ocr.contains("Docling DocumentConverter"))
+        XCTAssertTrue(ocr.contains("pinned Tesseract"))
 
-        let render = DocumentRenderTool.descriptor.description
-        XCTAssertTrue(render.contains("deterministic PNG"))
-        XCTAssertTrue(render.contains("committed atomically"))
+        let render = PDFRenderPageTool.descriptor.description
+        XCTAssertTrue(render.contains("exactly one page"))
+        XCTAssertTrue(render.contains("PDFPage.draw"))
 
-        let export = DocumentExportPDFTool.descriptor.description
-        XCTAssertTrue(export.contains("PDF input is rejected"))
-        XCTAssertTrue(export.contains("pdfcpu strict validation"))
+        let registry = ToolRegistry.standard()
+        let export = registry.registration(named: "docx_export_pdf")?.descriptor.description ?? ""
+        XCTAssertTrue(export.contains("writer_pdf_Export"))
+        XCTAssertTrue(export.contains("no format or backend selection"))
 
-        let write = DocumentWriteTool.descriptor.description
-        XCTAssertTrue(write.contains("PDF mutation is unsupported"))
-        XCTAssertTrue(write.contains("atomically committed"))
+        let write = registry.registration(named: "docx_add_paragraph")?.descriptor.description ?? ""
+        XCTAssertTrue(write.contains("Document.add_paragraph"))
+        XCTAssertTrue(write.contains("no operations array"))
     }
 
     func testGenerateImageUsesInjectedService() async throws {
@@ -3936,9 +3938,10 @@ final class IntatisToolsTests: XCTestCase {
 
     func testStandardRegistry() {
         let reg = ToolRegistry.standard()
-        XCTAssertEqual(reg.registryVersion, "intatis.standard.v4")
-        XCTAssertEqual(reg.descriptors().count, 66)
+        XCTAssertEqual(reg.registryVersion, "intatis.standard.v7")
+        XCTAssertEqual(reg.descriptors().count, 104)
         XCTAssertNotNil(reg.tool(named: "read_file"))
+        XCTAssertNotNil(reg.tool(named: "view_image"))
         XCTAssertNotNil(reg.tool(named: "apply_patch"))
         XCTAssertNil(reg.tool(named: "run_shell"))
         XCTAssertNotNil(reg.tool(named: "git_status"))
@@ -3965,17 +3968,32 @@ final class IntatisToolsTests: XCTestCase {
         XCTAssertNotNil(reg.tool(named: "git_pull_ff"))
         XCTAssertNotNil(reg.tool(named: "git_push"))
         XCTAssertNotNil(reg.tool(named: "git_switch"))
+        XCTAssertNotNil(reg.tool(named: "inspect_pdf"))
         XCTAssertNotNil(reg.tool(named: "read_pdf"))
         XCTAssertNotNil(reg.tool(named: "read_docx"))
+        XCTAssertNotNil(reg.tool(named: "continue_docx_read"))
         XCTAssertNotNil(reg.tool(named: "read_pptx"))
+        XCTAssertNotNil(reg.tool(named: "continue_pptx_read"))
         XCTAssertNotNil(reg.tool(named: "read_xlsx"))
+        XCTAssertNotNil(reg.tool(named: "continue_xlsx_read"))
         XCTAssertNotNil(reg.tool(named: "read_html"))
+        XCTAssertNotNil(reg.tool(named: "continue_html_read"))
         XCTAssertNotNil(reg.tool(named: "read_epub"))
+        XCTAssertNotNil(reg.tool(named: "continue_epub_read"))
         XCTAssertNil(reg.tool(named: "document_read"))
-        XCTAssertNotNil(reg.tool(named: "document_ocr"))
-        XCTAssertNotNil(reg.tool(named: "document_render"))
-        XCTAssertNotNil(reg.tool(named: "document_export_pdf"))
-        XCTAssertNotNil(reg.tool(named: "document_write"))
+        XCTAssertNotNil(reg.tool(named: "ocr_pdf"))
+        XCTAssertNotNil(reg.tool(named: "pdf_render_page"))
+        XCTAssertNotNil(reg.tool(named: "docx_export_pdf"))
+        XCTAssertNotNil(reg.tool(named: "pptx_export_pdf"))
+        XCTAssertNotNil(reg.tool(named: "xlsx_export_pdf"))
+        XCTAssertNotNil(reg.tool(named: "html_export_pdf"))
+        XCTAssertNotNil(reg.tool(named: "docx_create_document"))
+        XCTAssertNotNil(reg.tool(named: "pptx_create_presentation"))
+        XCTAssertNotNil(reg.tool(named: "xlsx_create_workbook"))
+        XCTAssertNil(reg.tool(named: "document_ocr"))
+        XCTAssertNil(reg.tool(named: "document_render"))
+        XCTAssertNil(reg.tool(named: "document_export_pdf"))
+        XCTAssertNil(reg.tool(named: "document_write"))
         XCTAssertNil(reg.tool(named: "read_document"))
         XCTAssertNil(reg.tool(named: "edit_pdf_pages"))
         XCTAssertNil(reg.tool(named: "reconstruct_document_image"))

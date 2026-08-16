@@ -174,8 +174,8 @@ final class MessageDelegationSplitTests: XCTestCase {
         XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
             .allSatisfy(mailboxToolNames.contains))
         XCTAssertFalse(mailboxToolNames.contains("document_read"))
-        XCTAssertTrue(mailboxToolNames.contains("document_ocr"))
-        XCTAssertFalse(mailboxToolNames.contains("document_render"))
+        XCTAssertTrue(mailboxToolNames.contains("ocr_pdf"))
+        XCTAssertFalse(mailboxToolNames.contains("pdf_render_page"))
         XCTAssertFalse(mailboxToolNames.contains("document_export_pdf"))
         XCTAssertFalse(mailboxToolNames.contains("document_write"))
         XCTAssertFalse(mailboxToolNames.contains("task_create"))
@@ -403,14 +403,15 @@ final class MessageDelegationSplitTests: XCTestCase {
 
     func testCapabilityLeaseControlsMessageAndDelegationTools() {
         let workerTools = Set(Orchestrator.toolRegistry(for: .worker()).descriptors().map(\.name))
+        XCTAssertTrue(workerTools.contains("view_image"))
         XCTAssertTrue(workerTools.contains("reply_message"))
         XCTAssertFalse(workerTools.contains("request_delegation"))
         XCTAssertTrue(workerTools.contains("read_pdf"))
         XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
             .allSatisfy(workerTools.contains))
         XCTAssertFalse(workerTools.contains("document_read"))
-        XCTAssertTrue(workerTools.contains("document_ocr"))
-        XCTAssertFalse(workerTools.contains("document_render"))
+        XCTAssertTrue(workerTools.contains("ocr_pdf"))
+        XCTAssertFalse(workerTools.contains("pdf_render_page"))
         XCTAssertFalse(workerTools.contains("document_export_pdf"))
         XCTAssertFalse(workerTools.contains("document_write"))
         XCTAssertFalse(workerTools.contains("delegate_task"))
@@ -441,6 +442,7 @@ final class MessageDelegationSplitTests: XCTestCase {
         XCTAssertFalse(workerTools.contains("browser_search"))
 
         let coordinatorTools = Set(Orchestrator.toolRegistry(for: .coordinator()).descriptors().map(\.name))
+        XCTAssertTrue(coordinatorTools.contains("view_image"))
         XCTAssertTrue(coordinatorTools.contains("send_message"))
         XCTAssertTrue(coordinatorTools.contains("request_information"))
         XCTAssertTrue(coordinatorTools.contains("reply_message"))
@@ -449,10 +451,17 @@ final class MessageDelegationSplitTests: XCTestCase {
         XCTAssertTrue(["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"]
             .allSatisfy(coordinatorTools.contains))
         XCTAssertFalse(coordinatorTools.contains("document_read"))
-        XCTAssertTrue(coordinatorTools.contains("document_ocr"))
-        XCTAssertTrue(coordinatorTools.contains("document_render"))
-        XCTAssertTrue(coordinatorTools.contains("document_export_pdf"))
-        XCTAssertTrue(coordinatorTools.contains("document_write"))
+        XCTAssertTrue(coordinatorTools.contains("ocr_pdf"))
+        XCTAssertTrue(coordinatorTools.contains("pdf_render_page"))
+        XCTAssertTrue([
+            "docx_export_pdf", "pptx_export_pdf", "xlsx_export_pdf", "html_export_pdf",
+        ].allSatisfy(coordinatorTools.contains))
+        XCTAssertTrue([
+            "docx_create_document", "docx_add_paragraph",
+            "pptx_create_presentation", "xlsx_create_workbook",
+        ].allSatisfy(coordinatorTools.contains))
+        XCTAssertFalse(coordinatorTools.contains("document_export_pdf"))
+        XCTAssertFalse(coordinatorTools.contains("document_write"))
         XCTAssertFalse(coordinatorTools.contains("read_document"))
         XCTAssertFalse(coordinatorTools.contains("edit_pdf_pages"))
         XCTAssertFalse(coordinatorTools.contains("reconstruct_document_image"))

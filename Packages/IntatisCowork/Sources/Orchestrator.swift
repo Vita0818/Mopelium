@@ -394,6 +394,7 @@ public actor Orchestrator {
     private let resolvedInferenceFor: (@Sendable (Agent) async throws -> ResolvedInferenceProfile)?
     private let providerFor: @Sendable (Agent) async throws -> ToolCallingProvider
     private let imageGeneratorFor: @Sendable (Agent) async -> ImageGenerationToolService?
+    private let imageViewer: (any WorkspaceImageViewingService)?
     private let imageResolver: AgentImageResolver?
     private let toolSnapshotProvider:
         ToolSnapshotProvider?
@@ -439,6 +440,7 @@ public actor Orchestrator {
         inferenceProfileRoutingMetadata: [InferenceProfileRoutingMetadata] = [],
         requiresInferenceBindings: Bool = false,
         imageGeneratorFor: @escaping @Sendable (Agent) async -> ImageGenerationToolService? = { _ in nil },
+        imageViewer: (any WorkspaceImageViewingService)? = nil,
         imageResolver: AgentImageResolver? = nil,
         toolSnapshotProvider:
             ToolSnapshotProvider? = nil,
@@ -468,6 +470,7 @@ public actor Orchestrator {
             inferenceProfileRoutingMetadata: inferenceProfileRoutingMetadata,
             requiresInferenceBindings: requiresInferenceBindings,
             imageGeneratorFor: imageGeneratorFor,
+            imageViewer: imageViewer,
             imageResolver: imageResolver,
             toolSnapshotProvider:
                 toolSnapshotProvider,
@@ -498,6 +501,7 @@ public actor Orchestrator {
         inferenceProfileRoutingMetadata: [InferenceProfileRoutingMetadata] = [],
         requiresInferenceBindings: Bool = true,
         imageGeneratorFor: @escaping @Sendable (Agent) async -> ImageGenerationToolService? = { _ in nil },
+        imageViewer: (any WorkspaceImageViewingService)? = nil,
         imageResolver: AgentImageResolver? = nil,
         toolSnapshotProvider:
             ToolSnapshotProvider? = nil,
@@ -523,6 +527,7 @@ public actor Orchestrator {
             inferenceProfileRoutingMetadata: inferenceProfileRoutingMetadata,
             requiresInferenceBindings: requiresInferenceBindings,
             imageGeneratorFor: imageGeneratorFor,
+            imageViewer: imageViewer,
             imageResolver: imageResolver,
             toolSnapshotProvider:
                 toolSnapshotProvider,
@@ -554,6 +559,7 @@ public actor Orchestrator {
                 inferenceProfileRoutingMetadata: [InferenceProfileRoutingMetadata] = [],
                 requiresInferenceBindings: Bool = false,
                 imageGeneratorFor: @escaping @Sendable (Agent) async -> ImageGenerationToolService? = { _ in nil },
+                imageViewer: (any WorkspaceImageViewingService)? = nil,
                 imageResolver: AgentImageResolver? = nil,
                 toolSnapshotProvider:
                     ToolSnapshotProvider? = nil,
@@ -630,6 +636,7 @@ public actor Orchestrator {
         self.resolvedInferenceFor = resolvedInferenceFor
         self.providerFor = providerFor
         self.imageGeneratorFor = imageGeneratorFor
+        self.imageViewer = imageViewer
         self.imageResolver = imageResolver
         self.toolSnapshotProvider =
             toolSnapshotProvider
@@ -6921,6 +6928,7 @@ public actor Orchestrator {
                     orchestrator: self)
                 : nil,
             imageGenerator: imageGenerator,
+            imageViewer: imageViewer,
             imageResolver: imageResolver,
             sessionNaming: agent.name == Self.mainAgentID ? sessionNaming : nil,
             capabilityLease: capabilityLease,
@@ -10029,47 +10037,53 @@ public actor Orchestrator {
             })
         }
         if lease.tools.contains(.readWorkspace) {
-            register([ReadFileTool()], granting: [.readWorkspace])
+            register(
+                [ReadFileTool(), ViewImageTool()],
+                granting: [.readWorkspace])
         }
         if lease.tools.contains(.readPDF) {
-            register([ReadPDFTool()], granting: [.readPDF])
+            register([InspectPDFTool(), ReadPDFTool()], granting: [.readPDF])
         }
         if lease.tools.contains(.readDOCX) {
-            register([ReadDOCXTool()], granting: [.readDOCX])
+            register([ReadDOCXTool(), ContinueDOCXReadTool()], granting: [.readDOCX])
         } else if lease.tools.contains(.documentRead) {
-            register([ReadDOCXTool()], granting: [.documentRead])
+            register([ReadDOCXTool(), ContinueDOCXReadTool()], granting: [.documentRead])
         }
         if lease.tools.contains(.readPPTX) {
-            register([ReadPPTXTool()], granting: [.readPPTX])
+            register([ReadPPTXTool(), ContinuePPTXReadTool()], granting: [.readPPTX])
         } else if lease.tools.contains(.documentRead) {
-            register([ReadPPTXTool()], granting: [.documentRead])
+            register([ReadPPTXTool(), ContinuePPTXReadTool()], granting: [.documentRead])
         }
         if lease.tools.contains(.readXLSX) {
-            register([ReadXLSXTool()], granting: [.readXLSX])
+            register([ReadXLSXTool(), ContinueXLSXReadTool()], granting: [.readXLSX])
         } else if lease.tools.contains(.documentRead) {
-            register([ReadXLSXTool()], granting: [.documentRead])
+            register([ReadXLSXTool(), ContinueXLSXReadTool()], granting: [.documentRead])
         }
         if lease.tools.contains(.readHTML) {
-            register([ReadHTMLTool()], granting: [.readHTML])
+            register([ReadHTMLTool(), ContinueHTMLReadTool()], granting: [.readHTML])
         } else if lease.tools.contains(.documentRead) {
-            register([ReadHTMLTool()], granting: [.documentRead])
+            register([ReadHTMLTool(), ContinueHTMLReadTool()], granting: [.documentRead])
         }
         if lease.tools.contains(.readEPUB) {
-            register([ReadEPUBTool()], granting: [.readEPUB])
+            register([ReadEPUBTool(), ContinueEPUBReadTool()], granting: [.readEPUB])
         } else if lease.tools.contains(.documentRead) {
-            register([ReadEPUBTool()], granting: [.documentRead])
+            register([ReadEPUBTool(), ContinueEPUBReadTool()], granting: [.documentRead])
         }
         if lease.tools.contains(.documentOCR) {
-            register([DocumentOCRTool()], granting: [.documentOCR])
+            register([OCRPDFTool()], granting: [.documentOCR])
         }
         if lease.tools.contains(.documentRender) {
-            register([DocumentRenderTool()], granting: [.documentRender])
+            register([PDFRenderPageTool()], granting: [.documentRender])
         }
         if lease.tools.contains(.documentExportPDF) {
-            register([DocumentExportPDFTool()], granting: [.documentExportPDF])
+            registrations.append(contentsOf:
+                ExactDocumentToolCatalog.exportRegistrations(
+                    grantingCapabilities: [.documentExportPDF]))
         }
         if lease.tools.contains(.documentWrite) {
-            register([DocumentWriteTool()], granting: [.documentWrite])
+            registrations.append(contentsOf:
+                ExactDocumentToolCatalog.writeRegistrations(
+                    grantingCapabilities: [.documentWrite]))
         }
         if lease.tools.contains(.listWorkspace) {
             register([ListFilesTool()], granting: [.listWorkspace])
@@ -10235,7 +10249,7 @@ public actor Orchestrator {
         }
         return ToolRegistry(
             registrations: registrations,
-            registryVersion: "intatis.cowork.v4")
+            registryVersion: "intatis.cowork.v7")
     }
 
     private static func canCoordinate(_ lease: CapabilityLease) -> Bool {

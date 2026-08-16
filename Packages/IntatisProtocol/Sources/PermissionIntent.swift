@@ -176,22 +176,35 @@ public struct PermissionIntent: Codable, Equatable, Sendable {
 
     private static func defaultAction(toolName: String, sideEffect: SideEffect) -> String {
         switch toolName {
-        case "read_file", "list_files", "search_text": return "filesystem.read"
+        case "read_file", "view_image", "list_files", "search_text": return "filesystem.read"
         case "write_file", "apply_patch": return "filesystem.edit"
-        case "read_pdf": return "document.read"
+        case "inspect_pdf", "read_pdf": return "document.read"
         case "document_read", // Legacy decode/history compatibility only.
-             "read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub":
+             "read_docx", "continue_docx_read",
+             "read_pptx", "continue_pptx_read",
+             "read_xlsx", "continue_xlsx_read",
+             "read_html", "continue_html_read",
+             "read_epub", "continue_epub_read":
             return "document.read"
-        case "document_ocr": return "document.ocr"
-        case "document_render": return "document.render"
-        case "document_export_pdf": return "document.export.pdf"
-        case "document_write": return "document.write"
+        case "document_ocr", // Legacy decode/history compatibility only.
+             "ocr_pdf": return "document.ocr"
+        case "document_render", // Legacy decode/history compatibility only.
+             "pdf_render_page": return "document.render"
+        case "document_export_pdf", // Legacy decode/history compatibility only.
+             "docx_export_pdf", "pptx_export_pdf", "xlsx_export_pdf",
+             "html_export_pdf": return "document.export.pdf"
+        case "document_write": return "document.write" // Legacy only.
         case "compile_latex": return "document.compile"
         case "generate_image": return "media.generate"
         case "edit_image": return "media.edit"
         case "web_fetch": return "network.fetch"
         case "run_shell": return "process.execute"
         default:
+            if toolName.hasPrefix("docx_")
+                || toolName.hasPrefix("pptx_")
+                || toolName.hasPrefix("xlsx_") {
+                return "document.write"
+            }
             if toolName.hasPrefix("git_") {
                 return "git." + String(toolName.dropFirst(4)).replacingOccurrences(of: "_", with: ".")
             }

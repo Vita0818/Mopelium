@@ -1,571 +1,201 @@
 import Foundation
-import XCTest
 import IntatisProtocol
 @testable import IntatisTools
+import XCTest
 
 final class DocumentToolContractTests: XCTestCase {
-    private let digestA = String(repeating: "a", count: 64)
-    private let digestB = String(repeating: "b", count: 64)
+    private let legacyAggregates = [
+        "document_read", "document_ocr", "document_render",
+        "document_export_pdf", "document_write",
+    ]
 
-    func testDocumentSchemasAreClosedAndDoNotExposeExecutionControls() throws {
-        let schemas = [
-            ReadPDFArguments.schema,
-            DocumentTextReadArguments.schema,
-            DocumentOCRArguments.schema,
-            DocumentRenderArguments.schema,
-            DocumentExportPDFArguments.schema,
-            DocumentWriteArguments.schema,
-        ]
-        for schema in schemas {
-            let object = try XCTUnwrap(object(schema))
-            XCTAssertEqual(object["type"], .string("object"))
-            XCTAssertEqual(object["additionalProperties"], .bool(false))
+    private let exactExports = [
+        "docx_export_pdf", "pptx_export_pdf",
+        "xlsx_export_pdf", "html_export_pdf",
+    ]
 
-            let encoded = String(data: try JSONEncoder().encode(schema), encoding: .utf8) ?? ""
+    private let exactWrites = [
+        "docx_create_document", "docx_add_paragraph",
+        "docx_set_paragraph_text", "docx_add_run",
+        "docx_set_run_bold", "docx_set_run_italic",
+        "docx_set_run_underline", "docx_add_table",
+        "docx_set_table_cell_text", "docx_add_picture",
+        "docx_set_header_paragraph_text", "docx_set_footer_paragraph_text",
+        "docx_set_section_orientation", "docx_set_section_top_margin",
+        "docx_set_section_right_margin", "docx_set_section_bottom_margin",
+        "docx_set_section_left_margin",
+        "pptx_create_presentation", "pptx_add_slide",
+        "pptx_set_shape_text", "pptx_add_shape", "pptx_add_picture",
+        "pptx_add_table", "pptx_set_table_cell_text",
+        "xlsx_create_workbook", "xlsx_create_sheet",
+        "xlsx_set_sheet_title", "xlsx_set_cell_value", "xlsx_append_row",
+    ]
+
+    func testFreshRegistryExposesOnlyExactDocumentOperations() {
+        let registry = ToolRegistry.standard()
+        for name in ["ocr_pdf", "pdf_render_page"] + exactExports + exactWrites {
+            XCTAssertNotNil(registry.registration(named: name), name)
+        }
+        for name in legacyAggregates {
+            XCTAssertNil(registry.registration(named: name), name)
+        }
+        for unsupported in [
+            "pptx_add_chart", "xlsx_set_range", "xlsx_set_style",
+            "xlsx_add_table", "xlsx_set_name", "xlsx_add_chart",
+            "html_set_text", "html_set_attribute", "html_append", "html_remove",
+            "epub_set_metadata", "epub_add_resource", "epub_append_spine", "epub_add_toc",
+        ] {
+            XCTAssertNil(registry.registration(named: unsupported), unsupported)
+        }
+        XCTAssertEqual(registry.registryVersion, "intatis.standard.v7")
+    }
+
+    func testExactSchemasAreClosedAndNeverExposeAggregateOrExecutionControls() throws {
+        let registry = ToolRegistry.standard()
+        let names = ["ocr_pdf", "pdf_render_page"] + exactExports + exactWrites
+        for name in names {
+            guard let descriptor = registry.registration(named: name)?.descriptor,
+                  case .object(let schema) = descriptor.parameters else {
+                return XCTFail("missing schema for \(name)")
+            }
+            XCTAssertEqual(schema["additionalProperties"], .bool(false), name)
+            let encoded = String(
+                data: try JSONEncoder().encode(descriptor.parameters),
+                encoding: .utf8) ?? ""
             for forbidden in [
-                "backend", "binary", "command", "executable", "environment", "allow_network",
-                "temp_dir",
+                "format", "mode", "operations", "backend", "command",
+                "environment", "working_directory",
             ] {
-                XCTAssertFalse(encoded.contains("\"\(forbidden)\""), forbidden)
+                XCTAssertFalse(encoded.contains("\"\(forbidden)\""), "\(name): \(forbidden)")
             }
         }
     }
 
-    func testReadPDFKeepsExistingFieldNamesAndRejectsUnknownControls() throws {
-        let value = try ReadPDFArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "path":"reports/source.pdf",
-          "pages":"1-3,5",
-          "maxCharacters":12000
-        }
-        """#))
-        XCTAssertEqual(value.path, "reports/source.pdf")
-        XCTAssertEqual(value.pages, "1-3,5")
-        XCTAssertEqual(value.maxCharacters, 12_000)
-
-        assertDocumentError(.unsupportedOperation) {
-            _ = try ReadPDFArguments.decodeValidated(
-                ToolArgs(raw: #"{"path":"source.pdf","backend":"anything"}"#))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try ReadPDFArguments.decodeValidated(
-                ToolArgs(raw: #"{"path":"source.docx"}"#))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try ReadPDFArguments.decodeValidated(
-                ToolArgs(raw: #"{"path":"source.pdf","pages":"3-1"}"#))
+    func testOCRIsOneFixedDoclingTesseractCall() throws {
+        XCTAssertNoThrow(try OCRPDFTool().validateArguments(ToolArgs(raw: """
+        {"input_path":"scan.pdf","expected_source_sha256":"\(digest)","max_characters":12000}
+        """)))
+        for rejected in [
+            "{\"input_path\":\"scan.pdf\",\"expected_source_sha256\":\"\(digest)\",\"languages\":[\"eng\"]}",
+            "{\"input_path\":\"scan.pdf\",\"expected_source_sha256\":\"\(digest)\",\"psm\":3}",
+            "{\"input_path\":\"scan.pdf\",\"expected_source_sha256\":\"\(digest)\",\"pages\":\"1\"}",
+            "{\"input_path\":\"scan.docx\",\"expected_source_sha256\":\"\(digest)\"}",
+        ] {
+            XCTAssertThrowsError(try OCRPDFTool().validateArguments(ToolArgs(raw: rejected)))
         }
     }
 
-    func testFixedFormatReadersUseOnlyPathAndCharacterBudget() throws {
-        let xlsx = try DocumentTextReadArguments.decodeValidated(
-            ToolArgs(raw: #"{"path":"data/book.xlsx","maxCharacters":200000}"#),
-            format: .xlsx)
-        XCTAssertEqual(xlsx.path, "data/book.xlsx")
-        XCTAssertEqual(xlsx.maxCharacters, 200_000)
-
-        let html = try DocumentTextReadArguments.decodeValidated(
-            ToolArgs(raw: #"{"path":"site/index.htm"}"#),
-            format: .html)
-        XCTAssertEqual(html.path, "site/index.htm")
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentTextReadArguments.decodeValidated(
-                ToolArgs(raw: #"{"path":"book.pptx"}"#),
-                format: .xlsx)
-        }
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentTextReadArguments.decodeValidated(
-                ToolArgs(raw: #"{"path":"book.xlsx","backend":"auto"}"#),
-                format: .xlsx)
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentTextReadArguments.decodeValidated(
-                ToolArgs(raw: #"{"path":"book.xlsx","options":{}}"#),
-                format: .xlsx)
+    func testPDFRenderAcceptsOnePageAndOnePNGOutput() throws {
+        let valid = """
+        {"input_path":"input.pdf","expected_source_sha256":"\(digest)","page":2,"output_path":"page.png"}
+        """
+        XCTAssertNoThrow(try PDFRenderPageTool().validateArguments(ToolArgs(raw: valid)))
+        for rejected in [
+            "{\"input_path\":\"input.pdf\",\"expected_source_sha256\":\"\(digest)\",\"pages\":\"1-2\",\"output_path\":\"pages\"}",
+            "{\"input_path\":\"input.docx\",\"expected_source_sha256\":\"\(digest)\",\"page\":1,\"output_path\":\"page.png\"}",
+            "{\"input_path\":\"input.pdf\",\"expected_source_sha256\":\"\(digest)\",\"page\":1,\"output_path\":\"page.jpg\"}",
+            "{\"input_path\":\"input.pdf\",\"expected_source_sha256\":\"\(digest)\",\"page\":0,\"output_path\":\"page.png\"}",
+        ] {
+            XCTAssertThrowsError(try PDFRenderPageTool().validateArguments(ToolArgs(raw: rejected)))
         }
     }
 
-    func testOCRRequiresPDFDigestAndExplicitAllowlistedTesseractSettings() throws {
-        let valid = try DocumentOCRArguments.decodeValidated(ToolArgs(raw: """
-        {
-          "input_path":"scans/report.pdf",
-          "expected_source_sha256":"\(digestA)",
-          "pages":"1-10",
-          "languages":["eng","chi_sim"],
-          "psm":6,
-          "max_characters":250000
+    func testEachExportOwnsItsFormatAndOnlyHTMLAcceptsAssets() throws {
+        let registry = ToolRegistry.standard()
+        let cases = [
+            ("docx_export_pdf", "input.docx"),
+            ("pptx_export_pdf", "input.pptx"),
+            ("xlsx_export_pdf", "input.xlsx"),
+            ("html_export_pdf", "input.html"),
+        ]
+        for (name, input) in cases {
+            let raw = """
+            {"input_path":"\(input)","expected_source_sha256":"\(digest)","output_path":"output.pdf"}
+            """
+            XCTAssertNoThrow(try registry.registration(named: name)?.validateArguments(ToolArgs(raw: raw)), name)
         }
-        """))
-        XCTAssertEqual(valid.languages, ["eng", "chi_sim"])
-        XCTAssertEqual(valid.pageSegmentationMode, 6)
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentOCRArguments.decodeValidated(ToolArgs(raw: """
-            {"input_path":"scan.pdf","expected_source_sha256":"\(digestA)",
-             "languages":["eng","eng"],"psm":6}
-            """))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentOCRArguments.decodeValidated(ToolArgs(raw: """
-            {"input_path":"scan.pdf","expected_source_sha256":"\(digestA)",
-             "languages":["eng"],"psm":2}
-            """))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentOCRArguments.decodeValidated(ToolArgs(raw: """
-            {"input_path":"scan.png","expected_source_sha256":"\(digestA)",
-             "languages":["eng"],"psm":6}
-            """))
-        }
+        XCTAssertThrowsError(try registry.registration(named: "docx_export_pdf")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"input.pptx","expected_source_sha256":"\(digest)","output_path":"output.pdf"}
+            """)))
+        XCTAssertNoThrow(try registry.registration(named: "html_export_pdf")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"input.html","expected_source_sha256":"\(digest)","local_asset_paths":["image.png"],"output_path":"output.pdf"}
+            """)))
+        XCTAssertThrowsError(try registry.registration(named: "xlsx_export_pdf")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"input.xlsx","expected_source_sha256":"\(digest)","local_asset_paths":["image.png"],"output_path":"output.pdf"}
+            """)))
     }
 
-    func testRenderFreezesVisualControlsBudgetsAndReplacementCAS() throws {
-        let valid = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-        {
-          "input_format":"pdf",
-          "input_path":"reports/source.pdf",
-          "expected_source_sha256":"\(digestA)",
-          "output_dir":"reports/source-pages",
-          "pages":"all",
-          "dpi":200,
-          "page_box":"media",
-          "background":"transparent",
-          "annotations":"hide",
-          "maximum_page_pixels":40000000,
-          "maximum_total_pixels":120000000,
-          "maximum_output_bytes":268435456
-        }
-        """))
-        XCTAssertEqual(valid.resolvedDPI, 200)
-        XCTAssertEqual(valid.resolvedPageBox, .media)
-        XCTAssertEqual(valid.resolvedBackground, .transparent)
-        XCTAssertEqual(valid.resolvedAnnotations, .hide)
+    func testCreateAndMutationContractsKeepCASOutsideBusinessArguments() throws {
+        let registry = ToolRegistry.standard()
+        XCTAssertNoThrow(try registry.registration(named: "docx_create_document")?.validateArguments(
+            ToolArgs(raw: #"{"output_path":"new.docx"}"#)))
+        XCTAssertThrowsError(try registry.registration(named: "docx_create_document")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"old.docx","expected_source_sha256":"\(digest)","output_path":"new.docx"}
+            """)))
 
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"pdf","input_path":"a.pdf","expected_source_sha256":"\(digestA)",
-             "output_dir":"pages","maximum_page_pixels":50000000,
-             "maximum_total_pixels":40000000}
-            """))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"pdf","input_path":"a.pdf","expected_source_sha256":"\(digestA)",
-             "output_dir":"pages","replace_existing":true}
-            """))
-        }
-        _ = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-        {"input_format":"pdf","input_path":"a.pdf","expected_source_sha256":"\(digestA)",
-         "output_dir":"pages","replace_existing":true,"expected_output_sha256":"\(digestB)"}
-        """))
+        let mutation = """
+        {"input_path":"old.docx","expected_source_sha256":"\(digest)","output_path":"new.docx","text":"hello"}
+        """
+        XCTAssertNoThrow(try registry.registration(named: "docx_add_paragraph")?.validateArguments(
+            ToolArgs(raw: mutation)))
+        XCTAssertThrowsError(try registry.registration(named: "docx_add_paragraph")?.validateArguments(
+            ToolArgs(raw: #"{"input_path":"old.docx","output_path":"new.docx","text":"hello"}"#)))
+
+        let inPlace = """
+        {"input_path":"same.docx","expected_source_sha256":"\(digest)","output_path":"same.docx","replace_existing":true,"expected_output_sha256":"\(digest)","text":"hello"}
+        """
+        XCTAssertNoThrow(try registry.registration(named: "docx_add_paragraph")?.validateArguments(
+            ToolArgs(raw: inPlace)))
+        XCTAssertThrowsError(try registry.registration(named: "docx_add_paragraph")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"same.docx","expected_source_sha256":"\(digest)","output_path":"same.docx","text":"hello"}
+            """)))
     }
 
-    func testHTMLRenderAndExportBindOnlyExplicitLocalAssets() throws {
-        let render = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-        {"input_format":"html","input_path":"site/index.html",
-         "expected_source_sha256":"\(digestA)","local_asset_paths":["site/app.css","site/logo.png"],
-         "output_dir":"site/preview"}
-        """))
-        XCTAssertEqual(render.localAssetPaths, ["site/app.css", "site/logo.png"])
-
-        let export = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-        {"input_format":"html","input_path":"site/index.html",
-         "expected_source_sha256":"\(digestA)","local_asset_paths":["site/app.css"],
-         "output_path":"site/index.pdf"}
-        """))
-        XCTAssertEqual(export.localAssetPaths, ["site/app.css"])
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"docx","input_path":"a.docx","expected_source_sha256":"\(digestA)",
-             "local_asset_paths":["image.png"],"output_path":"a.pdf"}
-            """))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"html","input_path":"a.html","expected_source_sha256":"\(digestA)",
-             "local_asset_paths":["https://example.com/a.css"],"output_dir":"pages"}
-            """))
-        }
+    func testPreviouslyBundledBusinessOperationsCannotHideInsideAnExactCall() throws {
+        let registry = ToolRegistry.standard()
+        XCTAssertThrowsError(try registry.registration(named: "pptx_add_slide")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"slides.pptx","expected_source_sha256":"\(digest)","output_path":"next.pptx","slide_layout_index":0,"title":"bundled"}
+            """)))
+        XCTAssertThrowsError(try registry.registration(named: "pptx_add_shape")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"slides.pptx","expected_source_sha256":"\(digest)","output_path":"next.pptx","slide_index":0,"shape_type":1,"left":0,"top":0,"width":100,"height":100,"text":"bundled"}
+            """)))
+        XCTAssertThrowsError(try registry.registration(named: "pptx_add_table")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"slides.pptx","expected_source_sha256":"\(digest)","output_path":"next.pptx","slide_index":0,"rows":2,"cols":2,"left":0,"top":0,"width":100,"height":100,"values":[["x"]]}
+            """)))
     }
 
-    func testHTMLWriteBindsOnlyExplicitLocalAssets() throws {
-        let write = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"html","mode":"create","output_path":"site/index.html",
-          "local_asset_paths":["site/logo.png"],
-          "operations":[
-            {"kind":"xpath.append","parameters":{
-              "xpath":"//body","expected_match_count":1,
-              "html":"<img src=\"logo.png\" alt=\"logo\">"
-            }}
-          ]
-        }
-        """#))
-        XCTAssertEqual(write.localAssetPaths, ["site/logo.png"])
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"docx","mode":"create","output_path":"report.docx",
-              "local_asset_paths":["assets/logo.png"],
-              "operations":[{"kind":"paragraph.add","parameters":{"text":"Hello"}}]
-            }
-            """#))
-        }
+    func testXLSXSurfaceIsCellValueAndAppendOnly() throws {
+        let registry = ToolRegistry.standard()
+        XCTAssertNoThrow(try registry.registration(named: "xlsx_set_cell_value")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"book.xlsx","expected_source_sha256":"\(digest)","output_path":"next.xlsx","sheet":"Sheet","cell":"A1","value":42}
+            """)))
+        XCTAssertNoThrow(try registry.registration(named: "xlsx_append_row")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"book.xlsx","expected_source_sha256":"\(digest)","output_path":"next.xlsx","sheet":"Sheet","values":[1,"two",true,null]}
+            """)))
+        XCTAssertThrowsError(try registry.registration(named: "xlsx_set_cell_value")?.validateArguments(
+            ToolArgs(raw: """
+            {"input_path":"book.xlsx","expected_source_sha256":"\(digest)","output_path":"next.xlsx","sheet":"Sheet","cell":"A1","value":"=WEBSERVICE(\"https://example.com\")"}
+            """)))
     }
 
-    func testExportPDFRejectsPDFInputAndRequiresExactExtensions() throws {
-        _ = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-        {"input_format":"docx","input_path":"reports/a.docx",
-         "expected_source_sha256":"\(digestA)","output_path":"reports/a.pdf"}
-        """))
-
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"pdf","input_path":"a.pdf","expected_source_sha256":"\(digestA)",
-             "output_path":"copy.pdf"}
-            """))
+    func testCompileLaTeXHasNoEngineSelector() throws {
+        guard case .object(let schema) = CompileLaTeXTool.descriptor.parameters,
+              case .object(let properties)? = schema["properties"] else {
+            return XCTFail("compile_latex schema missing")
         }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"pptx","input_path":"a.docx","expected_source_sha256":"\(digestA)",
-             "output_path":"a.pdf"}
-            """))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"docx","input_path":"same.pdf","expected_source_sha256":"\(digestA)",
-             "output_path":"same.pdf"}
-            """))
-        }
-
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentExportPDFArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"epub","input_path":"book.epub",
-             "expected_source_sha256":"\(digestA)","output_path":"book.pdf"}
-            """))
-        }
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"epub","input_path":"book.epub",
-             "expected_source_sha256":"\(digestA)","output_dir":"book-pages"}
-            """))
-        }
+        XCTAssertEqual(Set(properties.keys), ["inputPath", "outputDir"])
+        XCTAssertFalse(properties.keys.contains("engine"))
     }
 
-    func testWriteCreateEditAndInPlaceDigestInvariants() throws {
-        let create = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"docx","mode":"create","output_path":"new.docx",
-          "operations":[{"kind":"paragraph.add","parameters":{"text":"Hello"}}]
-        }
-        """#))
-        XCTAssertEqual(create.mode, .create)
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-            {"format":"docx","mode":"create","input_path":"old.docx",
-             "expected_source_sha256":"\(digestA)","output_path":"new.docx",
-             "operations":[{"kind":"paragraph.add","parameters":{"text":"Hello"}}]}
-            """))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-            {"format":"docx","mode":"edit","input_path":"old.docx",
-             "output_path":"new.docx",
-             "operations":[{"kind":"paragraph.add","parameters":{"text":"Hello"}}]}
-            """))
-        }
-        _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-        {"format":"docx","mode":"edit","input_path":"same.docx",
-         "expected_source_sha256":"\(digestA)","output_path":"same.docx",
-         "replace_existing":true,"expected_output_sha256":"\(digestA)",
-         "operations":[{"kind":"paragraph.add","parameters":{"text":"Hello"}}]}
-        """))
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-            {"format":"docx","mode":"edit","input_path":"same.docx",
-             "expected_source_sha256":"\(digestA)","output_path":"same.docx",
-             "replace_existing":true,"expected_output_sha256":"\(digestB)",
-             "operations":[{"kind":"paragraph.add","parameters":{"text":"Hello"}}]}
-            """))
-        }
-    }
-
-    func testWriteRejectsPDFMutationAndUnknownOperationEnvelopeKeys() throws {
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"pdf","mode":"edit","input_path":"a.pdf","output_path":"a.pdf",
-              "operations":[{"kind":"page.delete","parameters":{"page":1}}]
-            }
-            """#))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"docx","mode":"create","output_path":"a.docx",
-              "operations":[{"kind":"paragraph.add","parameters":{"text":"x"},"fallback":true}]
-            }
-            """#))
-        }
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"docx","mode":"create","output_path":"a.docx",
-              "operations":[{"kind":"paragraph.delete","parameters":{"paragraph_index":0}}]
-            }
-            """#))
-        }
-    }
-
-    func testDOCXMatrixIsClosedAndSectionMutationMustChangeAProperty() throws {
-        _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"docx","mode":"create","output_path":"a.docx",
-          "operations":[
-            {"kind":"run.add","parameters":{"paragraph_index":0,"text":"world","bold":true}},
-            {"kind":"table.add","parameters":{"values":[["A","B"],["1","2"]]}},
-            {"kind":"image.add","parameters":{"path":"assets/chart.png","width_points":300}},
-            {"kind":"header.set_text","parameters":{"section_index":0,"text":"Header"}},
-            {"kind":"footer.set_text","parameters":{"section_index":0,"text":"Footer"}},
-            {"kind":"section.set","parameters":{"section_index":0,"orientation":"landscape"}}
-          ]
-        }
-        """#))
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"docx","mode":"create","output_path":"a.docx",
-              "operations":[{"kind":"section.set","parameters":{"section_index":0}}]
-            }
-            """#))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"docx","mode":"create","output_path":"a.docx",
-              "operations":[{"kind":"paragraph.add","parameters":{"text":"x","xml":"<w:p/>"}}]
-            }
-            """#))
-        }
-    }
-
-    func testPPTXMatrixExcludesDeleteReorderCloneAndBoundsCharts() throws {
-        _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"pptx","mode":"create","output_path":"deck.pptx",
-          "operations":[
-            {"kind":"slide.add","parameters":{"layout_index":0,"title":"Q1"}},
-            {"kind":"shape.add","parameters":{"slide_index":0,"shape_type":"rectangle",
-             "x_points":10,"y_points":10,"width_points":100,"height_points":50}},
-            {"kind":"chart.add","parameters":{"slide_index":0,"chart_type":"column",
-             "categories":["A","B"],"series_name":"Revenue","values":[1,2],
-             "x_points":10,"y_points":80,"width_points":400,"height_points":240}}
-          ]
-        }
-        """#))
-
-        for kind in ["slide.delete", "slide.reorder", "slide.clone"] {
-            assertDocumentError(.unsupportedOperation) {
-                _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-                {"format":"pptx","mode":"create","output_path":"deck.pptx",
-                 "operations":[{"kind":"\(kind)","parameters":{}}]}
-                """))
-            }
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"pptx","mode":"create","output_path":"deck.pptx",
-              "operations":[{"kind":"chart.add","parameters":{"slide_index":0,
-               "chart_type":"column","categories":["A","B"],"series_name":"Revenue",
-               "values":[1],"x_points":10,"y_points":10,"width_points":100,"height_points":100}}]
-            }
-            """#))
-        }
-    }
-
-    func testXLSXMatrixRejectsMacrosExternalConnectionsPivotAndRaggedRanges() throws {
-        _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"xlsx","mode":"create","output_path":"book.xlsx",
-          "operations":[
-            {"kind":"sheet.add","parameters":{"name":"Summary"}},
-            {"kind":"cell.set","parameters":{"sheet":"Summary","cell":"A1","value":"=SUM(B1:B3)"}},
-            {"kind":"range.set","parameters":{"sheet":"Summary","start_cell":"B1","values":[[1,2],[3,4]]}},
-            {"kind":"style.set","parameters":{"sheet":"Summary","range":"A1:B2","bold":true}},
-            {"kind":"table.add","parameters":{"sheet":"Summary","range":"A1:B2","name":"SummaryTable"}},
-            {"kind":"name.set","parameters":{"name":"Totals","reference":"Summary!$A$1:$A$2"}},
-            {"kind":"chart.add","parameters":{"sheet":"Summary","chart_type":"line",
-             "data_range":"B1:B2","category_range":"A1:A2","anchor":"D2"}}
-          ]
-        }
-        """#))
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"xlsx","mode":"create","output_path":"book.xlsm",
-              "operations":[{"kind":"sheet.add","parameters":{"name":"S"}}]
-            }
-            """#))
-        }
-        assertDocumentError(.unsupportedFeature) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"xlsx","mode":"create","output_path":"book.xlsx",
-              "operations":[{"kind":"cell.set","parameters":{"sheet":"S","cell":"A1",
-               "value":"='[external.xlsx]Sheet1'!A1"}}]
-            }
-            """#))
-        }
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"xlsx","mode":"create","output_path":"book.xlsx",
-              "operations":[{"kind":"pivot.add","parameters":{}}]
-            }
-            """#))
-        }
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"xlsx","mode":"create","output_path":"book.xlsx",
-              "operations":[{"kind":"range.set","parameters":{"sheet":"S","start_cell":"A1",
-               "values":[[1,2],[3]]}}]
-            }
-            """#))
-        }
-    }
-
-    func testHTMLMatrixRequiresExactMatchCountAndRejectsActiveRemoteContent() throws {
-        _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"html","mode":"create","output_path":"index.html",
-          "operations":[
-            {"kind":"xpath.set_text","parameters":{"xpath":"//h1","expected_match_count":1,"text":"Title"}},
-            {"kind":"xpath.set_attribute","parameters":{"xpath":"//img","expected_match_count":1,
-             "name":"src","value":"assets/logo.png"}},
-            {"kind":"xpath.append","parameters":{"xpath":"//main","expected_match_count":1,"html":"<p>Local</p>"}},
-            {"kind":"xpath.remove","parameters":{"xpath":"//aside","expected_match_count":1}}
-          ]
-        }
-        """#))
-
-        assertDocumentError(.validationFailed) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"html","mode":"create","output_path":"index.html",
-              "operations":[{"kind":"xpath.remove","parameters":{"xpath":"//aside"}}]
-            }
-            """#))
-        }
-        assertDocumentError(.unsupportedFeature) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"html","mode":"create","output_path":"index.html",
-              "operations":[{"kind":"xpath.set_attribute","parameters":{"xpath":"//img",
-               "expected_match_count":1,"name":"src","value":"https://example.com/a.png"}}]
-            }
-            """#))
-        }
-        assertDocumentError(.unsupportedFeature) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"html","mode":"create","output_path":"index.html",
-              "operations":[{"kind":"xpath.append","parameters":{"xpath":"//main",
-               "expected_match_count":1,"html":"<script>alert(1)</script>"}}]
-            }
-            """#))
-        }
-    }
-
-    func testEPUBMatrixIsCandidateSubsetAndRejectsRemoteOrTraversalHrefs() throws {
-        _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-        {
-          "format":"epub","mode":"create","output_path":"book.epub",
-          "operations":[
-            {"kind":"metadata.set","parameters":{"field":"title","value":"Book"}},
-            {"kind":"resource.add","parameters":{"id":"chapter1","source_path":"chapters/one.xhtml",
-             "href":"text/one.xhtml","media_type":"application/xhtml+xml"}},
-            {"kind":"spine.append","parameters":{"resource_id":"chapter1","linear":true}},
-            {"kind":"toc.add","parameters":{"label":"One","href":"text/one.xhtml"}}
-          ]
-        }
-        """#))
-
-        for href in ["https://example.com/one.xhtml", "../one.xhtml", "/one.xhtml"] {
-            assertAnyDocumentError {
-                _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-                {"format":"epub","mode":"create","output_path":"book.epub",
-                 "operations":[{"kind":"toc.add","parameters":{"label":"One","href":"\(href)"}}]}
-                """))
-            }
-        }
-        for kind in ["resource.remove", "spine.reorder", "toc.replace"] {
-            assertDocumentError(.unsupportedOperation) {
-                _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: """
-                {"format":"epub","mode":"create","output_path":"book.epub",
-                 "operations":[{"kind":"\(kind)","parameters":{}}]}
-                """))
-            }
-        }
-    }
-
-    func testForbiddenExecutionControlsAreRejectedEvenWhenNested() throws {
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentWriteArguments.decodeValidated(ToolArgs(raw: #"""
-            {
-              "format":"docx","mode":"create","output_path":"a.docx",
-              "operations":[{"kind":"paragraph.add","parameters":{"text":"x","env":{"A":"B"}}}]
-            }
-            """#))
-        }
-        assertDocumentError(.unsupportedOperation) {
-            _ = try DocumentRenderArguments.decodeValidated(ToolArgs(raw: """
-            {"input_format":"pdf","input_path":"a.pdf","expected_source_sha256":"\(digestA)",
-             "output_dir":"pages","command":"pdftoppm"}
-            """))
-        }
-    }
-
-    private func object(_ value: JSONValue) -> [String: JSONValue]? {
-        guard case .object(let object) = value else { return nil }
-        return object
-    }
-
-    private func assertDocumentError(
-        _ expected: DocumentToolErrorCode,
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        _ body: () throws -> Void
-    ) {
-        do {
-            try body()
-            XCTFail("expected DocumentToolError", file: file, line: line)
-        } catch let error as DocumentToolError {
-            XCTAssertEqual(error.code, expected, file: file, line: line)
-        } catch {
-            XCTFail("unexpected error: \(error)", file: file, line: line)
-        }
-    }
-
-    private func assertAnyDocumentError(
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        _ body: () throws -> Void
-    ) {
-        do {
-            try body()
-            XCTFail("expected DocumentToolError", file: file, line: line)
-        } catch is DocumentToolError {
-            // Expected.
-        } catch {
-            XCTFail("unexpected error: \(error)", file: file, line: line)
-        }
-    }
+    private var digest: String { String(repeating: "a", count: 64) }
 }

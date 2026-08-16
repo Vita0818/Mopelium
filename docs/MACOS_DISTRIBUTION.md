@@ -2,8 +2,8 @@
 
 文档状态：当前发行合同
 生效日期：2026-07-28
-最近核对：2026-08-11
-产品基线：v0.48（build 48）
+最近核对：2026-08-15
+产品基线：v0.10（build 49）
 
 ## 产品决策
 
@@ -41,16 +41,27 @@ iOS 自身的系统 sandbox 与 target-linkage 限制。
 1. 当前 Keychain 存在有效的 `Developer ID Application` identity；
 2. `INTATIS_NOTARY_PROFILE` 指向用户已通过 `notarytool store-credentials`
    保存的 Keychain profile；
-3. universal Release build 同时包含 `arm64` 与 `x86_64`；
-4. 使用 Developer ID entitlements、secure timestamp 与 Hardened Runtime 完成签名；
-5. App 公证状态为 `Accepted`，staple/validate、严格 codesign 与 Gatekeeper assessment
+3. `INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT` / `INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT`
+   分别指向已完成来源/许可证审查和 bottom-up Developer ID 签名的 external document runtime；
+4. 两套 runtime 在入 App 前后均通过 fixed manifest、完整 SHA-256 inventory、project-owned
+   EPUBCheck wrapper 与 Heron/tessdata hash、SPDX-2.3/license bundle、target Mach-O architecture、
+   load commands 与 exact signing identity 静态校验；SBOM 的 transitive completeness 还必须由发行
+   review 对照 resolved binary closure，不能由“JSON 合法/包数组非空”替代；
+5. universal Release build 同时包含 `arm64` 与 `x86_64`，并把两套 runtime 放在
+   `Contents/Resources/DocumentRuntime/<architecture>`；
+6. 使用 Developer ID entitlements、secure timestamp 与 Hardened Runtime 完成签名；外层 App strict
+   resource seal 与 exact identity 通过后，才在 validation-owned 临时 `HOME`/`TMPDIR` 中执行两套
+   runtime 的固定版本探针，签名前不得运行待打包内容；
+7. App 公证状态为 `Accepted`，staple/validate、严格 codesign 与 Gatekeeper assessment
    全部通过；
-6. DMG 包含 `/Applications` 拖放入口，以 Developer ID 单独签名，再次公证并完成
+8. DMG 包含 `/Applications` 拖放入口，以 Developer ID 单独签名，再次公证并完成
    staple/validate、codesign 与 Gatekeeper assessment。
 
 使用方式：
 
 ```sh
+INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT=<absolute-reviewed-arm64-root> \
+INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT=<absolute-reviewed-x86_64-root> \
 INTATIS_NOTARY_PROFILE=<本机 profile 名称> \
   scripts/package-macos-release.sh
 ```
@@ -60,6 +71,8 @@ notarization，使用交互式两阶段模式：
 
 ```sh
 INTATIS_PAUSE_BEFORE_NOTARIZATION=1 \
+INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT=<absolute-reviewed-arm64-root> \
+INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT=<absolute-reviewed-x86_64-root> \
 INTATIS_NOTARY_PROFILE=<本机 profile 名称> \
   scripts/package-macos-release.sh
 ```
@@ -93,6 +106,23 @@ TERM、网络错误、Apple 长时间处理或 Invalid 也保留 recovery 目录
 `INTATIS_DEVELOPER_IDENTITY` 为目标证书的完整 common name。可用
 `INTATIS_OUTPUT_DIR` 改变输出目录。证书、私钥、Apple 账号/App Store Connect
 凭据和 profile 内容都不得进入仓库；脚本只接收 identity/profile 名称。
+
+文档运行时不是由发行脚本联网下载或临时安装。仓库中的
+`Packages/IntatisTools/Runtime/document-runtime/release-spec.json` 是兼容性合同，
+`scripts/validate-document-runtime.sh` 是门禁，不是 binary builder；exact 来源和许可证边界见
+`ThirdPartyNotices/DocumentReadingRuntime.md`。shipping `IntatisMac` 只接受 App bundle 中与当前
+process architecture 对应的 root；缺失或损坏时必须 fail closed，不能回退用户 Application Support、
+Homebrew、系统 Java 或另一个 parser/model。CLI/debug 可保留用户 runtime 作为开发 fallback，但它
+不满足发行门禁。
+
+validator 默认 `static`，只检查内容而不执行 runtime；`execute` 只接受已经位于最终
+`Intatis.app/Contents/Resources/DocumentRuntime/<architecture>`、且外层 App strict seal 与 exact
+Developer ID identity 已通过的 root。正常发行只应由打包脚本按此顺序调用这两个阶段。
+
+截至 2026-08-15，本仓库已具备上述 integration、manifest 和 fail-closed staging gate，但尚无
+已审查并使用同一 Developer ID identity 签名的 arm64/x86_64 runtime roots，也没有包含它们的
+notarized App 或 clean-machine 初读/继续读/PDF inspect→OCR 验收。因此不得把“发行脚本现在会阻止
+缺失 runtime”写成“第六项二进制发行制品已经完成”。
 
 输出包括 stapled App 的 ZIP、已单独公证并 stapled 的 DMG，以及两者的 SHA-256
 清单。任一门槛失败都不得把 ad-hoc/未公证包发布为正式产物。
@@ -135,9 +165,12 @@ runtime sandbox`、测试宿主 sandbox、Linux bwrap 和权限/工作区围栏�
 2. `swift build` 与受影响的 CLI product；
 3. `xcodegen generate`；
 4. `IntatisMac` macOS build；
-5. 触及实际发行时的 Developer ID 签名、公证、Hardened Runtime、
-   entitlements 和 bundle/link inventory；
-6. 触及 iOS 子集时才追加 `IntatisiOS` build/test。
+5. 文档 runtime 变更必须额外运行 `zsh -n scripts/validate-document-runtime.sh`、
+   `plutil -convert xml1 -o /dev/null Packages/IntatisTools/Runtime/document-runtime/release-spec.json`、focused reader/
+   cursor/PDF identity/RSS tests；实际发行还必须让两套 external roots 通过 validator；
+6. 触及实际发行时的 Developer ID 签名、公证、Hardened Runtime、
+   entitlements、runtime/resource 和 bundle/link inventory；
+7. 触及 iOS 子集时才追加 `IntatisiOS` build/test。
 
 除非用户明确点名遗留 target，否则不要构建、修复、测试或报告
 `IntatisMacAppStore`，也不要因它失败而修改当前发行产品。

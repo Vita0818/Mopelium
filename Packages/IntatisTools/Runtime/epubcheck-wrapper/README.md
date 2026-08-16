@@ -9,6 +9,7 @@ Runtime layout:
 ```text
 document-runtime/
   bin/intatis-epubcheck
+  jre/temurin-21.0.11+10/Contents/Home/bin/java
   lib/epubcheck-5.3.0/
     epubcheck.jar
     lib/*.jar
@@ -17,8 +18,14 @@ document-runtime/
     licenses/*
 ```
 
-The wrapper accepts no Intatis-specific command language. It forwards the
-host-owned fixed argv to `/usr/bin/java -Djava.awt.headless=true -jar ...`.
+The wrapper accepts no Intatis-specific command language. A release forwards
+the host-owned fixed argv to the architecture root's pinned, self-contained
+Temurin JRE 21.0.11+10 via `java -Djava.awt.headless=true -jar ...`.
+`/usr/bin/java` remains only as
+a compatibility fallback for a user-managed development runtime. A wrapper
+under `Intatis.app/Contents/Resources/DocumentRuntime/<architecture>` fails
+closed if its bundled JRE is unavailable; it never falls back to system Java.
+The development fallback does not satisfy the release validator.
 The model cannot choose the executable, JAR, environment, network policy, or
 runtime directory.
 
@@ -33,5 +40,6 @@ The local development runtime uses the official W3C release asset:
 
 The upstream distribution is intentionally not committed here. A packaged
 Intatis release must preserve the distribution's `LICENSE.txt`,
-`THIRD-PARTY.txt`, and `licenses/` directory and separately close signing,
-architecture, Java-runtime, SBOM, and clean-machine verification gates.
+`THIRD-PARTY.txt`, and `licenses/` directory. The architecture-specific Java
+runtime, SBOM, license inventory, hashes, and signatures are mandatory inputs
+to `scripts/validate-document-runtime.sh` and the App release gate.

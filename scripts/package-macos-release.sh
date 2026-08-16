@@ -10,6 +10,8 @@ requested_identity="${INTATIS_DEVELOPER_IDENTITY:-}"
 pause_before_notarization="${INTATIS_PAUSE_BEFORE_NOTARIZATION:-0}"
 notary_timeout="${INTATIS_NOTARY_TIMEOUT:-30m}"
 resume_release_dir="${INTATIS_RESUME_RELEASE_DIR:-}"
+document_runtime_arm64_root="${INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT:-}"
+document_runtime_x86_64_root="${INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT:-}"
 recovery_parent="$project_root/.intatis/release-recovery"
 work_root=""
 recovery_dir=""
@@ -204,6 +206,50 @@ inspect_release_app() {
         || fail "Release version contains unsafe filename characters"
     [[ "$build_number" != *[^A-Za-z0-9._-]* ]] \
         || fail "Release build number contains unsafe filename characters"
+
+    local runtime_bundle="$app/Contents/Resources/DocumentRuntime"
+    for architecture in arm64 x86_64; do
+        [[ -f "$runtime_bundle/$architecture/runtime-manifest.json" ]] \
+            || fail "Release App is missing the $architecture document runtime"
+    done
+}
+
+validate_document_runtime() {
+    local root="$1"
+    local architecture="$2"
+    local signing_identity="$3"
+    local validation_mode="${4:-static}"
+    "$project_root/scripts/validate-document-runtime.sh" \
+        "$root" "$architecture" "$signing_identity" "$validation_mode"
+}
+
+stage_document_runtimes() {
+    local app="$1"
+    [[ -n "$document_runtime_arm64_root" && -n "$document_runtime_x86_64_root" ]] \
+        || fail "INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT and INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT are required"
+
+    validate_document_runtime "$document_runtime_arm64_root" arm64 "$signing_identity"
+    validate_document_runtime "$document_runtime_x86_64_root" x86_64 "$signing_identity"
+
+    local destination="$app/Contents/Resources/DocumentRuntime"
+    [[ ! -e "$destination" && ! -L "$destination" ]] \
+        || fail "Release build unexpectedly already contains a document runtime"
+    /bin/mkdir -p "$destination/arm64" "$destination/x86_64"
+    /usr/bin/ditto "$document_runtime_arm64_root" "$destination/arm64"
+    /usr/bin/ditto "$document_runtime_x86_64_root" "$destination/x86_64"
+
+    validate_document_runtime "$destination/arm64" arm64 "$signing_identity"
+    validate_document_runtime "$destination/x86_64" x86_64 "$signing_identity"
+}
+
+validate_staged_document_runtimes() {
+    local app="$1"
+    local validation_mode="${2:-static}"
+    local runtime_bundle="$app/Contents/Resources/DocumentRuntime"
+    validate_document_runtime \
+        "$runtime_bundle/arm64" arm64 "$signing_identity" "$validation_mode"
+    validate_document_runtime \
+        "$runtime_bundle/x86_64" x86_64 "$signing_identity" "$validation_mode"
 }
 
 require_current_project_version() {
@@ -484,6 +530,7 @@ if [[ -n "$resume_release_dir" ]]; then
         || fail "recovery App build number does not match its state"
     require_current_project_version
     verify_signed_release_app "$staged_app"
+    validate_staged_document_runtimes "$staged_app" execute
     print -- "Resuming preserved Intatis $version (build $build_number) release state."
 else
     xcodegen_path="$(command -v xcodegen || true)"
@@ -517,6 +564,7 @@ else
     source_app="$derived_data/Build/Products/Release/IntatisMac.app"
     [[ -d "$source_app" ]] || fail "Release build did not produce IntatisMac.app"
     /usr/bin/ditto "$source_app" "$build_staged_app"
+    stage_document_runtimes "$build_staged_app"
     inspect_release_app "$build_staged_app"
     require_current_project_version
 
@@ -529,11 +577,13 @@ else
         --entitlements "$entitlements" \
         "$build_staged_app"
     verify_signed_release_app "$build_staged_app"
+    validate_staged_document_runtimes "$build_staged_app" execute
 
     create_recovery_directory "$build_staged_app"
     inspect_release_app "$staged_app"
     require_current_project_version
     verify_signed_release_app "$staged_app"
+    validate_staged_document_runtimes "$staged_app" execute
     pause_for_notarization_network_if_requested
 fi
 

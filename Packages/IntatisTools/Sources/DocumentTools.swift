@@ -62,7 +62,7 @@ enum DocumentPageSelection {
     }
 }
 
-private actor DocumentExecutionAccumulator {
+actor DocumentExecutionAccumulator {
     private var engineVersions: [String: String] = [:]
     private var warnings: [String] = []
     private var result: JSONValue?
@@ -86,7 +86,7 @@ private actor DocumentExecutionAccumulator {
     }
 }
 
-private enum DocumentToolSupport {
+enum DocumentToolSupport {
     static func encode<T: Encodable>(_ value: T) throws -> JSONValue {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -117,8 +117,6 @@ private enum DocumentToolSupport {
                 "path": .string(receipt.relativePath),
                 "sha256": .string(receipt.sha256),
                 "byte_count": .number(Double(receipt.byteCount)),
-                "file_count": .number(Double(receipt.fileCount)),
-                "cleanup_warning": receipt.cleanupWarning.map(JSONValue.string) ?? .null,
             ])
         }
         let encoder = JSONEncoder()
@@ -264,59 +262,6 @@ private enum DocumentToolSupport {
         }
     }
 
-    static func validateRenderBundle(_ directory: URL) throws {
-        let manifestURL = directory.appendingPathComponent(
-            PDFNativeDocumentService.manifestFileName,
-            isDirectory: false)
-        let data = try Data(contentsOf: manifestURL, options: [.mappedIfSafe])
-        let manifest = try JSONDecoder().decode(PDFNativeRenderManifest.self, from: data)
-        guard manifest.schemaVersion == 1,
-              !manifest.pages.isEmpty,
-              manifest.pages.allSatisfy({ page in
-                  page.mimeType == "image/png"
-                      && page.byteCount > 0
-                      && page.sha256.utf8.count == 64
-                      && FileManager.default.fileExists(
-                          atPath: directory.appendingPathComponent(page.fileName).path)
-              }) else {
-            throw DocumentToolError(.validationFailed, "render bundle manifest is invalid")
-        }
-    }
-
-    static func renderablePDF(
-        format: DocumentFormat,
-        input: URL,
-        reviewedInputPath: String,
-        reviewedOutputPath: String,
-        allowedHTMLAssets: [String: URL],
-        stagedPDF: URL,
-        context: ToolContext
-    ) async throws -> [String: String] {
-        switch format {
-        case .docx, .pptx, .xlsx:
-            return try await LibreOfficeDocumentBackend.exportPDF(
-                actualInput: input,
-                reviewedInputPath: reviewedInputPath,
-                stagedPDF: stagedPDF,
-                reviewedOutputPath: reviewedOutputPath,
-                in: context)
-        case .html:
-            return try await prepareAndRenderHTML(
-                input: input,
-                reviewedInputPaths: [reviewedInputPath] + allowedHTMLAssets.keys.sorted(),
-                reviewedOutputPath: reviewedOutputPath,
-                allowedHTMLAssets: allowedHTMLAssets,
-                stagedPDF: stagedPDF,
-                context: context)
-        case .epub:
-            throw DocumentToolError(
-                .unsupportedFeature,
-                "EPUB full-spine PDF export has not passed its required corpus gate")
-        case .pdf:
-            throw DocumentToolError(.unsupportedOperation, "PDF input is not an export route")
-        }
-    }
-
     static func prepareAndRenderHTML(
         input: URL,
         reviewedInputPaths: [String],
@@ -384,105 +329,6 @@ private enum DocumentToolSupport {
         return versions
     }
 
-    static func moveRenderedBundle(from source: URL, to destination: URL) throws {
-        let children = try FileManager.default.contentsOfDirectory(
-            at: source,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-            options: [])
-        for child in children {
-            let values = try child.resourceValues(forKeys: [
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-            ])
-            guard values.isRegularFile == true, values.isSymbolicLink != true else {
-                throw DocumentToolError(.validationFailed, "render backend emitted an unsafe entry")
-            }
-            try FileManager.default.moveItem(
-                at: child,
-                to: destination.appendingPathComponent(child.lastPathComponent))
-        }
-    }
-
-    static func writeOperationPaths(_ value: DocumentWriteArguments) -> [String] {
-        var paths: [String] = []
-        if let input = value.inputPath { paths.append(input) }
-        paths.append(contentsOf: value.localAssetPaths ?? [])
-        for operation in value.operations {
-            for key in ["path", "source_path"] {
-                if case .string(let path)? = operation.parameters[key] {
-                    paths.append(path)
-                }
-            }
-        }
-        paths.append(value.outputPath)
-        var seen = Set<String>()
-        return paths.filter { seen.insert($0).inserted }
-    }
-
-    static func resolvedWriteOperations(
-        _ operations: [DocumentWriteOperation],
-        assets: [String: URL]
-    ) -> JSONValue {
-        .array(operations.map { operation in
-            var parameters = operation.parameters
-            for key in ["path", "source_path"] {
-                if case .string(let original)? = parameters[key],
-                   let resolved = assets[original] {
-                    parameters[key] = .string(resolved.path)
-                }
-            }
-            return .object([
-                "kind": .string(operation.kind),
-                "parameters": .object(parameters),
-            ])
-        })
-    }
-
-    static func verifyWrittenNativeDocument(
-        _ stagedOutput: URL,
-        format: DocumentFormat,
-        resolvedOperations: JSONValue,
-        expectedOperationCount: Int,
-        assets: [String: URL],
-        reviewedOutputPath: String,
-        stageRoot: URL,
-        context: ToolContext
-    ) async throws -> DocumentBackendEnvelope {
-        guard [.docx, .pptx, .xlsx, .html].contains(format) else {
-            throw DocumentToolError(
-                .unsupportedOperation,
-                "format has no fixed native write verifier")
-        }
-        let allowedAssets = assets.values
-            .map { JSONValue.string($0.path) }
-            .sorted(by: jsonStringLess)
-        let envelope = try await DocumentPythonBackend.run(
-            operation: "verify_write",
-            payload: .object([
-                "format": .string(format.rawValue),
-                "input_path": .string(stagedOutput.path),
-                "operations": resolvedOperations,
-                "allowed_asset_paths": .array(allowedAssets),
-            ]),
-            readableWorkspacePaths: [],
-            writableWorkspacePaths: [reviewedOutputPath],
-            internalWritableWorkspacePaths: [stageRoot.path],
-            internalReadOnlyWorkspacePaths: [stagedOutput.path],
-            in: context)
-        guard case .object(let result)? = envelope.result,
-              case .string(let verifiedFormat)? = result["format"],
-              verifiedFormat == format.rawValue,
-              case .number(let verifiedCount)? = result["verified_count"],
-              verifiedCount.isFinite,
-              verifiedCount.rounded(.towardZero) == verifiedCount,
-              Int(exactly: verifiedCount) == expectedOperationCount else {
-            throw DocumentToolError(
-                .validationFailed,
-                "document write verifier did not confirm every declared operation")
-        }
-        return envelope
-    }
-
     private static func jsonStringLess(_ lhs: JSONValue, _ rhs: JSONValue) -> Bool {
         guard case .string(let left) = lhs, case .string(let right) = rhs else { return false }
         return left < right
@@ -491,13 +337,42 @@ private enum DocumentToolSupport {
 
 // MARK: - Fixed-format text readers
 
+private struct DocumentTextCursorPayload: Codable, Equatable, Sendable {
+    let schemaVersion: Int
+    let format: String
+    let sourceSHA256: String
+    let element: Int
+    let characterOffset: Int
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case format
+        case sourceSHA256 = "source_sha256"
+        case element
+        case characterOffset = "character_offset"
+    }
+}
+
 private enum DocumentTextReadSupport {
+    private static let cursorSchemaVersion = 1
+
     static func value(_ args: ToolArgs, format: DocumentFormat) throws -> DocumentTextReadArguments {
         try DocumentTextReadArguments.decodeValidated(args, format: format)
     }
 
+    static func continuationValue(
+        _ args: ToolArgs,
+        format: DocumentFormat
+    ) throws -> DocumentTextContinueArguments {
+        try DocumentTextContinueArguments.decodeValidated(args, format: format)
+    }
+
     static func touchedPaths(_ args: ToolArgs, format: DocumentFormat) -> [String] {
         (try? value(args, format: format)).map { [$0.path] } ?? []
+    }
+
+    static func continuationTouchedPaths(_ args: ToolArgs, format: DocumentFormat) -> [String] {
+        (try? continuationValue(args, format: format)).map { [$0.path] } ?? []
     }
 
     static func permissionIntent(
@@ -521,6 +396,27 @@ private enum DocumentTextReadSupport {
             replayPolicy: .safeToReplay)
     }
 
+    static func continuationPermissionIntent(
+        _ args: ToolArgs,
+        format: DocumentFormat,
+        toolName: String,
+        sideEffect: SideEffect
+    ) -> PermissionIntent {
+        guard let value = try? continuationValue(args, format: format) else {
+            return PermissionIntent.derived(
+                toolName: toolName,
+                sideEffect: sideEffect,
+                touchedPaths: continuationTouchedPaths(args, format: format),
+                risksNetwork: false)
+        }
+        return DocumentToolSupport.processReadIntent(
+            action: "document.read.\(format.rawValue)",
+            paths: [value.path],
+            operation: "continue_bounded_markdown",
+            format: format,
+            replayPolicy: .safeToReplay)
+    }
+
     static func execute(
         _ args: ToolArgs,
         format: DocumentFormat,
@@ -528,32 +424,199 @@ private enum DocumentTextReadSupport {
         context: ToolContext
     ) async throws -> ToolObservation {
         let value = try value(args, format: format)
-        let snapshot = try DocumentInputFile.freeze(
+        return try await executeWindow(
             path: value.path,
+            maximumCharacters: value.maxCharacters ?? 200_000,
+            cursor: nil,
+            format: format,
+            operation: operation,
+            context: context)
+    }
+
+    static func executeContinuation(
+        _ args: ToolArgs,
+        format: DocumentFormat,
+        operation: String,
+        context: ToolContext
+    ) async throws -> ToolObservation {
+        let value = try continuationValue(args, format: format)
+        let cursor = try decodeCursor(value.cursor, expectedFormat: format)
+        return try await executeWindow(
+            path: value.path,
+            maximumCharacters: value.maxCharacters ?? 200_000,
+            cursor: cursor,
+            format: format,
+            operation: operation,
+            context: context)
+    }
+
+    private static func executeWindow(
+        path: String,
+        maximumCharacters: Int,
+        cursor: DocumentTextCursorPayload?,
+        format: DocumentFormat,
+        operation: String,
+        context: ToolContext
+    ) async throws -> ToolObservation {
+        let snapshot = try DocumentInputFile.freeze(
+            path: path,
             expectedFormat: format,
+            expectedSHA256: cursor?.sourceSHA256,
             workspace: context.workspaceRoot)
         let envelope = try await DocumentPythonBackend.run(
-            operation: "read",
+            operation: "read_\(format.rawValue)",
             payload: .object([
-                "format": .string(format.rawValue),
                 "input_path": .string(snapshot.url.path),
-                "maximum_characters": .number(Double(value.maxCharacters ?? 200_000)),
+                "maximum_characters": .number(Double(maximumCharacters)),
                 "maximum_file_bytes": .number(Double(snapshot.identity.byteCount)),
+                "start_element": .number(Double(cursor?.element ?? 1)),
+                "start_character_offset": .number(Double(cursor?.characterOffset ?? 0)),
             ]),
-            readableWorkspacePaths: [value.path],
+            readableWorkspacePaths: [path],
             in: context)
         try DocumentInputFile.verifyUnchanged(snapshot)
+        let result = try decorateResult(
+            envelope.result,
+            format: format,
+            sourceSHA256: snapshot.identity.sha256,
+            sourceByteCount: snapshot.identity.byteCount)
         return try DocumentToolSupport.observation(
             operation: operation,
             format: format,
-            result: envelope.result,
+            result: result,
             engineVersions: envelope.engineVersions,
             warnings: envelope.warnings,
             truncated: {
-                guard case .object(let result)? = envelope.result,
+                guard case .object(let result) = result,
                       case .bool(let truncated)? = result["truncated"] else { return false }
                 return truncated
             }())
+    }
+
+    private static func decorateResult(
+        _ rawResult: JSONValue?,
+        format: DocumentFormat,
+        sourceSHA256: String,
+        sourceByteCount: UInt64
+    ) throws -> JSONValue {
+        guard case .object(var result)? = rawResult,
+              case .string(let returnedFormat)? = result["format"],
+              returnedFormat == format.rawValue,
+              case .string? = result["markdown"],
+              case .bool(let truncated)? = result["truncated"],
+              case .object(var navigation)? = result["navigation"],
+              let sourceElementCount = exactInteger(navigation["source_element_count"]),
+              sourceElementCount >= 1,
+              case .array(let rawLandmarks)? = navigation["landmarks"],
+              rawLandmarks.count <= 256,
+              case .bool? = navigation["landmarks_truncated"] else {
+            throw DocumentToolError(.backendFailed, "Docling reader returned an invalid navigation envelope")
+        }
+
+        let nextCursor: JSONValue
+        switch navigation["next"] {
+        case .null?:
+            guard truncated == false else {
+                throw DocumentToolError(.backendFailed, "Docling reader omitted its continuation position")
+            }
+            nextCursor = .null
+        case .object(let next)?:
+            guard truncated,
+                  let element = exactInteger(next["element"]),
+                  let characterOffset = exactInteger(next["character_offset"]),
+                  element >= 1,
+                  element < sourceElementCount,
+                  characterOffset >= 0 else {
+                throw DocumentToolError(.backendFailed, "Docling reader returned an invalid continuation position")
+            }
+            nextCursor = .string(try encodeCursor(DocumentTextCursorPayload(
+                schemaVersion: cursorSchemaVersion,
+                format: format.rawValue,
+                sourceSHA256: sourceSHA256.lowercased(),
+                element: element,
+                characterOffset: characterOffset)))
+        default:
+            throw DocumentToolError(.backendFailed, "Docling reader returned an invalid continuation position")
+        }
+
+        var landmarks: [JSONValue] = []
+        landmarks.reserveCapacity(rawLandmarks.count)
+        for rawLandmark in rawLandmarks {
+            guard case .object(var landmark) = rawLandmark,
+                  case .string(let kind)? = landmark["kind"],
+                  !kind.isEmpty,
+                  kind.utf8.count <= 64,
+                  case .string(let title)? = landmark["title"],
+                  !title.isEmpty,
+                  title.count <= 240,
+                  let element = exactInteger(landmark["element"]),
+                  element >= 1,
+                  element < sourceElementCount else {
+                throw DocumentToolError(.backendFailed, "Docling reader returned an invalid landmark")
+            }
+            landmark.removeValue(forKey: "element")
+            landmark["cursor"] = .string(try encodeCursor(DocumentTextCursorPayload(
+                schemaVersion: cursorSchemaVersion,
+                format: format.rawValue,
+                sourceSHA256: sourceSHA256.lowercased(),
+                element: element,
+                characterOffset: 0)))
+            landmarks.append(.object(landmark))
+        }
+
+        navigation.removeValue(forKey: "next")
+        navigation["next_cursor"] = nextCursor
+        navigation["landmarks"] = .array(landmarks)
+        navigation["cursor_schema_version"] = .number(Double(cursorSchemaVersion))
+        result["navigation"] = .object(navigation)
+        result["source_sha256"] = .string(sourceSHA256.lowercased())
+        result["source_byte_count"] = .number(Double(sourceByteCount))
+        return .object(result)
+    }
+
+    private static func exactInteger(_ value: JSONValue?) -> Int? {
+        guard case .number(let number)? = value,
+              number.isFinite,
+              number.rounded(.towardZero) == number else { return nil }
+        return Int(exactly: number)
+    }
+
+    private static func encodeCursor(_ cursor: DocumentTextCursorPayload) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(cursor)
+        return data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func decodeCursor(
+        _ rawValue: String,
+        expectedFormat: DocumentFormat
+    ) throws -> DocumentTextCursorPayload {
+        guard rawValue.count % 4 != 1 else {
+            throw DocumentToolError(.validationFailed, "document cursor is malformed")
+        }
+        let padding = String(repeating: "=", count: (4 - rawValue.count % 4) % 4)
+        let base64 = rawValue
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/") + padding
+        guard let data = Data(base64Encoded: base64),
+              data.count <= 1_024,
+              let cursor = try? JSONDecoder().decode(DocumentTextCursorPayload.self, from: data),
+              cursor.schemaVersion == cursorSchemaVersion,
+              cursor.format == expectedFormat.rawValue,
+              cursor.sourceSHA256.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression) != nil,
+              cursor.element >= 1,
+              cursor.characterOffset >= 0,
+              cursor.characterOffset <= 512 * 1_024 * 1_024,
+              try encodeCursor(cursor) == rawValue else {
+            throw DocumentToolError(.validationFailed, "document cursor is invalid for this reader")
+        }
+        return cursor
     }
 }
 
@@ -562,7 +625,7 @@ public struct ReadDOCXTool: Tool {
     public static let canonicalPermission: String? = "document.read"
     public static let descriptor = ToolDescriptor(
         name: "read_docx",
-        description: "Read one DOCX workspace file as bounded Markdown with the fixed local Docling DOCX converter. The format and backend are fixed; no fallback, edit, rendering, or OCR is attempted.",
+        description: "Read one DOCX workspace file as bounded Markdown with the fixed local Docling DOCX converter. The result includes source-bound next/section cursors for continue_docx_read. The format and backend are fixed; no fallback, edit, rendering, or OCR is attempted.",
         sideEffect: .exec,
         parameters: DocumentTextReadArguments.schema)
     public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.value(args, format: .docx) }
@@ -576,7 +639,7 @@ public struct ReadPPTXTool: Tool {
     public static let canonicalPermission: String? = "document.read"
     public static let descriptor = ToolDescriptor(
         name: "read_pptx",
-        description: "Read one PPTX workspace file as bounded Markdown with the fixed local Docling PPTX converter. The format and backend are fixed; no fallback, edit, rendering, or OCR is attempted.",
+        description: "Read one PPTX workspace file as bounded Markdown with the fixed local Docling PPTX converter. The result includes source-bound next/slide/section cursors for continue_pptx_read. The format and backend are fixed; no fallback, edit, rendering, or OCR is attempted.",
         sideEffect: .exec,
         parameters: DocumentTextReadArguments.schema)
     public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.value(args, format: .pptx) }
@@ -590,7 +653,7 @@ public struct ReadXLSXTool: Tool {
     public static let canonicalPermission: String? = "document.read"
     public static let descriptor = ToolDescriptor(
         name: "read_xlsx",
-        description: "Read one XLSX workspace file as bounded Markdown with the fixed local Docling XLSX converter. The format and backend are fixed; no fallback, edit, recalculation, or formula execution is attempted.",
+        description: "Read one XLSX workspace file as bounded Markdown with the fixed local Docling XLSX converter. The result includes source-bound next/sheet/section cursors for continue_xlsx_read. The format and backend are fixed; no fallback, edit, recalculation, or formula execution is attempted.",
         sideEffect: .exec,
         parameters: DocumentTextReadArguments.schema)
     public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.value(args, format: .xlsx) }
@@ -604,7 +667,7 @@ public struct ReadHTMLTool: Tool {
     public static let canonicalPermission: String? = "document.read"
     public static let descriptor = ToolDescriptor(
         name: "read_html",
-        description: "Read one local HTML workspace file as bounded Markdown with the fixed local Docling HTML converter. The format and backend are fixed; no fallback, script execution, network access, or rendering is attempted.",
+        description: "Read one local HTML workspace file as bounded Markdown with the fixed local Docling HTML converter. The result includes source-bound next/section cursors for continue_html_read. The format and backend are fixed; no fallback, script execution, network access, or rendering is attempted.",
         sideEffect: .exec,
         parameters: DocumentTextReadArguments.schema)
     public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.value(args, format: .html) }
@@ -618,7 +681,7 @@ public struct ReadEPUBTool: Tool {
     public static let canonicalPermission: String? = "document.read"
     public static let descriptor = ToolDescriptor(
         name: "read_epub",
-        description: "Read one EPUB workspace file as bounded Markdown with the fixed local Docling EPUB converter. The format and backend are fixed; no fallback, edit, rendering, or network access is attempted.",
+        description: "Read one EPUB workspace file as bounded Markdown with the fixed local Docling EPUB converter. The result includes source-bound next/section cursors for continue_epub_read. The format and backend are fixed; no fallback, edit, rendering, or network access is attempted.",
         sideEffect: .exec,
         parameters: DocumentTextReadArguments.schema)
     public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.value(args, format: .epub) }
@@ -627,70 +690,126 @@ public struct ReadEPUBTool: Tool {
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation { try await DocumentTextReadSupport.execute(args, format: .epub, operation: Self.descriptor.name, context: context) }
 }
 
-// MARK: - document_ocr
+// MARK: - Fixed-format text reader continuation
 
-public struct DocumentOCRTool: Tool {
+public struct ContinueDOCXReadTool: Tool {
+    public init() {}
+    public static let canonicalPermission: String? = "document.read"
+    public static let descriptor = ToolDescriptor(
+        name: "continue_docx_read",
+        description: "Continue or jump within one DOCX using a source-bound opaque cursor returned by read_docx or this tool. Content and landmarks come from the same fixed local Docling DOCX converter.",
+        sideEffect: .exec,
+        parameters: DocumentTextContinueArguments.schema)
+    public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.continuationValue(args, format: .docx) }
+    public func touchedPaths(_ args: ToolArgs) -> [String] { DocumentTextReadSupport.continuationTouchedPaths(args, format: .docx) }
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent { DocumentTextReadSupport.continuationPermissionIntent(args, format: .docx, toolName: Self.descriptor.name, sideEffect: Self.descriptor.sideEffect) }
+    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation { try await DocumentTextReadSupport.executeContinuation(args, format: .docx, operation: Self.descriptor.name, context: context) }
+}
+
+public struct ContinuePPTXReadTool: Tool {
+    public init() {}
+    public static let canonicalPermission: String? = "document.read"
+    public static let descriptor = ToolDescriptor(
+        name: "continue_pptx_read",
+        description: "Continue or jump within one PPTX using a source-bound opaque cursor returned by read_pptx or this tool. Content and slide landmarks come from the same fixed local Docling PPTX converter.",
+        sideEffect: .exec,
+        parameters: DocumentTextContinueArguments.schema)
+    public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.continuationValue(args, format: .pptx) }
+    public func touchedPaths(_ args: ToolArgs) -> [String] { DocumentTextReadSupport.continuationTouchedPaths(args, format: .pptx) }
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent { DocumentTextReadSupport.continuationPermissionIntent(args, format: .pptx, toolName: Self.descriptor.name, sideEffect: Self.descriptor.sideEffect) }
+    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation { try await DocumentTextReadSupport.executeContinuation(args, format: .pptx, operation: Self.descriptor.name, context: context) }
+}
+
+public struct ContinueXLSXReadTool: Tool {
+    public init() {}
+    public static let canonicalPermission: String? = "document.read"
+    public static let descriptor = ToolDescriptor(
+        name: "continue_xlsx_read",
+        description: "Continue or jump within one XLSX using a source-bound opaque cursor returned by read_xlsx or this tool. Content and sheet landmarks come from the same fixed local Docling XLSX converter.",
+        sideEffect: .exec,
+        parameters: DocumentTextContinueArguments.schema)
+    public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.continuationValue(args, format: .xlsx) }
+    public func touchedPaths(_ args: ToolArgs) -> [String] { DocumentTextReadSupport.continuationTouchedPaths(args, format: .xlsx) }
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent { DocumentTextReadSupport.continuationPermissionIntent(args, format: .xlsx, toolName: Self.descriptor.name, sideEffect: Self.descriptor.sideEffect) }
+    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation { try await DocumentTextReadSupport.executeContinuation(args, format: .xlsx, operation: Self.descriptor.name, context: context) }
+}
+
+public struct ContinueHTMLReadTool: Tool {
+    public init() {}
+    public static let canonicalPermission: String? = "document.read"
+    public static let descriptor = ToolDescriptor(
+        name: "continue_html_read",
+        description: "Continue or jump within one local HTML document using a source-bound opaque cursor returned by read_html or this tool. Content and landmarks come from the same fixed local Docling HTML converter.",
+        sideEffect: .exec,
+        parameters: DocumentTextContinueArguments.schema)
+    public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.continuationValue(args, format: .html) }
+    public func touchedPaths(_ args: ToolArgs) -> [String] { DocumentTextReadSupport.continuationTouchedPaths(args, format: .html) }
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent { DocumentTextReadSupport.continuationPermissionIntent(args, format: .html, toolName: Self.descriptor.name, sideEffect: Self.descriptor.sideEffect) }
+    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation { try await DocumentTextReadSupport.executeContinuation(args, format: .html, operation: Self.descriptor.name, context: context) }
+}
+
+public struct ContinueEPUBReadTool: Tool {
+    public init() {}
+    public static let canonicalPermission: String? = "document.read"
+    public static let descriptor = ToolDescriptor(
+        name: "continue_epub_read",
+        description: "Continue or jump within one EPUB using a source-bound opaque cursor returned by read_epub or this tool. Content and chapter landmarks come from the same fixed local Docling EPUB converter.",
+        sideEffect: .exec,
+        parameters: DocumentTextContinueArguments.schema)
+    public func validateArguments(_ args: ToolArgs) throws { _ = try DocumentTextReadSupport.continuationValue(args, format: .epub) }
+    public func touchedPaths(_ args: ToolArgs) -> [String] { DocumentTextReadSupport.continuationTouchedPaths(args, format: .epub) }
+    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent { DocumentTextReadSupport.continuationPermissionIntent(args, format: .epub, toolName: Self.descriptor.name, sideEffect: Self.descriptor.sideEffect) }
+    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation { try await DocumentTextReadSupport.executeContinuation(args, format: .epub, operation: Self.descriptor.name, context: context) }
+}
+
+// MARK: - Exact PDF OCR and rendering
+
+public struct OCRPDFTool: Tool {
     public init() {}
 
     public static let canonicalPermission: String? = "document.ocr"
     public static let descriptor = ToolDescriptor(
-        name: "document_ocr",
-        description: "Run explicit offline OCR on selected pages of a workspace PDF with fixed Docling models and fixed Tesseract settings. It returns bounded text and boxes; it never creates or edits a PDF and never chooses an OCR engine automatically.",
+        name: "ocr_pdf",
+        description: "Convert one image-only PDF to bounded Markdown with one fixed local Docling DocumentConverter call using the pinned Tesseract runtime. First pass inspect_pdf.source_sha256. The tool does not generate or edit a PDF.",
         sideEffect: .exec,
-        parameters: DocumentOCRArguments.schema)
+        parameters: OCRPDFArguments.schema)
 
     public func validateArguments(_ args: ToolArgs) throws {
-        _ = try DocumentOCRArguments.decodeValidated(args)
+        _ = try OCRPDFArguments.decodeValidated(args)
     }
 
     public func touchedPaths(_ args: ToolArgs) -> [String] {
-        (try? DocumentOCRArguments.decodeValidated(args)).map { [$0.inputPath] } ?? []
+        (try? OCRPDFArguments.decodeValidated(args)).map { [$0.inputPath] } ?? []
     }
 
     public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
         DocumentToolSupport.processReadIntent(
             action: "document.ocr",
             paths: touchedPaths(args),
-            operation: "ocr_selected_pdf_pages",
+            operation: Self.descriptor.name,
             format: .pdf)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
-        let value = try DocumentOCRArguments.decodeValidated(args)
+        let value = try OCRPDFArguments.decodeValidated(args)
         let snapshot = try DocumentInputFile.freeze(
             path: value.inputPath,
             expectedFormat: .pdf,
             expectedSHA256: value.expectedSourceSHA256,
             maximumBytes: 100 * 1_024 * 1_024,
             workspace: context.workspaceRoot)
-        let pageCount: Int
-        do {
-            pageCount = try PDFNativeDocumentService.readNativeText(
-                from: snapshot.url,
-                pages: nil,
-                maximumCharacters: 1).pageCount
-        } catch {
-            throw DocumentToolError(.validationFailed, "PDF could not be inspected before OCR")
-        }
-        let pages = try DocumentPageSelection.expand(
-            value.pages,
-            pageCount: pageCount,
-            maximumCount: 50)
         let payload = try DocumentPythonBackend.fixedOCRPayload(
             inputPath: snapshot.url.path,
-            pages: pages,
-            languages: value.languages,
-            psm: value.pageSegmentationMode,
             maximumCharacters: value.maxCharacters ?? 200_000,
             maximumFileBytes: 100 * 1_024 * 1_024)
         let envelope = try await DocumentPythonBackend.run(
-            operation: "ocr",
+            operation: Self.descriptor.name,
             payload: payload,
             readableWorkspacePaths: [value.inputPath],
             in: context)
         try DocumentInputFile.verifyUnchanged(snapshot)
         return try DocumentToolSupport.observation(
-            operation: "document_ocr",
+            operation: Self.descriptor.name,
             format: .pdf,
             result: envelope.result,
             engineVersions: envelope.engineVersions,
@@ -703,29 +822,27 @@ public struct DocumentOCRTool: Tool {
     }
 }
 
-// MARK: - document_render
-
-public struct DocumentRenderTool: Tool {
+public struct PDFRenderPageTool: Tool {
     public init() {}
 
     public static let canonicalPermission: String? = "document.render"
     public static let descriptor = ToolDescriptor(
-        name: "document_render",
-        description: "Render selected document pages to a workspace directory containing deterministic PNG files and manifest.json. PDF pages are drawn directly with PDFKit; DOCX, PPTX, XLSX, and HTML use one fixed temporary-PDF route. The complete directory is committed atomically.",
+        name: "pdf_render_page",
+        description: "Draw exactly one page of one workspace PDF to one PNG with PDFKit PDFPage.draw. Rendering is fixed to the crop box, 144 DPI, a white background, and visible annotations; export other formats to PDF first.",
         sideEffect: .exec,
-        parameters: DocumentRenderArguments.schema)
+        parameters: PDFRenderPageArguments.schema)
 
     public func validateArguments(_ args: ToolArgs) throws {
-        _ = try DocumentRenderArguments.decodeValidated(args)
+        _ = try PDFRenderPageArguments.decodeValidated(args)
     }
 
     public func touchedPaths(_ args: ToolArgs) -> [String] {
-        guard let value = try? DocumentRenderArguments.decodeValidated(args) else { return [] }
-        return [value.inputPath] + (value.localAssetPaths ?? []) + [value.outputDirectory]
+        guard let value = try? PDFRenderPageArguments.decodeValidated(args) else { return [] }
+        return [value.inputPath, value.outputPath]
     }
 
     public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
-        guard let value = try? DocumentRenderArguments.decodeValidated(args) else {
+        guard let value = try? PDFRenderPageArguments.decodeValidated(args) else {
             return PermissionIntent.derived(
                 toolName: Self.descriptor.name,
                 sideEffect: Self.descriptor.sideEffect,
@@ -734,164 +851,18 @@ public struct DocumentRenderTool: Tool {
         }
         return DocumentToolSupport.writeIntent(
             action: "document.render",
-            readPaths: [value.inputPath] + (value.localAssetPaths ?? []),
-            writePath: value.outputDirectory,
-            operation: "render_page_png_bundle",
-            format: value.inputFormat)
-    }
-
-    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
-        let value = try DocumentRenderArguments.decodeValidated(args)
-        let snapshot = try DocumentInputFile.freeze(
-            path: value.inputPath,
-            expectedFormat: value.inputFormat,
-            expectedSHA256: value.expectedSourceSHA256,
-            workspace: context.workspaceRoot)
-        let frozenAssets = try DocumentToolSupport.freezeAuxiliaryInputs(
-            value.localAssetPaths ?? [],
-            workspace: context.workspaceRoot)
-        let pages = try DocumentPageSelection.parse(value.pages, maximumCount: 200)
-        let request = DocumentStagedDirectoryRequest(
-            sourcePath: value.inputPath,
-            expectedSourceSHA256: value.expectedSourceSHA256,
-            destinationPath: value.outputDirectory,
-            replaceExisting: value.replaceExisting ?? false,
-            expectedDestinationSHA256: value.expectedOutputSHA256,
-            maximumFiles: 201,
-            maximumBytes: UInt64(value.resolvedMaximumOutputBytes),
-            readOnlyInputSnapshots: frozenAssets.snapshots)
-        let accumulator = DocumentExecutionAccumulator()
-        let receipt = try await DocumentStagedOutput.writeDirectory(
-            request,
-            workspace: context.workspaceRoot,
-            produce: { stage in
-                if value.inputFormat == .pdf {
-                    _ = try PDFNativeDocumentService.renderPages(
-                        from: snapshot.url,
-                        into: stage,
-                        pages: pages,
-                        box: value.resolvedPageBox == .media ? .mediaBox : .cropBox,
-                        dpi: Double(value.resolvedDPI),
-                        background: value.resolvedBackground == .white ? .white : .transparent,
-                        includeAnnotations: value.resolvedAnnotations == .show,
-                        maximumPagePixels: value.resolvedMaximumPagePixels,
-                        maximumTotalPixels: value.resolvedMaximumTotalPixels,
-                        maximumOutputBytes: value.resolvedMaximumOutputBytes)
-                    return
-                }
-
-                let rendered = stage.appendingPathComponent(".rendered", isDirectory: true)
-                try FileManager.default.createDirectory(
-                    at: rendered,
-                    withIntermediateDirectories: false,
-                    attributes: [.posixPermissions: NSNumber(value: Int16(0o700))])
-                // Keep backend payloads directly under the transaction root.
-                // The process boundary accepts only a same-parent
-                // `.intatis-document-stage-*` directory as its internal
-                // writable lease; a nested ad-hoc work directory would fail
-                // closed before the fixed backend could start.
-                let temporaryPDF = stage.appendingPathComponent("preview.pdf")
-                let rendererVersions = try await DocumentToolSupport.renderablePDF(
-                    format: value.inputFormat,
-                    input: snapshot.url,
-                    reviewedInputPath: value.inputPath,
-                    reviewedOutputPath: value.outputDirectory,
-                    allowedHTMLAssets: frozenAssets.urlsByReviewedPath,
-                    stagedPDF: temporaryPDF,
-                    context: context)
-                let validatorVersions = try await DocumentToolSupport.validateGeneratedPDF(
-                    temporaryPDF,
-                    reviewedOutputPath: value.outputDirectory,
-                    context: context)
-                await accumulator.record(versions: rendererVersions)
-                await accumulator.record(versions: validatorVersions)
-                _ = try PDFNativeDocumentService.renderPages(
-                    from: temporaryPDF,
-                    into: rendered,
-                    pages: pages,
-                    box: value.resolvedPageBox == .media ? .mediaBox : .cropBox,
-                    dpi: Double(value.resolvedDPI),
-                    background: value.resolvedBackground == .white ? .white : .transparent,
-                    includeAnnotations: value.resolvedAnnotations == .show,
-                    maximumPagePixels: value.resolvedMaximumPagePixels,
-                    maximumTotalPixels: value.resolvedMaximumTotalPixels,
-                    maximumOutputBytes: value.resolvedMaximumOutputBytes)
-                try DocumentToolSupport.moveRenderedBundle(from: rendered, to: stage)
-                try FileManager.default.removeItem(at: rendered)
-                try FileManager.default.removeItem(at: temporaryPDF)
-                for backendDirectoryName in [
-                    "libreoffice-output",
-                    "libreoffice-profile",
-                ] {
-                    let backendDirectory = stage.appendingPathComponent(
-                        backendDirectoryName,
-                        isDirectory: true)
-                    if FileManager.default.fileExists(atPath: backendDirectory.path) {
-                        try FileManager.default.removeItem(at: backendDirectory)
-                    }
-                }
-            },
-            validate: { directory in
-                try DocumentToolSupport.validateRenderBundle(directory)
-            })
-        let execution = await accumulator.snapshot()
-        var versions = execution.versions
-        versions["page_renderer"] = "PDFKit-system"
-        return try DocumentToolSupport.observation(
-            operation: "document_render",
-            format: value.inputFormat,
-            engineVersions: versions,
-            receipt: receipt,
-            changedFiles: [value.outputDirectory])
-    }
-}
-
-// MARK: - document_export_pdf
-
-public struct DocumentExportPDFTool: Tool {
-    public init() {}
-
-    public static let canonicalPermission: String? = "document.export.pdf"
-    public static let descriptor = ToolDescriptor(
-        name: "document_export_pdf",
-        description: "Export one DOCX, PPTX, XLSX, or local self-contained HTML workspace document to a new PDF through its single fixed renderer, then require pdfcpu strict validation and a PDFKit render smoke test before atomic commit. PDF input is rejected; EPUB remains gated.",
-        sideEffect: .exec,
-        parameters: DocumentExportPDFArguments.schema)
-
-    public func validateArguments(_ args: ToolArgs) throws {
-        _ = try DocumentExportPDFArguments.decodeValidated(args)
-    }
-
-    public func touchedPaths(_ args: ToolArgs) -> [String] {
-        guard let value = try? DocumentExportPDFArguments.decodeValidated(args) else { return [] }
-        return [value.inputPath] + (value.localAssetPaths ?? []) + [value.outputPath]
-    }
-
-    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
-        guard let value = try? DocumentExportPDFArguments.decodeValidated(args) else {
-            return PermissionIntent.derived(
-                toolName: Self.descriptor.name,
-                sideEffect: Self.descriptor.sideEffect,
-                touchedPaths: touchedPaths(args),
-                risksNetwork: false)
-        }
-        return DocumentToolSupport.writeIntent(
-            action: "document.export.pdf",
-            readPaths: [value.inputPath] + (value.localAssetPaths ?? []),
+            readPaths: [value.inputPath],
             writePath: value.outputPath,
-            operation: "export_new_pdf",
-            format: value.inputFormat)
+            operation: Self.descriptor.name,
+            format: .pdf)
     }
 
     public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
-        let value = try DocumentExportPDFArguments.decodeValidated(args)
+        let value = try PDFRenderPageArguments.decodeValidated(args)
         let snapshot = try DocumentInputFile.freeze(
             path: value.inputPath,
-            expectedFormat: value.inputFormat,
+            expectedFormat: .pdf,
             expectedSHA256: value.expectedSourceSHA256,
-            workspace: context.workspaceRoot)
-        let frozenAssets = try DocumentToolSupport.freezeAuxiliaryInputs(
-            value.localAssetPaths ?? [],
             workspace: context.workspaceRoot)
         let request = DocumentStagedFileRequest(
             sourcePath: value.inputPath,
@@ -899,271 +870,44 @@ public struct DocumentExportPDFTool: Tool {
             destinationPath: value.outputPath,
             replaceExisting: value.replaceExisting ?? false,
             expectedDestinationSHA256: value.expectedOutputSHA256,
-            fileExtension: "pdf",
-            maximumBytes: 1_024 * 1_024 * 1_024,
-            readOnlyInputSnapshots: frozenAssets.snapshots)
-        let accumulator = DocumentExecutionAccumulator()
+            fileExtension: "png",
+            maximumBytes: 128 * 1_024 * 1_024)
         let receipt = try await DocumentStagedOutput.writeFile(
             request,
             workspace: context.workspaceRoot,
-            produce: { stagedPDF in
-                let rendererVersions = try await DocumentToolSupport.renderablePDF(
-                    format: value.inputFormat,
-                    input: snapshot.url,
-                    reviewedInputPath: value.inputPath,
-                    reviewedOutputPath: value.outputPath,
-                    allowedHTMLAssets: frozenAssets.urlsByReviewedPath,
-                    stagedPDF: stagedPDF,
-                    context: context)
-                let validatorVersions = try await DocumentToolSupport.validateGeneratedPDF(
-                    stagedPDF,
-                    reviewedOutputPath: value.outputPath,
-                    context: context)
-                await accumulator.record(versions: rendererVersions)
-                await accumulator.record(versions: validatorVersions)
-            },
-            validate: { pdf in
-                try DocumentToolSupport.validatePDFFile(pdf)
-            })
-        let execution = await accumulator.snapshot()
-        return try DocumentToolSupport.observation(
-            operation: "document_export_pdf",
-            format: value.inputFormat,
-            engineVersions: execution.versions,
-            receipt: receipt,
-            changedFiles: [value.outputPath])
-    }
-}
-
-// MARK: - document_write
-
-public struct DocumentWriteTool: Tool {
-    public init() {}
-
-    public static let canonicalPermission: String? = "document.write"
-    public static let descriptor = ToolDescriptor(
-        name: "document_write",
-        description: "Create or edit DOCX, PPTX, XLSX, HTML, or EPUB using only the declared fixed high-level operation subset. Each output is staged, reopened, visually validated where applicable, and atomically committed. PDF mutation is unsupported.",
-        sideEffect: .exec,
-        parameters: DocumentWriteArguments.schema)
-
-    public func validateArguments(_ args: ToolArgs) throws {
-        _ = try DocumentWriteArguments.decodeValidated(args)
-    }
-
-    public func touchedPaths(_ args: ToolArgs) -> [String] {
-        guard let value = try? DocumentWriteArguments.decodeValidated(args) else { return [] }
-        return DocumentToolSupport.writeOperationPaths(value)
-    }
-
-    public func permissionIntent(_ args: ToolArgs, workspaceRoot: URL) -> PermissionIntent {
-        guard let value = try? DocumentWriteArguments.decodeValidated(args) else {
-            return PermissionIntent.derived(
-                toolName: Self.descriptor.name,
-                sideEffect: Self.descriptor.sideEffect,
-                touchedPaths: touchedPaths(args),
-                risksNetwork: false)
-        }
-        let readPaths = (value.inputPath.map { [$0] } ?? [])
-            + (value.localAssetPaths ?? [])
-            + value.operations.flatMap { operation in
-                ["path", "source_path"].compactMap { key -> String? in
-                    guard case .string(let path)? = operation.parameters[key] else { return nil }
-                    return path
-                }
-            }
-        return DocumentToolSupport.writeIntent(
-            action: "document.write",
-            readPaths: readPaths,
-            writePath: value.outputPath,
-            operation: value.mode.rawValue,
-            format: value.format)
-    }
-
-    public func execute(_ args: ToolArgs, in context: ToolContext) async throws -> ToolObservation {
-        let value = try DocumentWriteArguments.decodeValidated(args)
-        let inputSnapshot = try value.inputPath.map {
-            try DocumentInputFile.freeze(
-                path: $0,
-                expectedFormat: value.format,
-                expectedSHA256: value.expectedSourceSHA256,
-                workspace: context.workspaceRoot)
-        }
-        let assetPaths = (value.localAssetPaths ?? []) + value.operations.flatMap { operation in
-            ["path", "source_path"].compactMap { key -> String? in
-                guard case .string(let path)? = operation.parameters[key] else { return nil }
-                return path
-            }
-        }
-        let frozenAssets = try DocumentToolSupport.freezeAuxiliaryInputs(
-            Array(Set(assetPaths)).sorted(),
-            workspace: context.workspaceRoot)
-        let operations = DocumentToolSupport.resolvedWriteOperations(
-            value.operations,
-            assets: frozenAssets.urlsByReviewedPath)
-        let request = DocumentStagedFileRequest(
-            sourcePath: value.inputPath,
-            expectedSourceSHA256: value.expectedSourceSHA256,
-            destinationPath: value.outputPath,
-            replaceExisting: value.replaceExisting ?? false,
-            expectedDestinationSHA256: value.expectedOutputSHA256,
-            fileExtension: URL(fileURLWithPath: value.outputPath).pathExtension,
-            maximumBytes: 1_024 * 1_024 * 1_024,
-            readOnlyInputSnapshots: frozenAssets.snapshots)
-        let accumulator = DocumentExecutionAccumulator()
-        let receipt = try await DocumentStagedOutput.writeFile(
-            request,
-            workspace: context.workspaceRoot,
-            produce: { stagedOutput in
-                let stageRoot = stagedOutput.deletingLastPathComponent()
-                var payload: [String: JSONValue] = [
-                    "format": .string(value.format.rawValue),
-                    "mode": .string(value.mode.rawValue),
-                    "output_path": .string(stagedOutput.path),
-                    "operations": operations,
-                    "allowed_asset_paths": .array(
-                        frozenAssets.urlsByReviewedPath.values.map { .string($0.path) }.sorted(by: { left, right in
-                            guard case .string(let lhs) = left,
-                                  case .string(let rhs) = right else { return false }
-                            return lhs < rhs
-                        })),
-                ]
-                if let input = inputSnapshot?.url { payload["input_path"] = .string(input.path) }
-
-                if value.format == .epub {
-                    let envelope = try await RBookDocumentBackend.run(
-                        operation: "write",
-                        payload: .object(payload),
-                        reviewedInputPaths: (value.inputPath.map { [$0] } ?? [])
-                            + frozenAssets.urlsByReviewedPath.keys.sorted(),
-                        reviewedOutputPaths: [value.outputPath],
-                        internalStageRoot: stageRoot.path,
-                        in: context)
-                    await accumulator.record(
-                        versions: envelope.engineVersions,
-                        warnings: envelope.warnings,
-                        result: envelope.result)
-                    let validation = try await EPUBCheckValidationBackend.validate(
-                        stagedEPUB: stagedOutput,
-                        reviewedOutputPath: value.outputPath,
-                        in: context)
-                    await accumulator.record(versions: validation)
-                    return
-                }
-
-                if value.format == .xlsx {
-                    let intermediate = stageRoot.appendingPathComponent("openpyxl-intermediate.xlsx")
-                    payload["output_path"] = .string(intermediate.path)
-                    let envelope = try await DocumentPythonBackend.run(
-                        operation: "write",
-                        payload: .object(payload),
-                        readableWorkspacePaths: (value.inputPath.map { [$0] } ?? [])
-                            + frozenAssets.urlsByReviewedPath.keys.sorted(),
-                        writableWorkspacePaths: [value.outputPath],
-                        internalWritableWorkspacePaths: [stageRoot.path],
-                        in: context)
-                    await accumulator.record(
-                        versions: envelope.engineVersions,
-                        warnings: envelope.warnings,
-                        result: envelope.result)
-                    let preview = stageRoot.appendingPathComponent("preview.pdf")
-                    let calc = try await LibreOfficeDocumentBackend.recalculateAndSaveXLSX(
-                        editedInput: intermediate,
-                        stagedXLSX: stagedOutput,
-                        previewPDF: preview,
-                        reviewedInputPath: value.inputPath ?? value.outputPath,
-                        reviewedOutputPath: value.outputPath,
-                        in: context)
-                    await accumulator.record(versions: calc)
-                    let verification = try await DocumentToolSupport.verifyWrittenNativeDocument(
-                        stagedOutput,
-                        format: .xlsx,
-                        resolvedOperations: operations,
-                        expectedOperationCount: value.operations.count,
-                        assets: frozenAssets.urlsByReviewedPath,
-                        reviewedOutputPath: value.outputPath,
-                        stageRoot: stageRoot,
-                        context: context)
-                    await accumulator.record(
-                        versions: verification.engineVersions,
-                        warnings: verification.warnings)
-                    let pdfVersions = try await DocumentToolSupport.validateGeneratedPDF(
-                        preview,
-                        reviewedOutputPath: value.outputPath,
-                        context: context)
-                    await accumulator.record(versions: pdfVersions)
-                    return
-                }
-
-                let envelope = try await DocumentPythonBackend.run(
-                    operation: "write",
-                    payload: .object(payload),
-                    readableWorkspacePaths: (value.inputPath.map { [$0] } ?? [])
-                        + frozenAssets.urlsByReviewedPath.keys.sorted(),
-                    writableWorkspacePaths: [value.outputPath],
-                    internalWritableWorkspacePaths: [stageRoot.path],
-                    in: context)
-                await accumulator.record(
-                    versions: envelope.engineVersions,
-                    warnings: envelope.warnings,
-                    result: envelope.result)
-                let verification = try await DocumentToolSupport.verifyWrittenNativeDocument(
-                    stagedOutput,
-                    format: value.format,
-                    resolvedOperations: operations,
-                    expectedOperationCount: value.operations.count,
-                    assets: frozenAssets.urlsByReviewedPath,
-                    reviewedOutputPath: value.outputPath,
-                    stageRoot: stageRoot,
-                    context: context)
-                await accumulator.record(
-                    versions: verification.engineVersions,
-                    warnings: verification.warnings)
-
-                let preview = stageRoot.appendingPathComponent("preview.pdf")
-                let previewVersions: [String: String]
-                if value.format == .html {
-                    previewVersions = try await DocumentToolSupport.prepareAndRenderHTML(
-                        input: stagedOutput,
-                        reviewedInputPaths: frozenAssets.urlsByReviewedPath.keys.sorted(),
-                        reviewedOutputPath: value.outputPath,
-                        allowedHTMLAssets: frozenAssets.urlsByReviewedPath,
-                        stagedPDF: preview,
-                        context: context)
-                } else {
-                    previewVersions = try await LibreOfficeDocumentBackend.exportPDF(
-                        actualInput: stagedOutput,
-                        reviewedInputPath: value.inputPath ?? value.outputPath,
-                        stagedPDF: preview,
-                        reviewedOutputPath: value.outputPath,
-                        in: context)
-                }
-                await accumulator.record(versions: previewVersions)
-                let pdfVersions = try await DocumentToolSupport.validateGeneratedPDF(
-                    preview,
-                    reviewedOutputPath: value.outputPath,
-                    context: context)
-                await accumulator.record(versions: pdfVersions)
+            produce: { stagedPNG in
+                let data = try PDFNativeDocumentService.renderPagePNG(
+                    from: snapshot.url,
+                    pageNumber: value.page,
+                    box: .cropBox,
+                    dpi: 144,
+                    background: .white,
+                    includeAnnotations: true,
+                    maximumPagePixels: 40_000_000,
+                    maximumOutputBytes: 128 * 1_024 * 1_024)
+                try data.write(to: stagedPNG, options: .withoutOverwriting)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: NSNumber(value: Int16(0o600))],
+                    ofItemAtPath: stagedPNG.path)
             },
             validate: { output in
-                let values = try output.resourceValues(forKeys: [
-                    .isRegularFileKey,
-                    .isSymbolicLinkKey,
-                    .fileSizeKey,
-                ])
-                guard values.isRegularFile == true,
-                      values.isSymbolicLink != true,
-                      (values.fileSize ?? 0) > 0 else {
-                    throw DocumentToolError(.validationFailed, "document writer produced no safe output")
+                let prefix = try Data(contentsOf: output, options: [.mappedIfSafe]).prefix(8)
+                guard prefix.elementsEqual([137, 80, 78, 71, 13, 10, 26, 10]) else {
+                    throw DocumentToolError(.validationFailed, "PDFKit did not produce a PNG")
                 }
             })
-        let execution = await accumulator.snapshot()
+        let result: JSONValue = .object([
+            "page": .number(Double(value.page)),
+            "dpi": .number(144),
+            "page_box": .string("crop"),
+            "background": .string("white"),
+            "annotations": .string("show"),
+        ])
         return try DocumentToolSupport.observation(
-            operation: "document_write",
-            format: value.format,
-            result: execution.result,
-            engineVersions: execution.versions,
-            warnings: execution.warnings,
+            operation: Self.descriptor.name,
+            format: .pdf,
+            result: result,
+            engineVersions: ["pdfkit": "system"],
             receipt: receipt,
             changedFiles: [value.outputPath])
     }

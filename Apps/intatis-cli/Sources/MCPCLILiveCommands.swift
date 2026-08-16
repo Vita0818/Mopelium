@@ -1,5 +1,6 @@
 import Foundation
 import IntatisAgentKernel
+import IntatisArtifacts
 import IntatisCore
 import IntatisMCP
 import IntatisPermission
@@ -558,6 +559,11 @@ func runExecCommand(
     let live = try await makeLiveSession(
         context,
         arguments: arguments)
+    let artifactStore = try ArtifactStore(
+        root: live.runtime.log.sessionDirectoryURL
+            .appendingPathComponent(
+                "artifacts",
+                isDirectory: true))
     let terminal =
         ProcessTerminalSessionManager()
     do {
@@ -628,6 +634,10 @@ func runExecCommand(
                 skillSnapshot: skillSnapshot,
                 runtimeEnvironment: .code),
             terminal: terminal,
+            imageViewer: ArtifactStoreImageViewingService(
+                store: artifactStore),
+            imageResolver: AgentImageResolution.resolver(
+                store: artifactStore),
             capabilityLease:
                 live.capabilityLease,
             workspaceLease:

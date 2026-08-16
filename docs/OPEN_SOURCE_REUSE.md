@@ -2,8 +2,8 @@
 
 文档状态：当前开源复用政策
 生效日期：2026-07-12
-最近核对：2026-08-05
-产品基线：v0.48（build 48）
+最近核对：2026-08-16
+产品基线：v0.10（build 49）
 
 ## 项目立场
 
@@ -414,6 +414,40 @@ external-runtime 以独立 helper/process/service 运行上游实现
   本批没有新增第三方分发物，因而 `NOTICE.md` 不增加 Flotis 第三方条目。若后续把 Flotis 作为独立
   第三方发布物或引入其其他文件，必须先补齐权利/许可证结论并重新评估 NOTICE。
 
+## 文档读取 external runtime 当前准入结论
+
+- DOCX/PPTX/XLSX/HTML/EPUB 普通读取明确采用 external runtime，不在
+  Intatis 内实现这些格式的语义 parser。固定入口是 Docling 2.117.0 的
+  public `DocumentConverter`，结构遍历/范围 Markdown 序列化/语义导航分别
+  使用 docling-core 2.89.0 的 `iterate_items`、`export_to_markdown` 与
+  `HierarchicalChunker`；Swift/Python 宿主代码只负责 tool schema、源文件
+  identity、恶意归档 preflight、窗口/游标、权限、sandbox 和 envelope
+  校验。不得把这些宿主边界重新扩成手写 OOXML/HTML/EPUB reader 或 raw
+  Docling dict 投影。
+- exact direct pins、Heron model revision、model/tessdata SHA-256、JRE 与固定
+  validator/runtime layout 位于
+  `Packages/IntatisTools/Runtime/document-runtime/release-spec.json`；来源、
+  licenses、排除项和二进制分发边界位于
+  `ThirdPartyNotices/DocumentReadingRuntime.md`，根 `NOTICE.md` 已登记实际
+  采用项。Docling 代码是 MIT；Heron model 是 Apache-2.0；其余 Python、
+  PDFium、Tesseract/tessdata、pdfcpu、EPUBCheck、Temurin、LibreOffice 和
+  rbook closure 的实际条款不能用“都是 Docling 依赖”概括，必须按 exact
+  artifact 的 SBOM 与原始 LICENSE/NOTICE 分别收集。
+- production App 只接受随 bundle 提供的 active-architecture runtime；CLI/
+  debug 的历史用户 runtime 只是开发 fallback，不能构成发行证据。
+  `scripts/validate-document-runtime.sh` 要求 manifest、完整 file inventory、
+  project-owned EPUBCheck wrapper 与 exact model/data hash、target Mach-O architecture、
+  无 build-machine/Homebrew/user-framework absolute Mach-O dependency/RPATH、
+  SPDX-2.3/license bundle 与同一 Developer ID 的 bottom-up signatures；静态阶段不执行
+  runtime。`scripts/package-macos-release.sh` 在放入 App 前后复验 arm64/x86_64 roots，只有
+  outer App strict resource seal 与 exact identity 通过后才用隔离临时 HOME/TMPDIR 执行 direct
+  version inspection。validator 对 SPDX structure/package array 的验证不能替代对 resolved transitive
+  closure 的人工来源/许可证核对。
+- 本轮只完成 integration 和 fail-closed gate，不声称已生成两套经审查签名的
+  runtime roots，也不声称 notarized App 或 clean-machine acceptance 已完成。
+  在这些外部 artifact 证据齐备前，发行脚本必须停止，不能联网下载、使用
+  Homebrew/系统偶然安装或切换 parser/model 继续发布。
+
 ## rbook EPUB helper 当前准入结论
 
 - `Packages/IntatisTools/Runtime/rbook-helper` 是 Intatis 自有的窄 Rust
@@ -423,11 +457,12 @@ external-runtime 以独立 helper/process/service 运行上游实现
   许可证 Apache-2.0。只读审计 checkout 固定在
   `d440c7cf35db2fd31e938c0555448dbaec5437d0`，但可重复构建身份以
   `Cargo.lock` 与 registry checksum 为准。
-- helper 只暴露版本化 `json-v1` 的 EPUB write 子集；普通 EPUB read 已由固定
-  Docling high-level converter 承担，不再经过 rbook helper。helper 不接受模型
-  command、backend、环境变量或网络地址。它仍位于 Intatis 的
-  PermissionEngine、CapabilityLease、WorkspaceLease、sandbox、staging、
-  EPUBCheck 和原子提交之后，不进入 iOS target。
+- helper 源码仍保留版本化 `json-v1` EPUB write 协议供 provenance/reproducibility 审计，
+  但当前 production registry 不注册任何 EPUB write tool，也没有从 model-facing tool 到该 helper 的
+  live route；旧 `operations[]` 不能作为通用文档写入层恢复。普通 EPUB read 已由固定 Docling
+  high-level converter 承担，不经过 rbook helper。若未来要重新采用，必须先证明每个 model-facing
+  tool 能一对一映射 rbook 的单一公开 API，并重新走 PermissionEngine、CapabilityLease、
+  WorkspaceLease、sandbox、staging、EPUBCheck 与原子提交；helper 不进入 iOS target。
 - `Cargo.toml` 对 rbook/serde/serde_json/zip 使用 exact pins，lockfile v4
   固定完整闭包及 crates.io checksum。当前解析闭包只有
   Apache-2.0、MIT、Zlib、0BSD、Unlicense 与 Unicode-3.0 等兼容条款，
@@ -439,6 +474,18 @@ external-runtime 以独立 helper/process/service 运行上游实现
   生成 SBOM、固定 Rust toolchain 与双架构 binary hash，并完成 Developer ID
   签名、公证和 clean-machine sandbox 验证；未完成时生产调用必须返回
   `backend_missing`，不得下载或切换到另一个 EPUB backend。
+
+## 工作区图片查看当前准入结论
+
+- `view_image` 固定采用 Apple 平台系统 ImageIO 解码 API，并复用项目既有
+  `ArtifactImageResolver` / `ArtifactStore`；没有引入新的第三方源码、package、外部 runtime、模型或
+  许可证闭包，因此本项不新增 `NOTICE.md` / `ThirdPartyNotices` 条目。
+- model-facing adapter 只接受 workspace `path`，宿主 service 只做有界字节搬运和 exact-session
+  artifact 绑定；图片 type、完整性、尺寸与像素由 ImageIO resolver 验证。不得为了支持更多格式在
+  Intatis 内手写 parser，也不得在该通道叠加 OCR、编辑、缩放、格式转换、网络 fetch 或 fallback。
+- 当前正向格式有意收窄为 PNG/JPEG，与 provider function-output image 和现有 durable model-history
+  合同一致。扩展新格式必须先确认 provider 输入支持、系统 decoder 行为、资源上限和跨平台边界，
+  不能仅靠文件扩展名放行。
 
 ## 上游升级规则
 

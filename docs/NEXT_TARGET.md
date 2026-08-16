@@ -2,8 +2,8 @@
 
 文档状态：来源快照携带的 Intatis 上游目标；不是 Mopelium 活跃目标
 来源最近核对：2026-08-11
-Mopelium 解释核对：2026-08-14
-产品基线：v0.48（build 48）
+Mopelium 解释核对：2026-08-15
+产品基线：v0.10（build 49）
 
 ## Mopelium 解释
 
@@ -41,6 +41,10 @@ Mopelium 解释核对：2026-08-14
   notarytool Keychain profile；凭据和私钥均未写入仓库。
 - 发行脚本已支持构建/公证分段切换网络：GitHub 依赖解析和签名阶段保持代理/VPN，暂停后
   关闭会阻断 Apple 的代理/VPN，再原地继续公证，无需重新构建。
+- 文档读取/写入所需 external runtime 已有 repository-owned release spec、provenance/NOTICE 与
+  fail-closed validator；发行脚本现在强制要求独立 arm64/x86_64 roots，并在入 App 前后复验 exact
+  version/hash/model-data/SBOM/license/architecture/signature。这里只完成 integration/gate，不代表两套
+  runtime binary roots 已经生成或完成审查签名。
 - Apple 已接收两次 v0.36 App submission，但查询时均长时间保持 `In Progress`；它们不能作为
   v0.48 公证证据。旧脚本的无输出
   `--wait` 已被用户中断，且旧临时 App 已清理。发行脚本现改为显示 upload/status、保存
@@ -48,22 +52,34 @@ Mopelium 解释核对：2026-08-14
 
 ## 剩余 release gate
 
-1. 先用 `xcrun notarytool history --keychain-profile Intatis-Notary` 查看现有两条 v0.36
+1. 先在仓库外生成或取得两套经过来源/许可证审查的 document runtime roots，为其中每个 Mach-O
+   使用本次 App 的 exact Developer ID identity 做 bottom-up 签名，并分别通过：
+
+   ```sh
+   scripts/validate-document-runtime.sh <absolute-arm64-root> arm64 '<exact identity>'
+   scripts/validate-document-runtime.sh <absolute-x86_64-root> x86_64 '<exact identity>'
+   ```
+
+   当前仓库没有这些 binary artifacts，因而此 gate 仍未完成。
+2. 用 `xcrun notarytool history --keychain-profile Intatis-Notary` 查看现有两条 v0.36
    submission；在它们仍为 `In Progress` 时不要继续上传。
-2. 现有提交到达 terminal 后，在代理/VPN开启时只运行一次：
+3. 现有提交到达 terminal 后，在代理/VPN开启时只运行一次：
 
    ```sh
    INTATIS_PAUSE_BEFORE_NOTARIZATION=1 \
+   INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT=<absolute-arm64-root> \
+   INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT=<absolute-x86_64-root> \
    INTATIS_NOTARY_PROFILE=Intatis-Notary \
      scripts/package-macos-release.sh
    ```
 
-3. 脚本显示网络切换提示后保持终端打开，关闭会阻断 Apple 的代理/VPN，再按 Return；若
+4. 脚本显示网络切换提示后保持终端打开，关闭会阻断 Apple 的代理/VPN，再按 Return；若
    Apple 探测失败，调整网络后按提示原地重试。
-4. 若 30 分钟后仍为 `In Progress`，不要再次上传；用脚本打印的
+5. 若 30 分钟后仍为 `In Progress`，不要再次上传；用脚本打印的
    `INTATIS_RESUME_RELEASE_DIR` 命令稍后恢复同一 submission。
-5. 记录最终 ZIP/DMG 文件名、SHA-256、notarization Accepted、stapler validate、codesign、
-   Gatekeeper assessment，以及一台干净 macOS 用户环境的安装/首次启动结果。
+6. 记录最终 ZIP/DMG 文件名、SHA-256、notarization Accepted、stapler validate、codesign、
+   Gatekeeper assessment，以及一台干净 macOS 用户环境的安装/首次启动和文档初读/继续读/
+   PDF inspect→OCR 结果。
 
 ## 明确非目标
 

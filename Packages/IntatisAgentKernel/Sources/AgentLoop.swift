@@ -273,6 +273,7 @@ public struct AgentLoop: Sendable {
     private let goalManager: GoalManager?
     private let runController: RunController?
     private let imageGenerator: ImageGenerationToolService?
+    private let imageViewer: (any WorkspaceImageViewingService)?
     private let imageResolver: AgentImageResolver?
     private let sessionNaming: SessionNamingService?
     private let reasoningEffort: ReasoningEffort?
@@ -307,6 +308,7 @@ public struct AgentLoop: Sendable {
                 goalManager: GoalManager? = nil,
                 runController: RunController? = nil,
                 imageGenerator: ImageGenerationToolService? = nil,
+                imageViewer: (any WorkspaceImageViewingService)? = nil,
                 imageResolver: AgentImageResolver? = nil,
                 sessionNaming: SessionNamingService? = nil,
                 reasoningEffort: ReasoningEffort? = nil,
@@ -339,6 +341,7 @@ public struct AgentLoop: Sendable {
         self.goalManager = goalManager
         self.runController = runController
         self.imageGenerator = imageGenerator
+        self.imageViewer = imageViewer
         self.imageResolver = imageResolver
         self.sessionNaming = sessionNaming
         self.reasoningEffort = reasoningEffort
@@ -2789,6 +2792,7 @@ public struct AgentLoop: Sendable {
                                       goalManager: goalManager,
                                       runController: runController,
                                       imageGenerator: imageGenerator,
+                                      imageViewer: imageViewer,
                                       sessionNaming: sessionNaming,
                                       executionID: executionID,
                                       mcpAvailability:

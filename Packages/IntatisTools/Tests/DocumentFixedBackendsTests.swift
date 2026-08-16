@@ -100,7 +100,7 @@ final class DocumentFixedBackendsTests: XCTestCase {
         let preview = stage.appendingPathComponent("preview.pdf")
         let runner = FixedBackendRecordingRunner()
 
-        _ = try await LibreOfficeDocumentBackend.exportPDF(
+        _ = try await LibreOfficeDocumentBackend.exportDOCXPDF(
             actualInput: input,
             reviewedInputPath: "report.docx",
             stagedPDF: preview,
@@ -128,7 +128,7 @@ final class DocumentFixedBackendsTests: XCTestCase {
         let preview = stage.appendingPathComponent("preview.pdf")
         let runner = FixedBackendRecordingRunner()
 
-        _ = try await LibreOfficeDocumentBackend.exportPDF(
+        _ = try await LibreOfficeDocumentBackend.exportDOCXPDF(
             actualInput: input,
             reviewedInputPath: "report.docx",
             stagedPDF: preview,
@@ -141,38 +141,34 @@ final class DocumentFixedBackendsTests: XCTestCase {
         XCTAssertTrue(invocations[1].internalReadOnlyWorkspacePaths.isEmpty)
     }
 
-    func testCalcRoundTripUsesOnlySofficeAndThenExportsPreview() async throws {
+    func testXLSXExportUsesOnlyTheFixedCalcPDFFilter() async throws {
         let workspace = try makeWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let stage = workspace.appendingPathComponent("stage", isDirectory: true)
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
-        let intermediate = stage.appendingPathComponent("openpyxl-intermediate.xlsx")
-        let staged = stage.appendingPathComponent("final.xlsx")
+        let input = stage.appendingPathComponent("source.xlsx")
         let preview = stage.appendingPathComponent("preview.pdf")
-        let source = Data("xlsx fixture".utf8)
-        try source.write(to: intermediate)
+        try Data("xlsx fixture".utf8).write(to: input)
         let runner = FixedBackendRecordingRunner()
 
-        let versions = try await LibreOfficeDocumentBackend.recalculateAndSaveXLSX(
-            editedInput: intermediate,
-            stagedXLSX: staged,
-            previewPDF: preview,
+        _ = try await LibreOfficeDocumentBackend.exportXLSXPDF(
+            actualInput: input,
             reviewedInputPath: "source.xlsx",
-            reviewedOutputPath: "result.xlsx",
+            stagedPDF: preview,
+            reviewedOutputPath: "result.pdf",
             in: ToolContext(workspaceRoot: workspace, documentBackend: runner))
 
         let invocations = await runner.invocations()
-        XCTAssertEqual(invocations.count, 4)
+        XCTAssertEqual(invocations.count, 2)
         XCTAssertTrue(invocations.allSatisfy { $0.executable == .libreOffice })
-        XCTAssertEqual(invocations[1].internalReadOnlyWorkspacePaths, [intermediate.path])
-        XCTAssertEqual(invocations[3].internalReadOnlyWorkspacePaths, [staged.path])
-        XCTAssertEqual(try Data(contentsOf: staged), source)
+        guard let convertIndex = invocations[1].arguments.firstIndex(of: "--convert-to") else {
+            return XCTFail("missing LibreOffice conversion filter")
+        }
+        XCTAssertEqual(invocations[1].arguments[convertIndex + 1], "pdf:calc_pdf_Export")
+        XCTAssertEqual(invocations[1].internalReadOnlyWorkspacePaths, [input.path])
         XCTAssertTrue(FileManager.default.fileExists(atPath: preview.path))
-        XCTAssertEqual(
-            versions["xlsx_recalculation"],
-            "calc_roundtrip_cache_verified")
         let profile = stage.appendingPathComponent(
-            "libreoffice-calc-profile/user/registrymodifications.xcu")
+            "libreoffice-profile/user/registrymodifications.xcu")
         let configuration = try String(contentsOf: profile, encoding: .utf8)
         XCTAssertTrue(configuration.contains("MacroSecurityLevel"))
         XCTAssertTrue(configuration.contains("DisablePythonRuntime"))

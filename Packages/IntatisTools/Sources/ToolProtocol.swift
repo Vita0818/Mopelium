@@ -148,8 +148,6 @@ public enum DocumentBackendExecutable: String, Equatable, Sendable {
     case pythonRuntime
     case libreOffice
     case pdfcpu
-    case rbookHelper
-    case epubCheck
 }
 
 /// Opaque, host-authored document backend request. Public read-only fields
@@ -434,6 +432,36 @@ public protocol AgentManager: Sendable {
     func removeAgent(name: String) async -> String
 }
 
+/// Immutable facts returned after one workspace image has been copied into
+/// the exact session's durable image store and validated by the host image
+/// backend. The model supplies only the workspace path; session/artifact
+/// identity remains host-owned.
+public struct ViewedWorkspaceImage: Equatable, Sendable {
+    public let artifactID: ArtifactID
+    public let mimeType: String
+    public let byteCount: Int
+    public let sha256: String
+
+    public init(
+        artifactID: ArtifactID,
+        mimeType: String,
+        byteCount: Int,
+        sha256: String
+    ) {
+        self.artifactID = artifactID
+        self.mimeType = mimeType
+        self.byteCount = byteCount
+        self.sha256 = sha256
+    }
+}
+
+/// Exact-session host bridge used by `view_image`. Implementations own image
+/// decoding and ArtifactStore persistence; the model-facing tool deliberately
+/// has no parser, conversion, resize, OCR, or session-selection logic.
+public protocol WorkspaceImageViewingService: Sendable {
+    func viewImage(at url: URL) async throws -> ViewedWorkspaceImage
+}
+
 public struct ToolContext: Sendable {
     public let workspaceRoot: URL
     /// Effective task/workspace lease. Direct tool hosts that omit it receive
@@ -470,6 +498,7 @@ public struct ToolContext: Sendable {
     public let goalManager: GoalManager?
     public let runController: RunController?
     public let imageGenerator: ImageGenerationToolService?
+    public let imageViewer: (any WorkspaceImageViewingService)?
     /// Host service bound to the session that owns this exact invocation.
     /// The model never supplies a session identifier.
     public let sessionNaming: SessionNamingService?
@@ -501,6 +530,7 @@ public struct ToolContext: Sendable {
                 goalManager: GoalManager? = nil,
                 runController: RunController? = nil,
                 imageGenerator: ImageGenerationToolService? = nil,
+                imageViewer: (any WorkspaceImageViewingService)? = nil,
                 sessionNaming: SessionNamingService? = nil,
                 executionID: String? = nil,
                 mcpAvailability:
@@ -595,6 +625,7 @@ public struct ToolContext: Sendable {
         self.goalManager = goalManager
         self.runController = runController
         self.imageGenerator = imageGenerator
+        self.imageViewer = imageViewer
         self.sessionNaming = sessionNaming
         self.executionID = executionID
         self.mcpAvailability = mcpAvailability
@@ -1733,7 +1764,7 @@ public struct ToolRegistry: Sendable {
         hostedWebSearch: (any HostedWebSearchToolService)? = nil
     ) -> ToolRegistry {
         var tools: [any Tool] = [
-            ReadFileTool(), ListFilesTool(), SearchTextTool(), WriteFileTool(),
+            ReadFileTool(), ViewImageTool(), ListFilesTool(), SearchTextTool(), WriteFileTool(),
             ApplyPatchTool(), GitStatusTool(), GitDiffTool(),
             GitStagedDiffTool(), GitInfoTool(), GitRecentCommitsTool(),
             GitDiffBaseTool(), GitBranchTool(), GitCreateBranchTool(),
@@ -1743,9 +1774,13 @@ public struct ToolRegistry: Sendable {
             GitWorktreeCreateTool(), GitWorktreeRemoveTool(),
             GitRemotesTool(), GitFetchTool(), GitPullFastForwardTool(),
             GitPushTool(), GitSwitchBranchTool(),
-            ReadPDFTool(), ReadDOCXTool(), ReadPPTXTool(), ReadXLSXTool(),
-            ReadHTMLTool(), ReadEPUBTool(), DocumentOCRTool(), DocumentRenderTool(),
-            DocumentExportPDFTool(), DocumentWriteTool(),
+            InspectPDFTool(), ReadPDFTool(),
+            ReadDOCXTool(), ContinueDOCXReadTool(),
+            ReadPPTXTool(), ContinuePPTXReadTool(),
+            ReadXLSXTool(), ContinueXLSXReadTool(),
+            ReadHTMLTool(), ContinueHTMLReadTool(),
+            ReadEPUBTool(), ContinueEPUBReadTool(),
+            OCRPDFTool(), PDFRenderPageTool(),
             CompileLaTeXTool(), GenerateImageTool(), EditImageTool(),
             WebFetchTool(), BrowserDiagnosticsTool(), BrowserProfilesTool(), BrowserProfileDeleteTool(), BrowserHistoryTool(),
             BrowserNavigateTool(), BrowserSnapshotTool(), BrowserHandoffTool(), BrowserClickTool(),
@@ -1760,18 +1795,20 @@ public struct ToolRegistry: Sendable {
             tools.append(WriteStdinTool())
         }
         var registrations = tools.map { ToolRegistration(tool: $0) }
+        registrations.append(contentsOf: ExactDocumentToolCatalog.exportRegistrations())
+        registrations.append(contentsOf: ExactDocumentToolCatalog.writeRegistrations())
         if let hostedWebSearch {
             registrations.append(ToolRegistration(
                 tool: HostedWebSearchTool(service: hostedWebSearch),
                 grantingCapabilities: [.hostedWebSearch]))
         }
-        // The document surface changed incompatibly from the legacy aggregate
-        // group, and provider-hosted search adds a distinct network tool.
-        // Keep the replacement identity explicit so a durable authorization
-        // issued for an old catalog can never validate against this one.
+        // Exact document tools, provider-hosted search, and workspace image
+        // viewing each changed the model-visible catalog. Keep the replacement
+        // identity explicit so a durable authorization issued for an old
+        // catalog can never validate against this one.
         return ToolRegistry(
             registrations: registrations,
-            registryVersion: "intatis.standard.v4")
+            registryVersion: "intatis.standard.v7")
     }
 }
 

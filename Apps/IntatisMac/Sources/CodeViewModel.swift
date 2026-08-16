@@ -655,6 +655,8 @@ final class CodeViewModel: ObservableObject, PermissionResponder {
                         runtimeEnvironment: .code),
                     terminal: self.terminal,
                     imageGenerator: ProviderImageGenerationToolService(registry: self.registry),
+                    imageViewer: ArtifactStoreImageViewingService(
+                        store: self.artifactStore),
                     imageResolver: AgentImageResolution.resolver(
                         store: self.artifactStore),
                     sessionNaming: self.sessionNaming,

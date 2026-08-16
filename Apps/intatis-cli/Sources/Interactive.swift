@@ -441,6 +441,8 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         imageGenerator:
                             ProviderImageGenerationToolService(
                                 registry: registry),
+                        imageViewer: ArtifactStoreImageViewingService(
+                            store: codeArtifactStore),
                         imageResolver: imageResolver,
                         sessionNaming:
                             EventLogSessionNamingService(
@@ -567,6 +569,8 @@ private func chatCodeREPL(_ config: CLIConfig, mode: Mode, workspace: URL) async
                         imageGenerator:
                             ProviderImageGenerationToolService(
                                 registry: registry),
+                        imageViewer: ArtifactStoreImageViewingService(
+                            store: codeArtifactStore),
                         imageResolver: imageResolver,
                         sessionNaming:
                             EventLogSessionNamingService(
@@ -677,6 +681,8 @@ private func coworkREPL(_ config: CLIConfig, workspace: URL) async throws -> REP
         },
         requiresInferenceBindings: true,
         imageGeneratorFor: { _ in ProviderImageGenerationToolService(registry: registry) },
+        imageViewer: ArtifactStoreImageViewingService(
+            store: artifactStore),
         imageResolver: AgentImageResolution.resolver(
             store: artifactStore),
         toolSnapshotProvider: {

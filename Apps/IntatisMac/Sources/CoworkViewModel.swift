@@ -637,6 +637,8 @@ final class CoworkViewModel: ObservableObject, PermissionResponder {
                 },
                 requiresInferenceBindings: true,
                 imageGeneratorFor: { _ in await registryBox.imageToolService() },
+                imageViewer: ArtifactStoreImageViewingService(
+                    store: artifactStore),
                 imageResolver: AgentImageResolution.resolver(
                     store: artifactStore),
                 toolSnapshotProvider:

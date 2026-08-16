@@ -576,6 +576,77 @@ final class DurableMultimodalAgentLoopTests: XCTestCase {
             })
     }
 
+    #if canImport(ImageIO)
+    func testViewImagePassesWorkspacePixelsToTheNextModelRequest()
+        async throws
+    {
+        let workspace = try makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let png = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
+        try png.write(to: workspace.appendingPathComponent("page.png"))
+        let store = try ArtifactStore(
+            root: workspace.appendingPathComponent(
+                "artifact-store",
+                isDirectory: true))
+        let log = try EventLog(
+            session: SessionID(rawValue: "view-workspace-image"),
+            fileURL: workspace.appendingPathComponent("events.jsonl"))
+        let provider = DurableMediaCapturingProvider(
+            responses: [
+                [
+                    .toolCalls([ToolCall(
+                        id: "call-view-image",
+                        name: "view_image",
+                        arguments: #"{"path":"page.png"}"#)]),
+                    .done(finishReason: "tool_calls"),
+                ],
+                [
+                    .textDelta("saw the image"),
+                    .done(finishReason: "stop"),
+                ],
+            ],
+            capabilities: ToolCallingProviderCapabilities(
+                supportsUserImageInput: true,
+                supportsFunctionOutputImageInput: true))
+        let loop = makeLoop(
+            workspace: workspace,
+            log: log,
+            provider: provider,
+            registry: ToolRegistry([ViewImageTool()]),
+            imageViewer: ArtifactStoreImageViewingService(store: store),
+            imageResolver: AgentImageResolution.resolver(store: store))
+
+        let answer = try await loop.send("view page.png")
+
+        XCTAssertEqual(answer, "saw the image")
+        XCTAssertEqual(provider.requests.count, 2)
+        let toolMessage = try XCTUnwrap(
+            provider.requests[1].messages.first(where: {
+                $0.role == .tool
+                    && $0.toolCallId == "call-view-image"
+            }))
+        XCTAssertTrue(toolMessage.content?.contains("Viewed page.png") == true)
+        XCTAssertEqual(toolMessage.images, [
+            ImageAttachment(
+                url: "data:image/png;base64,\(png.base64EncodedString())"),
+        ])
+
+        let events = try await log.replayChecked()
+        let output = try XCTUnwrap(events.compactMap {
+            envelope -> ModelHistoryItemPayload? in
+            guard case .modelHistoryItem(let payload) = envelope.event,
+                  payload.callID == "call-view-image" else {
+                return nil
+            }
+            return payload
+        }.first)
+        XCTAssertEqual(output.imageReferences?.count, 1)
+        XCTAssertEqual(output.imageReferences?.first?.mimeType, "image/png")
+        XCTAssertEqual(output.imageReferences?.first?.byteCount, png.count)
+    }
+    #endif
+
     func testUnsupportedFCOImageFailsAfterTruthfulSettlement() async throws {
         let workspace = try makeWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -1069,6 +1140,7 @@ final class DurableMultimodalAgentLoopTests: XCTestCase {
         log: EventLog,
         provider: any ToolCallingProvider,
         registry: ToolRegistry,
+        imageViewer: (any WorkspaceImageViewingService)? = nil,
         imageResolver: AgentImageResolver? = nil,
         context: ContextBuilder? = nil,
         modelContextPolicy: AgentModelContextPolicy = .unspecified
@@ -1103,6 +1175,7 @@ final class DurableMultimodalAgentLoopTests: XCTestCase {
                 runtimeEnvironment: .code,
                 conversationHistoryPolicy: .conversation),
             allowsShell: false,
+            imageViewer: imageViewer,
             imageResolver: imageResolver ?? defaultResolver,
             modelContextPolicy: modelContextPolicy)
     }

@@ -4,14 +4,46 @@ import IntatisProtocol
 import XCTest
 
 final class DocumentReadToolSplitTests: XCTestCase {
-    func testStandardRegistryExposesOneReaderPerFormatAndNoAggregateReader() {
+    func testStandardRegistryExposesExactReadersAndContinuationsAndNoAggregateReader() {
         let registry = ToolRegistry.standard()
 
-        for name in ["read_docx", "read_pptx", "read_xlsx", "read_html", "read_epub"] {
+        for name in [
+            "read_docx", "continue_docx_read",
+            "read_pptx", "continue_pptx_read",
+            "read_xlsx", "continue_xlsx_read",
+            "read_html", "continue_html_read",
+            "read_epub", "continue_epub_read",
+        ] {
             XCTAssertNotNil(registry.tool(named: name), name)
         }
         XCTAssertNil(registry.tool(named: "document_read"))
-        XCTAssertEqual(registry.registryVersion, "intatis.standard.v4")
+        XCTAssertEqual(registry.registryVersion, "intatis.standard.v7")
+    }
+
+    func testContinuationsExposeOnlyPathOpaqueCursorAndCharacterBudget() throws {
+        let descriptors = [
+            ContinueDOCXReadTool.descriptor,
+            ContinuePPTXReadTool.descriptor,
+            ContinueXLSXReadTool.descriptor,
+            ContinueHTMLReadTool.descriptor,
+            ContinueEPUBReadTool.descriptor,
+        ]
+
+        for descriptor in descriptors {
+            XCTAssertEqual(descriptor.sideEffect, .exec)
+            guard case .object(let schema) = descriptor.parameters,
+                  case .object(let properties)? = schema["properties"] else {
+                return XCTFail("\(descriptor.name) must expose an object schema")
+            }
+            XCTAssertEqual(Set(properties.keys), ["path", "cursor", "maxCharacters"])
+            XCTAssertEqual(schema["additionalProperties"], .bool(false))
+            let encoded = String(
+                data: try JSONEncoder().encode(descriptor.parameters),
+                encoding: .utf8) ?? ""
+            for forbidden in ["format", "options", "sheet", "range", "xpath", "backend"] {
+                XCTAssertFalse(encoded.contains("\"\(forbidden)\""), "\(descriptor.name): \(forbidden)")
+            }
+        }
     }
 
     func testReadersExposeOnlyPathAndCharacterBudget() throws {
@@ -64,6 +96,13 @@ final class DocumentReadToolSplitTests: XCTestCase {
             ToolArgs(raw: #"{"path":"table.xlsx","maxCharacters":500001}"#)))
         XCTAssertThrowsError(try ReadXLSXTool().validateArguments(
             ToolArgs(raw: #"{"maxCharacters":12000}"#)))
+
+        XCTAssertNoThrow(try ContinueDOCXReadTool().validateArguments(
+            ToolArgs(raw: #"{"path":"notes.docx","cursor":"abc_DEF-123"}"#)))
+        XCTAssertThrowsError(try ContinueDOCXReadTool().validateArguments(
+            ToolArgs(raw: #"{"path":"notes.pptx","cursor":"abc_DEF-123"}"#)))
+        XCTAssertThrowsError(try ContinueDOCXReadTool().validateArguments(
+            ToolArgs(raw: #"{"path":"notes.docx","cursor":"not+base64url"}"#)))
     }
 
     func testReadersAreReviewedProcessExecutionsButSafeToReplay() {
@@ -89,5 +128,14 @@ final class DocumentReadToolSplitTests: XCTestCase {
             XCTAssertTrue(intent.isStructuredReadOnlyExecution)
             XCTAssertTrue(intent.isReadOnlyWorkspaceCompatible)
         }
+
+        let continuation = ContinueDOCXReadTool().permissionIntent(
+            ToolArgs(raw: #"{"path":"notes.docx","cursor":"abc"}"#),
+            workspaceRoot: workspace)
+        XCTAssertEqual(continuation.action, "document.read.docx")
+        XCTAssertEqual(continuation.metadata["operation"], .string("continue_bounded_markdown"))
+        XCTAssertEqual(continuation.replayPolicy, .safeToReplay)
+        XCTAssertTrue(continuation.isStructuredReadOnlyExecution)
+        XCTAssertTrue(continuation.isReadOnlyWorkspaceCompatible)
     }
 }

@@ -1,19 +1,24 @@
 # CURRENT_STATE
 
 文档状态：当前源码摘要
-最近核对：2026-08-15
-产品基线：v0.48（build 48）
+最近核对：2026-08-16
+产品基线：v0.10（build 49）
 
 ## 版本与发行状态
 
-- `HEAD` 与 `origin/main` 当前均为标题为 `v0.47` 的提交 `53f3320`。仓库没有 Git tag；该
-  commit 标题不是产品版本事实源，`project.yml` 把当前产品基线定义为 `0.48 (48)`。
-- `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` 已推进为 `0.48 (48)`。两个仓库参考
+- `HEAD` 与 `origin/main` 当前均为标题为 `v0.9` 的提交 `f9238ff`。仓库没有 Git tag；该
+  commit 标题不是产品版本事实源，`project.yml` 把当前产品基线定义为 `0.10 (49)`。
+- `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` 已调整为 `0.10 (49)`。marketing version
+  按当前产品要求改为 `0.10`，构建号则从 `48` 单调提升到 `49`。两个仓库参考
   Info.plist、README、文档入口和发行脚本使用同一基线。
-- 2026-08-11 已重新生成 Xcode 工程并通过 v0.48 版本一致性门；`IntatisMac` unsigned
+- 2026-08-16 已重新生成 Xcode 工程并通过 `0.10 (49)` 版本一致性门；`IntatisMac`
+  unsigned universal Release 与 `IntatisiOS` generic Simulator Debug 均构建通过，最终 bundle
+  均读回 `0.10 (49)`，macOS 可执行文件包含 `x86_64 arm64`。构建只出现仓库既有的
+  unused-result / deprecated API warning 及 Xcode 27 的 exit-code-0 噪声诊断。
+- 2026-08-11 的上一版本证据已重新生成 Xcode 工程并通过 v0.48 版本一致性门；`IntatisMac` unsigned
   universal Release 与 `IntatisiOS` generic Simulator Debug 均构建通过，最终 bundle 均为
   `0.48 (48)`，macOS 可执行文件包含 `x86_64 arm64`。
-- 本机 `/Applications/Intatis.app` 已安装上述当前工作树的 `0.48 (48)` ad-hoc Hardened
+- 本机 `/Applications/Intatis.app` 此前安装的是 `0.48 (48)` ad-hoc Hardened
   Runtime 开发构建；bundle identifier 为 `com.Vita0818.IntatisMac`，严格 codesign 校验通过，
   embedded entitlements 为 audio input=true、JIT=false 且 library validation 未关闭；安装副本与
   已验证 staging 副本的可执行文件 SHA-256 一致，且无 quarantine xattr。安装前的
@@ -22,7 +27,7 @@
 - macOS 只发行 `IntatisMac` Developer ID/direct-distribution 产品；不做 Mac App Store。
   `IntatisMacAppStore` 仍是 legacy source target，不进入默认构建、测试或 release gate。
 - 用户宿主终端已报告两个有效 codesigning identity，其中 Developer ID Application 可被发行
-  脚本选取；`Intatis-Notary` Keychain profile 也已配置。v0.48 最终 App/DMG 尚未完成 Apple
+  脚本选取；`Intatis-Notary` Keychain profile 也已配置。当前 v0.10 最终 App/DMG 尚未完成 Apple
   notarization、staple 与 Gatekeeper 全链路，因此仍不得描述为正式 release。
 
 ## 当前产品面
@@ -60,24 +65,36 @@ macOS 在源码与运行时层仍完整保留 Chat、Code、Cowork、Settings �
 - Code 使用共享 headless `AgentRuntime.code`，提供工作区文件、patch、Git、managed
   terminal、Skills、外部 MCP、文档/媒体、浏览器，以及与浏览器独立的 provider-hosted search
   工具。工具可见性、lease、权限和 durable execution ticket 在执行前逐层核对。
-- Code/Cowork/CLI 的普通文档读取已按格式拆成 `read_pdf`、`read_docx`、`read_pptx`、
-  `read_xlsx`、`read_html`、`read_epub`，另保留职责独立的 `document_ocr`、
-  `document_render`、`document_export_pdf`、`document_write`。聚合 `document_read` 已从
-  live registry 下架；旧 session 的同名 capability 只作为兼容授权映射到五个固定格式 reader，
+- Code/Cowork/CLI 的普通文档读取已按格式拆成 `inspect_pdf` / `read_pdf`、`read_docx`、
+  `read_pptx`、`read_xlsx`、`read_html`、`read_epub`；五种非 PDF 格式另有一一对应的
+  `continue_*_read`。聚合 `document_read` 已从
+  live registry 下架；旧 session 的同名 capability 只作为兼容授权映射到五个固定格式的初读+继续工具，
   不会重新暴露旧工具。旧
   `read_document` 自动 fallback、`edit_pdf_pages` 与 `reconstruct_document_image` 已从生产
   registry/fresh lease 下架；PDF P0 仅原生文本/metadata 读取、显式 OCR、页面 PNG 和新生成
-  PDF 校验，不提供任何 PDF mutation。写入使用 source/destination snapshot、owner-only staging、
-  CAS、格式语义验证与 file/directory 原子提交；模型不能选择 executable/backend/command/env 或
-  fallback。五个非 PDF reader 只接受 `path` 与可选 `maxCharacters`，由宿主固定 exact 格式，
-  并把 Docling 高层转换得到的 Markdown 整体做字符预算后返回；旧的 DOCX/PPTX/XLSX/HTML
-  手写对象遍历与 native-structure 投影已删除。写入仍由
-  python-docx/python-pptx/openpyxl/lxml 的明确 operation 子集负责，XLSX 在 openpyxl staging 后经固定 safe-profile LibreOffice Calc XLSX round-trip/save、formula + data-only
-  cache postcondition 与 PDF preview 验证；不能只凭转换退出码声称已重算。EPUB 普通读取走固定
-  Docling 高层转换；写入绑定仓内可重复构建的 pinned rbook helper source 和正式 EPUBCheck。
-  rbook helper 的旧 read route 已删除。EPUB render/export 在 full-spine corpus gate 通过前不进入 model schema，并返回
-  `unsupported_operation`。文档辅助资产会先冻结 digest/identity，backend 运行与提交锁内再次核对；
-  staged commit 固定目标父目录 identity，生成物同时受单文件、总字节与 entry 数预算约束。当前开发机
+  PDF 校验，不提供任何 PDF mutation。五个非 PDF 初始 reader 继续只接受 `path` 与可选
+  `maxCharacters`，由宿主固定 exact
+  格式；输出由 Docling 的 document structure、ranged Markdown serializer 与
+  `HierarchicalChunker` 生成有界窗口、next cursor 及 section/page/slide/sheet landmarks。
+  对应 continuation 工具只接受同一路径、宿主返回的 source-bound opaque `cursor` 与可选
+  `maxCharacters`；cursor 固定格式、Docling element/offset 与源文件 SHA-256，文件变化后 fail
+  closed。旧的 DOCX/PPTX/XLSX/HTML 手写对象遍历与 native-structure 投影已删除。
+
+  文档 mutation/conversion 工具已进一步按外部 API 拆开：`ocr_pdf` 固定 Docling
+  `DocumentConverter` + Tesseract，`pdf_render_page` 每次只用 PDFKit `PDFPage.draw` 生成一张 PNG，
+  `docx_export_pdf` / `pptx_export_pdf` / `xlsx_export_pdf` / `html_export_pdf` 分别固定 LibreOffice
+  Writer/Impress/Calc PDF filter 与 `WKWebView.createPDF`。DOCX、PPTX、XLSX 写入只暴露
+  `ExactDocumentToolCatalog` 中的一操作一工具 surface，直接对应 python-docx、python-pptx 或 openpyxl
+  的一个公开方法/属性；没有 model-facing `format`、`mode`、`operations[]`、backend 或 fallback。
+  HTML/EPUB 写入、PPTX/XLSX chart、XLSX range/style/table/name、写后 LibreOffice recalc/preview 和
+  自写第二层语义 verifier 均不再注册。`compile_latex` 只运行 Tectonic，不再探测其他 TeX engine。
+  写入管道仅保留 source/destination/auxiliary snapshot、owner-only staging、CAS、权限、sandbox、
+  timeout、外部版本 envelope、输出安全检查与 file 原子提交，不解释或组合业务 operation。
+
+  EPUB 普通读取走固定 Docling 高层转换；仓内 pinned rbook helper 与 EPUBCheck 仍是已审查的外部
+  runtime 资产，但当前 production registry 没有 EPUB 写入工具。文档辅助资产会先冻结
+  digest/identity，backend 运行与提交锁内再次核对；staged commit 固定目标父目录 identity，当前
+  model-facing 文档 mutation/conversion 每次只提交一个 regular file，并受单文件字节预算约束。当前开发机
   用户 runtime 已安装固定 Python Office/HTML/Docling 组件、Docling layout model、Tesseract、
   `intatis-rbook-helper`、pdfcpu 0.13.0、正式 EPUBCheck 5.3.0，以及版本化的官方
   LibreOfficeDev 26.8.0.0.beta1；固定后端只解析
@@ -96,20 +113,36 @@ macOS 在源码与运行时层仍完整保留 Chat、Code、Cowork、Settings �
   `-env:OSL_SOCKET_PATH=...` 传入。Seatbelt 只给该目录文件读写和匹配 `OSL_PIPE_*` 的本地 Unix
   socket bind/connect；IP 网络及其他 Unix socket 继续默认拒绝，调用结束后删除该目录。这个短路径
   同时避免 `sockaddr_un.sun_path` 超限；把 `OSL_SOCKET_PATH` 仅作为普通进程环境变量或放在长
-  Darwin temp path 都不能满足 LibreOffice bootstrap/长度合同。真实 core smoke 已在同一 Seatbelt
-  下跑通 DOCX write/read/preview/export/PDF read/render、PPTX write/read/preview/export/PDF read，
-  以及 XLSX write、Calc round-trip、公式文本与 data-only cache `4`、preview/export；不会自动降级。
+  Darwin temp path 都不能满足 LibreOffice bootstrap/长度合同。旧聚合工具曾在同一 Seatbelt 下完成
+  DOCX/PPTX/XLSX write/read/preview/export smoke；这些结果只证明固定 runtime 和 sandbox 基础可用，
+  不作为当前 exact write route 的验收证据。当前 exact route 的真实外部 runtime smoke 仍需显式设置
+  `INTATIS_REAL_DOCUMENT_RUNTIME_SMOKE=1` 执行。
   五个格式 reader 的真实 runtime smoke 均已通过；另以用户提供的外部 Intatis-test corpus 中
   一份稀疏 XLSX 与三份 PPTX 运行只读复制后的回归，
   4/4 通过，稀疏表不再进入 openpyxl `EmptyCell` 手写投影。结构化普通读取 intent 仍经进程权限
   审查，但标记为 `safeToReplay`；解析失败会 durable settle 为 failed/unknown、返回模型并继续同批
-  后续文件，不会升级成整个 turn 的终止错误。当前 `maxCharacters` 只约束最终返回给模型的
-  Markdown；Docling 仍会先完成整份文档转换与 Markdown 导出。生产 runner 已有输入文件/归档展开
-  上限、超时、取消与进程清理，但尚无独立 RSS 内存上限，因此超大或极端复杂文档仍是明确的资源
-  边界，不能把字符裁切误写成峰值内存保证。旧 26.2.4 runtime 已按用户授权移入废纸篓。生产 runner 的 EPUB write/EPUBCheck 和 strict
-  pdfcpu + Docling/Tesseract OCR smoke 也已分别通过。runtime 打包、双架构和其余发行许可闭包仍是
-  独立工作。read-only Cowork worker 获得 in-process
-  `read_pdf`、五个固定格式 reader 以及无持久写入的 `document_ocr`；render/export/write 只向
+  后续文件，不会升级成整个 turn 的终止错误。`maxCharacters` 约束每次返回窗口；Docling 仍会先完成
+  整份文档转换，production runner 另以独立 2 GiB aggregate RSS ceiling 监控 leader + descendants，
+  超限会终止整个 process tree，并继续保留输入/归档展开、输出、超时、取消与清理边界。旧 26.2.4
+  runtime 已按用户授权移入废纸篓。历史 EPUB write/EPUBCheck 和 strict pdfcpu +
+  Docling/Tesseract OCR smoke 也已分别通过；EPUB write 当前不再进入 model tool surface。
+
+  PDF identity/OCR 断点已闭合：`inspect_pdf` 只用 PDFKit 冻结文件并返回宿主计算的
+  `source_sha256`、字节数、页数与 `requires_ocr`，不返回正文或做 OCR；read-only worker 可把该
+  SHA 原样传给 `ocr_pdf.expected_source_sha256`。`read_pdf` 成功结果也包含同一 source
+  identity，image-only typed `ocr_required` 行为不变。
+
+  shipping runtime 现在有仓库固定的 release spec 和 fail-closed gate：正式 App 必须从调用方提供的
+  arm64/x86_64 roots 打包 Docling/Python、Heron model、Tesseract/tessdata、pdfcpu、rbook、
+  EPUBCheck + Temurin JRE 与 LibreOffice；两套 roots 均需完整 SHA-256 inventory、SPDX SBOM、
+  license closure、exact model/data hashes、direct version checks、target architecture 和同一
+  Developer ID bottom-up signatures，复制进 App 前后复验。active App slice 只选
+  `Contents/Resources/DocumentRuntime/<arch>`；用户 Application Support runtime 仅为 CLI/debug
+  开发 fallback。当前仓库没有两套已签名 runtime artifact，也未完成嵌入 runtime 的 notarized
+  clean-machine release；因此第六项的隐式依赖已改成硬发布门，但不能把外部 artifact closure 描述为
+  已验收。read-only Cowork worker 获得 in-process
+  `inspect_pdf` / `read_pdf`、五个固定格式 reader + continuation 以及无持久写入的
+  `ocr_pdf`；`pdf_render_page`、四个 exact PDF export 与 DOCX/PPTX/XLSX exact write tools 只向
   read-write worker/coordinator 显式签发。iOS Chat 不链接任何文档 runtime。
 - Code/Cowork/CLI 的 `generate_image` 与 `edit_image` 已接入 macOS/CLI 高级配置顶层
   `image_model`。主 agent 根据用户意图决定是否调用普通工具；model-facing schema 不接受
@@ -367,6 +400,10 @@ profiles 与外部 MCP client。macOS/Linux 的 stdio、sandbox、bwrap/guard �
   durable tool execution。明确 hard deny 不能被 reviewer 放宽。
 - production registry 不暴露 raw `run_shell`；shell-capable host 使用 runtime-owned
   `exec_command` / `write_stdin` managed terminal，默认断网并保留进程清理与输入清洗。
+- Code/Cowork/CLI 现在暴露 path-only `view_image`：它与 `read_file` 共用 `readWorkspace`
+  capability，只把经工作区权限校验的 PNG/JPEG 路径交给 Apple ImageIO、exact-session
+  ArtifactStore 和既有 function-output 图片链。工具不实现图片 parser、OCR、编辑、缩放、转换或
+  自动 PDF 渲染；`pdf_render_page` 的输出须在后续 tool-call round 显式交给 `view_image`。
 - Skills 只提供冻结上下文，不授予权限；外部 MCP 是 client-only，HTTP/stdio transport、
   OAuth/callback/task 和 process ownership 仍受产品边界与权限控制。
 - Provider catalog 保留 model options/variant/adapter 语义；credential 只从受控 reference
@@ -399,7 +436,7 @@ profiles 与外部 MCP client。macOS/Linux 的 stdio、sandbox、bwrap/guard �
   `tool_choice: required`，并在 hosted shape 被拒绝时 fail closed；不会退回普通模型回答，也不会调用
   `browser_search`、`web_fetch`、MCP、shell、本地浏览器、第二模型或隐藏搜索后端。调用仍经过
   strict schema、secret scan、ToolRegistry、lease、权限三层门、durable ticket 与 ToolResult。
-- production registry identity 已因新增独立工具推进为 `intatis.standard.v4` / `intatis.cowork.v4`。
+- production registry identity 已因新增 exact `view_image` 推进为 `intatis.standard.v7` / `intatis.cowork.v7`。
   `swift build`、hosted-search focused tests、`CapabilityLeaseTests` 7/7、`ToolRegistryLeaseTests` 27/27、
   macOS Debug unsigned App build 与 iOS generic Simulator Debug unsigned build 已通过。另一次完整
   `swift test` 在 `IntatisToolsTests` 227/227（19 opt-in skipped）与 `IntatisSkillsTests` 29/29 通过后，
@@ -478,6 +515,23 @@ profiles 与外部 MCP client。macOS/Linux 的 stdio、sandbox、bwrap/guard �
 
 ## 最近验证状态
 
+- 2026-08-16 path-only `view_image`：Code/Cowork/CLI 已接入 exact-session
+  `ArtifactStoreImageViewingService`，production registry 推进为 standard/Cowork v7。工具、ImageIO
+  resolver、durable function-output 图片链、registry/capability/mailbox 与受影响文档目录回归合计
+  80/80、0 failures；`swift build --disable-automatic-resolution`、XcodeGen、`IntatisMac` macOS Debug
+  unsigned 与 `IntatisiOS` generic Simulator Debug unsigned build 均退出 0，两个 v0.48 bundle 的最终
+  executable 均存在。Xcode 27 仍输出既有 warning，并出现“command failed with exit code 0 but produced
+  no further output”的 beta toolchain diagnostic；最终 process exit 和产物验证均成功，但不把它描述为
+  warning-free build。未运行真实 provider/key、GUI 手动查看、签名、公证或 clean-machine smoke。
+- 2026-08-15 文档工具一对一打薄：production registry 已从 aggregate
+  `document_ocr` / `document_render` / `document_export_pdf` / `document_write` 切换到 format/operation
+  fixed exact tools，registry identity 为 v6；旧目录 bundle transaction、generic Python write/verify
+  dispatcher、rbook/EPUBCheck live adapter 与非 Tectonic LaTeX fallback 已删除。`IntatisTools`、
+  `IntatisCowork` target build 均通过；文档 focused suites 63 个 case 中 60 通过、3 个显式 opt-in
+  runtime smoke 按设计跳过，capability/registry/mailbox/policy 80/80 通过，全部 0 failures。另显式运行
+  exact DOCX 全链与 pdfcpu + Docling/Tesseract OCR 各 1/1 通过。release/wrapper shell syntax、release-spec
+  JSON parse 与 `git diff --check` 通过。未运行整仓全量 test、App build、签名、公证或 clean-machine
+  验收，不能据此声称 shipping 双架构 runtime closure 已完成；详见 `docs/TESTING.md`。
 - 2026-08-13 AuthorizationSidecar 绑定域分离与副作用完成 cast 删除：business-args digest 只核对
   stripped canonical business arguments，custom authorization identity digest 只核对宿主授权快照；两者
   不再交叉比较。AgentLoop 已删除 denied/failed side-effect ledger、EventLog restore、final completion

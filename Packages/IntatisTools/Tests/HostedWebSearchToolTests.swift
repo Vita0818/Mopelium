@@ -83,7 +83,7 @@ final class HostedWebSearchToolTests: XCTestCase {
     func testStandardRegistryRequiresInjectedServiceAndExactCapability() {
         let ordinary = ToolRegistry.standard()
         XCTAssertNil(ordinary.tool(named: "hosted_web_search"))
-        XCTAssertEqual(ordinary.registryVersion, "intatis.standard.v4")
+        XCTAssertEqual(ordinary.registryVersion, "intatis.standard.v7")
 
         let service = CapturingHostedWebSearchService()
         let enabled = ToolRegistry.standard(hostedWebSearch: service)

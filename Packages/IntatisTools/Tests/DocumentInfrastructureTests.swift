@@ -92,42 +92,6 @@ final class DocumentInfrastructureTests: XCTestCase {
             })
     }
 
-    private func writeBundle(
-        _ files: [String: Data],
-        destinationPath: String,
-        workspace: URL,
-        replaceExisting: Bool = false,
-        expectedDestinationSHA256: String? = nil
-    ) async throws -> DocumentCommitReceipt {
-        try await DocumentStagedOutput.writeDirectory(
-            DocumentStagedDirectoryRequest(
-                sourcePath: nil,
-                expectedSourceSHA256: nil,
-                destinationPath: destinationPath,
-                replaceExisting: replaceExisting,
-                expectedDestinationSHA256: expectedDestinationSHA256,
-                maximumFiles: 32,
-                maximumBytes: 4 * 1_024 * 1_024),
-            workspace: workspace,
-            produce: { root in
-                for (relativePath, data) in files {
-                    let output = root.appendingPathComponent(relativePath, isDirectory: false)
-                    try FileManager.default.createDirectory(
-                        at: output.deletingLastPathComponent(),
-                        withIntermediateDirectories: true)
-                    try data.write(to: output)
-                }
-            },
-            validate: { root in
-                for (relativePath, data) in files {
-                    let output = root.appendingPathComponent(relativePath, isDirectory: false)
-                    guard try Data(contentsOf: output) == data else {
-                        throw DocumentToolError(.validationFailed, "fixture bundle read-back mismatch")
-                    }
-                }
-            })
-    }
-
     private func assertDocumentError(
         _ expectedCode: DocumentToolErrorCode,
         file: StaticString = #filePath,
@@ -318,9 +282,7 @@ final class DocumentInfrastructureTests: XCTestCase {
 
         XCTAssertEqual(createReceipt.relativePath, "docs/output.docx")
         XCTAssertEqual(createReceipt.byteCount, UInt64(created.count))
-        XCTAssertEqual(createReceipt.fileCount, 1)
         XCTAssertEqual(createReceipt.sha256.count, 64)
-        XCTAssertNil(createReceipt.cleanupWarning)
         XCTAssertEqual(try Data(contentsOf: destination), created)
 
         let replacement = Data("replacement document".utf8)
@@ -333,103 +295,14 @@ final class DocumentInfrastructureTests: XCTestCase {
 
         XCTAssertEqual(replaceReceipt.relativePath, "docs/output.docx")
         XCTAssertEqual(replaceReceipt.byteCount, UInt64(replacement.count))
-        XCTAssertEqual(replaceReceipt.fileCount, 1)
         XCTAssertNotEqual(replaceReceipt.sha256, createReceipt.sha256)
-        XCTAssertNil(replaceReceipt.cleanupWarning)
         XCTAssertEqual(try Data(contentsOf: destination), replacement)
     }
 
-    func testDirectoryBundleCreateAndReplaceUsesWholeManifestDigest() async throws {
-        let workspace = try makeWorkspace()
-        defer { try? fileManager.removeItem(at: workspace) }
-        try makeParent("bundles", workspace: workspace)
-        let initialFiles = [
-            "manifest.json": Data(#"{"pages":2}"#.utf8),
-            "pages/page-1.txt": Data("page one".utf8),
-            "pages/page-2.txt": Data("page two".utf8),
-            "legacy.txt": Data("old bundle only".utf8),
-        ]
-        let expectedInitialBytes = initialFiles.values.reduce(UInt64(0)) {
-            $0 + UInt64($1.count)
-        }
-
-        let createReceipt = try await writeBundle(
-            initialFiles,
-            destinationPath: "bundles/rendered",
-            workspace: workspace)
-        let copyReceipt = try await writeBundle(
-            initialFiles,
-            destinationPath: "bundles/rendered-copy",
-            workspace: workspace)
-
-        XCTAssertEqual(createReceipt.relativePath, "bundles/rendered")
-        XCTAssertEqual(createReceipt.fileCount, initialFiles.count)
-        XCTAssertEqual(createReceipt.byteCount, expectedInitialBytes)
-        XCTAssertEqual(createReceipt.sha256.count, 64)
-        XCTAssertEqual(copyReceipt.sha256, createReceipt.sha256)
-        XCTAssertEqual(copyReceipt.fileCount, createReceipt.fileCount)
-        XCTAssertEqual(copyReceipt.byteCount, createReceipt.byteCount)
-
-        await assertDocumentError(.outputConflict) {
-            _ = try await self.writeBundle(
-                initialFiles,
-                destinationPath: "bundles/rendered",
-                workspace: workspace,
-                replaceExisting: true,
-                expectedDestinationSHA256: nil)
-        }
-
-        #if canImport(Darwin)
-        let replacementFiles = [
-            "manifest.json": Data(#"{"pages":3}"#.utf8),
-            "pages/page-1.txt": Data("page one revised".utf8),
-            "pages/page-2.txt": Data("page two".utf8),
-            "pages/page-3.txt": Data("page three".utf8),
-        ]
-        let replaceReceipt = try await writeBundle(
-            replacementFiles,
-            destinationPath: "bundles/rendered",
-            workspace: workspace,
-            replaceExisting: true,
-            expectedDestinationSHA256: createReceipt.sha256)
-        let installed = workspace.appendingPathComponent("bundles/rendered", isDirectory: true)
-
-        XCTAssertEqual(replaceReceipt.fileCount, replacementFiles.count)
-        XCTAssertNotEqual(replaceReceipt.sha256, createReceipt.sha256)
-        XCTAssertFalse(fileManager.fileExists(atPath: installed.appendingPathComponent("legacy.txt").path))
-        for (relativePath, data) in replacementFiles {
-            XCTAssertEqual(try Data(contentsOf: installed.appendingPathComponent(relativePath)), data)
-        }
-        #endif
-    }
-
-    func testSymlinkAndNonRegularStagedOutputsAreRejected() async throws {
+    func testNonRegularStagedFileOutputIsRejected() async throws {
         let workspace = try makeWorkspace()
         defer { try? fileManager.removeItem(at: workspace) }
         try makeParent("outputs", workspace: workspace)
-        let symlinkTarget = workspace.appendingPathComponent("target.txt")
-        try Data("target".utf8).write(to: symlinkTarget)
-
-        await assertDocumentError(.validationFailed) {
-            _ = try await DocumentStagedOutput.writeDirectory(
-                DocumentStagedDirectoryRequest(
-                    sourcePath: nil,
-                    expectedSourceSHA256: nil,
-                    destinationPath: "outputs/symlink-bundle",
-                    replaceExisting: false,
-                    expectedDestinationSHA256: nil,
-                    maximumFiles: 8,
-                    maximumBytes: 1_024),
-                workspace: workspace,
-                produce: { root in
-                    try FileManager.default.createSymbolicLink(
-                        at: root.appendingPathComponent("link"),
-                        withDestinationURL: symlinkTarget)
-                },
-                validate: { _ in })
-        }
-        XCTAssertFalse(fileManager.fileExists(
-            atPath: workspace.appendingPathComponent("outputs/symlink-bundle").path))
 
         await assertDocumentError(.validationFailed) {
             _ = try await DocumentStagedOutput.writeFile(
@@ -468,7 +341,6 @@ final class DocumentInfrastructureTests: XCTestCase {
             maximumBytes: maximum)
 
         XCTAssertEqual(receipt.byteCount, UInt64(size))
-        XCTAssertEqual(receipt.fileCount, 1)
         XCTAssertEqual(
             try Data(contentsOf: workspace.appendingPathComponent("docs/large.docx")),
             data)

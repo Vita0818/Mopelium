@@ -315,6 +315,64 @@ enum PDFNativeDocumentService {
     }
     #endif
 
+    /// Draws one one-based PDF page through one PDFKit `PDFPage.draw` call and
+    /// returns the encoded PNG bytes. Output staging and atomic commit remain
+    /// the caller's responsibility.
+    static func renderPagePNG(
+        from inputURL: URL,
+        pageNumber: Int,
+        box: PDFNativePageBox = .cropBox,
+        dpi: Double = 144,
+        background: PDFNativeRenderBackground = .white,
+        includeAnnotations: Bool = true,
+        maximumPagePixels: Int,
+        maximumOutputBytes: Int
+    ) throws -> Data {
+        #if canImport(PDFKit) && canImport(CoreGraphics) && canImport(ImageIO) && canImport(Darwin)
+        guard dpi.isFinite, dpi >= minimumDPI, dpi <= maximumDPI else {
+            throw PDFNativeDocumentServiceError.invalidDPI(
+                minimum: minimumDPI,
+                maximum: maximumDPI)
+        }
+        try validateRenderBudget(
+            maximumPagePixels,
+            name: "maximumPagePixels",
+            ceiling: Self.maximumPixelsPerPage)
+        try validateRenderBudget(
+            maximumOutputBytes,
+            name: "maximumOutputBytes",
+            ceiling: Self.maximumOutputBytes)
+        let document = try loadDocument(from: inputURL)
+        guard pageNumber >= 1,
+              pageNumber <= document.pageCount,
+              let page = document.page(at: pageNumber - 1) else {
+            throw PDFNativeDocumentServiceError.invalidPageNumber(pageNumber)
+        }
+        try Task<Never, Never>.checkCancellation()
+        let geometry = try renderGeometry(
+            page: page,
+            pageNumber: pageNumber,
+            box: box,
+            dpi: dpi,
+            maximumPagePixels: maximumPagePixels)
+        let rendered = try render(
+            page: page,
+            pageNumber: pageNumber,
+            box: box,
+            geometry: geometry,
+            background: background,
+            includeAnnotations: includeAnnotations)
+        guard rendered.pngData.count <= maximumOutputBytes else {
+            throw PDFNativeDocumentServiceError.outputByteBudgetExceeded(
+                maximumBytes: maximumOutputBytes)
+        }
+        try Task<Never, Never>.checkCancellation()
+        return rendered.pngData
+        #else
+        throw PDFNativeDocumentServiceError.unavailable
+        #endif
+    }
+
     /// Renders pages into an already-created, private staging directory. The
     /// caller owns committing or discarding that directory as one artifact.
     /// Page numbers are one-based; nil selects all pages. Explicit selections

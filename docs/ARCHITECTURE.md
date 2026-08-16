@@ -2,7 +2,7 @@
 
 文档状态：当前架构规范
 最近核对：2026-08-15
-产品基线：v0.48（build 48）
+产品基线：v0.10（build 49）
 
 文中较早的 v0.x 只表示能力最初引入或兼容格式冻结的里程碑；除明确标为历史的段落外，
 当前架构判断以本文件、源码和 `project.yml` 为准。
@@ -947,12 +947,15 @@ Provider HTTP transport 统一使用 `ProviderURLSession.noRedirect`：Foundatio
 
 | 用户意图 / 输入 | 应选工具 | 边界 |
 | --- | --- | --- |
-| 阅读已有可抽取文本层的 PDF | `read_pdf` | PDFKit 文本与 metadata 抽取，不执行 OCR；纯图像 PDF 返回 typed `ocr_required` |
-| 读取 DOCX/PPTX/XLSX/HTML/EPUB 的普通内容 | `read_docx` / `read_pptx` / `read_xlsx` / `read_html` / `read_epub` | 每个工具固定一种格式；Docling 高层转换为有界 Markdown；不接受 format/options/backend/命令/URL |
-| 对 PDF 做用户明确要求的 OCR | `document_ocr` | 固定 Docling + Tesseract CLI 配置；不修改输入 PDF，不自动换引擎 |
-| 把 PDF 或文档页面渲染成 PNG bundle | `document_render` | 显式 workspace `output_dir`；页面与 manifest 作为目录整体原子提交 |
-| 把非 PDF 文档导出为新 PDF | `document_export_pdf` | PDF 输入拒绝；生成物经 strict pdfcpu 与 PDFKit smoke 验证后提交 |
-| 创建或修改 DOCX/PPTX/XLSX/HTML/EPUB | `document_write` | 只开放锁定成熟组件公开 API 已覆盖的 operation；PDF mutation 永久不在 P0 |
+| 取得 PDF identity / 判断是否需 OCR | `inspect_pdf` | PDFKit 冻结输入并返回宿主计算的 SHA-256、页数与 OCR 状态；不返回正文，不执行 OCR |
+| 阅读已有可抽取文本层的 PDF | `read_pdf` | PDFKit 文本与 metadata 抽取并返回源 identity，不执行 OCR；纯图像 PDF 返回 typed `ocr_required` |
+| 首次读取 DOCX/PPTX/XLSX/HTML/EPUB | `read_docx` / `read_pptx` / `read_xlsx` / `read_html` / `read_epub` | 每个工具固定一种格式；Docling 高层转换返回有界 Markdown、next cursor 与结构 landmarks；初始 schema 仍只有 path/maxCharacters |
+| 继续读取或跳到 Docling landmark | 对应的 `continue_docx_read` / `continue_pptx_read` / `continue_xlsx_read` / `continue_html_read` / `continue_epub_read` | 只接受同一路径、source-bound opaque cursor 与可选 maxCharacters；源 SHA 变化即拒绝 |
+| 对 PDF 做用户明确要求的 OCR | `ocr_pdf` | 先用 `inspect_pdf.source_sha256` 填入 expected identity，再固定调用 Docling `DocumentConverter` + Tesseract；不修改输入 PDF，不接受引擎/语言/PSM 选择 |
+| 把 PDF 的一页渲染成一张 PNG | `pdf_render_page` | 每次只调用 PDFKit `PDFPage.draw` 处理一个 one-based page；不生成 bundle/manifest，不自动导出其他格式 |
+| 查看已有工作区 PNG/JPEG | `view_image` | schema 只有 `path`；固定交给 Apple ImageIO + exact-session ArtifactStore，并通过既有 function-output image 通道把像素送给模型；不做 OCR、编辑、缩放或转换 |
+| 把 DOCX/PPTX/XLSX/HTML 导出为 PDF | `docx_export_pdf` / `pptx_export_pdf` / `xlsx_export_pdf` / `html_export_pdf` | 每个工具固定一种输入格式和一个 LibreOffice filter 或 `WKWebView.createPDF`；无 format/backend/fallback 参数 |
+| 创建或修改 DOCX/PPTX/XLSX | `docx_*` / `pptx_*` / `xlsx_*` exact tools | 一个 model-facing 工具固定映射一个 python-docx/python-pptx/openpyxl 公开方法或属性；宿主管道只负责安全边界与提交 |
 
 这仍不是宿主按自然语言改写工具调用的路由器。模型从 provider request 的 exact tools list 选择工具；每个 executor 再按严格 schema、extension、operation allowlist 与 capability 做确定性 preflight。所有写入经过 staging、source/destination CAS、验证和原子提交。replay policy 只区分 `safeToReplay` 与 `doNotReplay`；它控制旧 task attempt 能否自动重放，不把实时工具错误升级成单独的终止状态。普通 executor error 结算为 failed/unknown observation 并返回同一 Agent turn；五个 exact structured reader 为 `safeToReplay`。durable tool ticket 与 `effectDisposition` 语义保持不变。
 
@@ -965,34 +968,71 @@ provider tool_call -> AgentLoop schema validation
   -> DocumentToolContracts strict decode / path and operation preflight
   -> DocumentInfrastructure source/destination/auxiliary-input snapshot + staging
   -> fixed backend argv/request + per-file/aggregate generated-output budgets
+     + independent 2 GiB aggregate process-tree RSS ceiling
   -> format-specific validator + commit-lock CAS + pinned-parent atomic commit
   -> typed ToolObservation(output, changedFiles, engine versions)
   -> tool_result event -> CodeProjection / CoworkProjection / CLI
 ```
 
 标准文档工具：
-- `read_pdf`：PDFKit 原生文本/metadata 抽取，支持 1-based 页选择与字符上限；不执行 OCR，纯图像 PDF 返回 `ocr_required`。
+- `inspect_pdf`：只接受 `path`，以 PDFKit 冻结并检查 PDF，返回宿主计算的 source SHA-256、字节数、
+  页数、native-text status 与 `requires_ocr`；不读取正文、不执行 OCR。其 SHA 是 read-only worker
+  构造 `ocr_pdf.expected_source_sha256` 的权威桥梁。
+- `read_pdf`：PDFKit 原生文本/metadata 抽取，支持 1-based 页选择与字符上限，并在成功结果返回
+  source SHA-256/字节数；不执行 OCR，纯图像 PDF 返回 `ocr_required`。
 - `read_docx` / `read_pptx` / `read_xlsx` / `read_html` / `read_epub`：每个工具只接受
   `path` 与可选 `maxCharacters`，format 由 concrete tool 固定；固定本地 Docling converter 只允许
   该一种 `InputFormat`，显式关闭 remote services、external plugins、remote/local asset fetch 与图片
-  enrich，返回有界 Markdown。普通读取不再维护 python-docx/python-pptx/openpyxl/lxml/rbook 的
-  自写对象遍历或 native-structure JSON 投影，也不存在 backend fallback。
-- `document_ocr`：只接受 PDF；固定 Docling pipeline、显式 Tesseract CLI、语言/PSM/tessdata/model artifact 配置，并强制禁用 remote services 与 external plugins。
-- `document_render`：PDF 直接由 PDFKit 按固定 box/DPI/背景导出 PNG；其他格式先用唯一 renderer 生成临时 PDF，再转页面 PNG。页面、SHA-256/尺寸/字节 metadata 与 manifest 作为单一目录 bundle 提交。
-- `document_export_pdf`：DOCX/PPTX/XLSX 走 LibreOffice，HTML 走固定 WKWebView renderer；生成 PDF 固定经过 `pdfcpu --conf disable --offline validate --mode strict` 与 PDFKit reopen/render smoke。EPUB 在 full-spine corpus gate 通过前不进入该工具 schema，显式请求返回 `unsupported_operation`。
-- `document_write`：DOCX/PPTX/XLSX/HTML 使用 python-docx/python-pptx/openpyxl/lxml 的明确 operation allowlist；EPUB 使用 rbook helper 并要求 EPUBCheck；XLSX 在 openpyxl 写 staging 后必须经固定 LibreOffice Calc XLSX round-trip/save、reopen/operation postcondition、formula + data-only cache 检查与 PDF preview 验证，最终文件允许被 LibreOffice 重写。CLI round-trip 成功本身不构成重算证明；目标公式缺少可读非公式缓存值时 fail closed。
+  enrich。它用 DoclingDocument `iterate_items`、ranged `export_to_markdown` 和
+  `HierarchicalChunker` 返回一个有界 Markdown window、source identity、next cursor 与最多 256 个
+  section/page/slide/sheet landmarks。普通读取不再维护 python-docx/python-pptx/openpyxl/lxml/rbook
+  的自写对象遍历或 native-structure JSON 投影，也不存在 backend fallback。
+- 五个 `continue_*_read`：分别与上述 concrete reader/capability 一一绑定；schema 只有 `path`、
+  required opaque `cursor` 与可选 `maxCharacters`。cursor 的 canonical payload 固定 schema version、
+  format、Docling element/character offset 与 exact source SHA-256；host 在 backend 前冻结同一 source，
+  文件变化、格式错配、非 canonical cursor 或无效位置都 fail closed。next/landmark 仍由同一 Docling
+  document structure 和 serializer 产生，不引入第二 parser。
+- `ocr_pdf`：只接受 PDF 和来自 `inspect_pdf` / 成功 `read_pdf` 的 exact source SHA-256；固定一次
+  Docling `DocumentConverter.convert`，固定 Tesseract English model 与 PSM，不向模型暴露 pages、language、
+  PSM、backend 或 fallback。结果只来自 Docling `export_to_markdown`，宿主不遍历 OCR cells/bbox/confidence。
+- `pdf_render_page`：只接受 PDF、exact source SHA-256、一个 one-based `page` 与一个 `.png`
+  `output_path`；固定 PDFKit crop/144 DPI/白底/annotation policy，每次只调用一页 `PDFPage.draw`。
+  Office/HTML 若需渲染，模型必须先完成相应 `*_export_pdf`，取得真实 ToolResult 后再调用本工具。
+- `docx_export_pdf` / `pptx_export_pdf` / `xlsx_export_pdf` 分别固定调用 LibreOffice
+  `writer_pdf_Export` / `impress_pdf_Export` / `calc_pdf_Export`；`html_export_pdf` 固定调用
+  `WKWebView.createPDF`。四者不接受 format/backend/mode；生成 PDF 只经过 host-owned strict pdfcpu 与
+  PDFKit 安全校验后提交。PDF/EPUB 不存在 export registration。
+- DOCX exact write surface：`docx_create_document`、`docx_add_paragraph`、
+  `docx_set_paragraph_text`、`docx_add_run`、`docx_set_run_bold`、`docx_set_run_italic`、
+  `docx_set_run_underline`、`docx_add_table`、`docx_set_table_cell_text`、`docx_add_picture`、
+  `docx_set_header_paragraph_text`、`docx_set_footer_paragraph_text`、
+  `docx_set_section_orientation` 与四个独立 margin setter。每个工具固定对应一个 python-docx
+  constructor/method/property。
+- PPTX exact write surface：`pptx_create_presentation`、`pptx_add_slide`、`pptx_set_shape_text`、
+  `pptx_add_shape`、`pptx_add_picture`、`pptx_add_table`、`pptx_set_table_cell_text`；每次调用只做一个
+  python-pptx operation，不能在 add 时顺带设置文本或填充单元格。
+- XLSX exact write surface：`xlsx_create_workbook`、`xlsx_create_sheet`、`xlsx_set_sheet_title`、
+  `xlsx_set_cell_value`、`xlsx_append_row`；分别固定对应 `Workbook()`、`create_sheet`、
+  `Worksheet.title`、`Cell.value`、`Worksheet.append`。当前 setter/append 不接受 formula，以免恢复公式
+  计算/缓存编排层。
+- `document_ocr` / `document_render` / `document_export_pdf` / `document_write` 不再注册。
+  model-facing `format` / `mode` / `operations[]`、HTML/EPUB 写入、PPTX/XLSX chart、XLSX
+  range/style/table/name、写后 LibreOffice recalc/preview 与自写第二层语义 verifier 均已撤掉。创建工具只需
+  output/CAS 字段；mutation 工具只增加 source/SHA 与该 external API 自己的参数。共用 Swift transport
+  只冻结输入、替换已审查路径、运行 fixed backend、检查安全输出并原子提交，不解释或组合业务操作。
 - macOS LibreOffice fixed runner 为每次调用建立当前用户 `0700` 的短路径
   `/private/tmp/intatis-lo-<12 hex>`，通过 `-env:OSL_SOCKET_PATH=...` 设置 LibreOffice bootstrap
   变量。Seatbelt 只允许该根内文件访问及 exact `OSL_PIPE_*` 本地 Unix socket 的 bind/connect，
   IP 网络与其他 socket 继续默认拒绝；调用结束必须清理 exact root。不得把该值退化为普通进程环境
   变量，也不得改回会超过 `sockaddr_un.sun_path` 的长 Darwin temp path。
-- 聚合 `document_read`、`read_document`、`edit_pdf_pages`、`reconstruct_document_image` 已从生产
+- 聚合 `document_read`、`document_ocr`、`document_render`、`document_export_pdf`、
+  `document_write`、`read_document`、`edit_pdf_pages`、`reconstruct_document_image` 已从生产
   registry 与 fresh lease 下架。旧 `document_read` capability 可在恢复旧 session 时兼容映射到五个
-  replacement reader，但旧 concrete tool 永不重新注册；其余 legacy raw value 只解码、不执行。
+  format family 的初读+继续工具，但旧聚合 concrete tool 永不重新注册；其余 legacy raw value 只解码、不执行。
   P0 不包含任何 PDF mutation、annotation 或 secure redaction。
 
 相邻但职责独立的媒体/编译工具继续保留：
-- `compile_latex`：调用已安装的 `tectonic`、`latexmk`、`xelatex` 或 `pdflatex` 编译 `.tex`，并确认 PDF 产物存在。
+- `compile_latex`：只调用固定 Tectonic 编译 `.tex` 并确认 PDF 产物存在；不接受 engine 参数，也不探测或回退 `latexmk` / `xelatex` / `pdflatex`。
 - `generate_image`：主 agent 从用户意图自主决定是否调用；model-facing schema 只包含 `prompt`、
   `outputPath`、可选 `size` 和 `count`，不暴露 provider/model 选择。宿主通过
   `ImageGenerationToolService` 从顶层 `image_model` 解析 exact provider/model，调用现有
@@ -1006,18 +1046,28 @@ provider tool_call -> AgentLoop schema validation
   原地覆盖。
 
 设计取舍：
-- “structured runner”只是 host-owned 固定连接器：Swift 选择已审计 executable/operation，发送 versioned JSON request 或固定 argv，并控制环境、工作目录、精确输入/输出根、断网、timeout/cancel、process-tree cleanup、stdout/stderr cap，以及生成文件的单项/聚合/entry 预算；模型不能提交命令、executable、environment、临时目录或 fallback 顺序。
+- “structured runner”只是 host-owned 固定连接器：Swift 选择已审计 executable/operation，发送 versioned JSON request 或固定 argv，并控制环境、工作目录、精确输入/输出根、断网、timeout/cancel、process-tree cleanup、stdout/stderr cap、生成文件的单项/聚合/entry 预算，以及独立的 2 GiB leader + descendant aggregate RSS ceiling；模型不能提交命令、executable、environment、临时目录或 fallback 顺序。
 - 普通读取语义由 Docling 高层 converter 拥有；Intatis 只做 strict schema、权限/路径校验、输入
   snapshot、固定调用、输出预算与错误映射。显式 write/edit 仍保留按格式的 allowlisted operation
   mapper、postcondition verifier、staging 与原子提交，但不与普通读取工具或读取输出协议混在一起。
   Intatis 不自行实现 PDF content stream、OOXML/EPUB parser、OCR/layout/formula engine。
-- 缺少锁定 runtime、模型、helper、validator 或 exact version 时返回 typed `backend_missing` / `backend_version_mismatch`，不得自动切换组件。当前 runtime 分发、签名、公证、双架构 closure 与第三方 NOTICE 仍是独立发行工作，不因开发机可执行而视为完成。
+- production App runtime 只从 bundle 的
+  `Contents/Resources/DocumentRuntime/<active-architecture>` 解析；CLI/debug 才允许用户 Application
+  Support fallback。release spec 固定 CPython/Docling/format deps、Heron model revision/hashes、
+  Tesseract/tessdata、pdfcpu、rbook、EPUBCheck + Temurin JRE 与 LibreOffice；每个 architecture root
+  必须有 complete file inventory、SPDX/license closure、direct version checks、target-arch Mach-O 和
+  selected Developer ID signature。发行脚本在 staging 前后复验两套 roots。缺 runtime、模型、helper、
+  validator、license closure 或 exact version 时 typed fail closed，不得自动下载或切换组件。当前尚未
+  产出/验收两套签名 external runtime artifacts 或 clean-machine notarized distribution。
 - PDFKit/WKWebView 是 Apple-native renderer 例外，不称为开源后端；pdfcpu 在本合同中只做 strict validate/info，不做 PDF 编辑。
-- read-only worker 获得 `read_pdf`、五个固定格式 reader 与 `document_ocr`。process-backed reader/OCR
+- read-only worker 获得 `inspect_pdf` / `read_pdf`、五个固定格式 reader + continuation 与
+  `ocr_pdf`。process-backed reader/OCR
   仍以 host-authored `structured_read_only` intent 标记，只能声明 read/execute、不能声明网络、工作区
   写入或通用 shell；DeterministicPolicyGate 只为该 exact 形状进入正常 reviewer/permission 流。
-  `document_render`、`document_export_pdf`、`document_write` 只向 read-write worker/coordinator 签发。
-- 五个普通 reader 的 replay policy 是 `safeToReplay`：进程开始后的解析失败原子写入 failed
+  `pdf_render_page`、四个 exact PDF export 与 DOCX/PPTX/XLSX exact write tools 只向 read-write
+  worker/coordinator 签发。durable capability raw value 可继续使用历史 aggregate 名称，但只决定这一组
+  exact registrations 的可见性，不恢复聚合 concrete tool。
+- 五个格式 family 的十个初读/继续工具 replay policy 都是 `safeToReplay`：进程开始后的解析失败原子写入 failed
   `tool_result` 与 failed/unknown settlement，作为 observation 返回主模型，并继续同批其他文件；
   普通工具的 denied/failed observation 都不会在 final 前升级为副作用完成阻断。`safeToReplay` 只决定
   旧 task attempt 的自动重放资格；写入、网络、OCR 与其他 non-replayable process 仍保持 `.doNotReplay`。
@@ -1172,8 +1222,8 @@ Cowork session open/new -> checked EventLog is canonical for settings, roster, l
        -> verify live AgentInferenceBinding == frozen TaskContract binding
        -> ProviderRegistry exact-resolves that agent's immutable profile/connection revision
        coordinator(canCoordinate=true) -> lease-based registry with workspace/doc/media/browser + coordination tools
-       read-only worker -> lease-based registry with read/list/search/read_pdf + five fixed-format readers + document_ocr + reply/request-delegation tools
-       read-write worker/coordinator -> may additionally receive document_render/document_export_pdf/document_write
+       read-only worker -> lease-based registry with read/list/search/read_pdf + five fixed-format readers + ocr_pdf + reply/request-delegation tools
+       read-write worker/coordinator -> may additionally receive pdf_render_page + four exact PDF exports + exact DOCX/PPTX/XLSX writes
   -> AgentLoop.send() 循环（Code 默认 maxIterations 50；Cowork 默认 64；host 显式配置可覆盖）
        ContextBuilder.initialMessages (RuntimeEnvironmentManifest + static system + history + scoped context + current user)
        stable Cowork @main:
@@ -1351,10 +1401,10 @@ MultimodalService.generateImage/transcribe/generateVideo(轮询 job)
 voice 不创建 artifact，也不在用户 Send 前写 EventLog；其 exact route、临时文件与生命周期合同见
 “Composer 语音输入链路”。
 
-Agent 用户图与工具图使用另一条 durable model-history 链：
+Agent 用户图、MCP 工具图和 `view_image` 使用同一条 durable model-history 链：
 
 ```text
-user attachment / MCP structured image
+user attachment / MCP structured image / view_image(path)
   -> exact-session ArtifactStore
   -> bounded ArtifactImageResolver
   -> ModelHistoryImageReference(schema v2, no bytes/path)
@@ -1363,6 +1413,12 @@ user attachment / MCP structured image
   -> exact .openAI request adapter + .visionInput
   -> OpenAI Responses
 ```
+
+`view_image` 本身只做 reviewed path 转发：`PathConfinement + WorkspaceLease` 通过后，会话绑定的
+`ArtifactStoreImageViewingService` 对 `.png` / `.jpg` / `.jpeg` 做有界字节搬运，实际格式、完整性、
+尺寸和像素解码仍由共享 ImageIO resolver 负责。工具不自写图片 parser，也不包含 OCR、编辑、缩放、
+转换或远程获取逻辑。PDF 页面视觉阅读是显式两步：先由 `pdf_render_page` 写出一张 PNG，收到成功
+ToolResult 后下一轮再调用 `view_image`；宿主不自动串联这两个操作。
 
 macOS共享composer reader先把`.png`与`.jpg`/`.jpeg`确定性映射为canonical `image/png`与
 `image/jpeg`，不依赖headless环境可能缺失的动态type database；实际bytes仍必须由后续resolver的
@@ -1440,7 +1496,7 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
 - **Goal 输入命令**：`GoalInputParser` 在 UI/ViewModel 层识别行首 `/goal`，要求后面有目标文本。Chat / Code 保留 v0.12 legacy 语义：剥离命令前缀，把清洗文本送入 provider，并在 `UserMessagePayload.tags = ["Goal"]` / `goal` 保存标签元数据供 bubble 投影。Cowork 的同一语法已升级为 durable Goal authority：创建 `Goal` 与首个 `ContinuationRun` 后由 host 驱动 scoped root AgentInvocation，不把它当成普通标签消息；仍在 mention 路由前后解析以接受 `/goal @Agent ...` 与 `@Agent /goal ...` 作为请求上下文，但 Goal continuation 始终由 `@main` 主持，因此 Goal Send 也冻结当时的 next-main exact binding，不能把生命周期、模型选择或终态 authority 下放给 mentioned agent。
 - **工具执行反馈**：AgentLoop 对未知工具、权限拒绝、工具抛错分别写入结构化 `tool_result` observation，并在执行前追加 `agent_status(tool)`。模型给出的 raw arguments 在 `.tool_call` 持久化前先分类；unknown/invalid、作为 inference-control surface 的全部 `spawn_agent` inputs、含用户自定义标题的 `rename_session` inputs，以及永不允许落原文的 `write_stdin` inputs 只记录 bounded redacted placeholder + count/redacted，且不写 raw-value digest；`rename_session` 还在 authorization/prepare 前按结构化 `name` 做 secret scan。schema-valid 其他工具先 secret-scrub/限长，只有未脱敏/未截断的 canonical 参数才可附加 digest。稳定 `@main` 另把一次 assistant 返回的完整 function-call batch 作为一个 model-facing item 在任何工具执行前原子持久化；其参数只有在 registration/schema/secret/size 检查全部通过时才原样保留，否则写固定合法 JSON placeholder。每个已清洗、有界的 function output 与对应 audit result/execution settlement 同 batch，因而不存在“工具已经结算、模型历史还没写”的可取消窗口；含图output还必须与同turn/call的唯一`tool_result`及同`{callID, agent, taskID, attempt}`的唯一settlement精确绑定，stable Code工具票据使用model-history规范化的attempt 1。只有完整 direct output 存在时才去除 ContextBundle 里的同一 audit result。UI/audit `tool_call` / `tool_result` 仍是独立记录，不能反向冒充模型历史。同一 turn 内空或重复 call ID 会改写为唯一 turn-local ID，并在后续关联位置一致使用。随后，已知工具在权限判断和执行前会校验参数必须是 JSON object，并满足 descriptor schema 的 required 字段、基础类型、数字 `minimum`/`maximum` 约束、字符串 `minLength`/`maxLength` 约束与 `additionalProperties:false` 未知字段规则，`read_file.maxBytes` 当前要求 `>= 1`，标准工具 path/query/command/diff 字符串当前要求非空，required 为空的无参工具可把空参数 / `null` 归一为 `{}`，坏 JSON、非对象、缺 required 字段、基础类型错误、数值越界、字符串过短/过长或未知字段会写入 `invalid tool input:` 的 `tool_result`，不生成 `permission_request`，也不执行工具。当前 shipped tools schema 默认声明 `additionalProperties:false`，因此模型给出的额外字段不能被 `try?` 默认值吞掉后进入权限或工具执行。`CodeProjection` 根据 `tool_call_id` 将结果标题回填为 `result · <toolName>`，把 `tool error:` / `permission denied:` / `unknown tool:` / `invalid tool input:` 标成失败项，并通过 `RuntimeRecoveryAdvice` 派生恢复建议。GUI 与 CLI 均消费事件投影/observation，不解析 assistant transcript。
 - **Automatic permission sidecar durability**：Cowork automatic 收到 provider tool call 后，先从 arguments 顶层抽出 provider-required string `__intatis_authorization_context`，再 canonicalize business object。provider-required 是 strict wire 表示；宿主只在 automatic ask 分支消费并验证它，deterministic allow/deny 忽略其语义。valid sidecar 只在当前 turn 的 acting-model 内存 conversation 中保留为格式示例；`message_completed`、durable `model_history_item(functionCallBatch)`、`.tool_call`、permission request、denial signature、durable ticket 与 executor 都只看到 stripped business view。outer JSON 无法解析时 durable history 只写固定合法 placeholder。valid automatic ask 的 `permission_request.context` 可写 generation/snapshot/context digest/status receipt；raw sidecar 永不落盘，reviewer transient exact-args 副本不进入 permission lifecycle。missing/malformed/secret-bearing sidecar 不建 `permission_request` / `permission_resolved`，只写 failed/runtimeFailed `tool_result`，不调用 reviewer、也不消耗 denial fuse；同 business args 补正后仍可进入 reviewer。binding 不一致另按 authorization snapshot failure typed fail closed。manual/nonautomatic 模式出现保留字段只写 redacted audit 并拒绝，不把字段交给业务工具。deterministic allow 仍执行拆包，但不依赖 sidecar。该边界只覆盖保留字段：acting model 自行复述到普通 assistant text 的内容仍走普通消息持久化；malformed provider error preview 仍依赖通用 diagnostic sanitizer，而不是 sidecar codec。
-- **Agent 文档/媒体工具**：`ToolRegistry.standard()` 暴露 PDFKit `read_pdf`、五个 fixed-format Docling Markdown reader、显式 OCR/render/export/write、LaTeX 编译和生图写入工作区；不暴露 PDF mutation、聚合 `document_read` 或扫描件重建 wrapper。PDFKit 路径在 macOS 可直接工作；Linux 或无 PDFKit 平台会返回配置错误并提示使用受审查的外部后端。process-backed 文档工具和 LaTeX 编译不内置模型或 TeX 发行版，只调用已安装且版本锁定的成熟工具；缺少命令时返回可行动的配置错误。生图工具不直接知道 provider secret，只通过注入的 `ImageGenerationToolService` 使用现有 provider registry。
+- **Agent 文档/媒体工具**：`ToolRegistry.standard()` 暴露 PDFKit `inspect_pdf` / `read_pdf`、五个 fixed-format Docling Markdown reader 及其 continuation、`ocr_pdf`、`pdf_render_page`、四个 exact PDF export、DOCX/PPTX/XLSX 一操作一工具的写入 surface、Tectonic-only `compile_latex` 和生图写入工作区；不暴露 PDF mutation、旧文档聚合工具、HTML/EPUB write 或扫描件重建 wrapper。PDFKit 路径在 macOS 可直接工作；Linux 或无 PDFKit 平台会返回配置错误并提示使用受审查的外部后端。process-backed 文档工具和 LaTeX 编译不内置模型或 TeX 发行版，只调用已安装且版本锁定的成熟工具；缺少命令时返回可行动的配置错误。生图工具不直接知道 provider secret，只通过注入的 `ImageGenerationToolService` 使用现有 provider registry。
 - **Chat 与 Agent 托管网络搜索**：macOS/iOS/CLI Chat 不展示搜索按钮、菜单项、开关、状态或 provider/model 路由提示。每次 Send 只冻结用户当前选择的 exact Chat provider/model/variant/request adapter；`ProviderRegistry.chatRuntimeRoute()` 先验证普通 Chat adapter，再同时要求 exact model 的 `hosted_web_search` 声明与受审 adapter dialect。满足时向当前模型提供对应能力并保持 `tool_choice: auto`，由当前模型自行决定是否搜索；明确不支持、未声明、无法确认或尚未适配时，在同一 route 上静默发送普通 Chat，不提示、不切换模型，也不调用 Agent `hosted_web_search`、`web_fetch`、`browser_search`、本地浏览器、MCP 或第三方搜索后端。Chat 能力不进入 PermissionEngine/AgentLoop，也不扩大 iOS linkage。Code/Cowork/CLI Code 则可在 exact agent route + read-write capability lease 同时成立时广告 strict query-only `hosted_web_search` Tool，使用同路由 `tool_choice:required` provider 请求，且经普通 tool permission/durable lifecycle；provider hosted shape 被拒绝时不允许 ordinary fallback。OpenAI Responses `web_search` 与 OpenRouter `openrouter:web_search` 分别编码；unknown/compatible/legacy/custom 接入点默认不声明搜索。只有 provider 返回结构化 URL annotation 时才形成来源；Chat 保存 optional citations，Agent 工具把去重来源纳入有界 observation。裸 404、自由文本和 partial payload 不可触发 Chat 重放。精确合同见 `docs/CHAT_HOSTED_SEARCH.md`。
 - **Agent 网络/浏览器工具**：`ToolRegistry.standard()` 暴露轻量 `web_fetch` 和 Playwright/CDP-backed `browser_*` 工具。浏览器工具依赖用户环境里已安装的 Node.js，并优先使用 Playwright + Chromium/Chrome/Edge channel；若 Playwright 不可解析，则通过 Node.js 内置 `WebSocket` 使用 Chrome DevTools Protocol 启动已安装 Chrome/Edge/Chromium。缺少后端时返回配置错误或 `browser_diagnostics` 的可行动诊断。profile/state/history/downloads 全部通过 `PathConfinement` 限定在 workspace `.intatis/browser/` 下，刷新、历史前进/后退、表单点击/输入/提交/下拉选择/按键/滚动/等待交互通过 locator 或当前焦点执行；click/download 的 CDP 路径使用真实鼠标事件，打开新页面的交互会跟随到新 tab/window 并把最终页面写回 state/history；截图只能写入工作区 PNG 路径，上传只能引用 workspace 内文件，显式下载只能写入 `.intatis/browser/downloads/<profile>`；`browser_profiles` 可报告 active browser / profile lock runtime marker 是否存在，但不得列内部 marker 文件名或读取内容；`browser_profile_delete` 只在目标 profile 与 `confirmProfile` 匹配时删除 `.intatis/browser/profiles/<profile>`、`downloads/<profile>`、`state/<profile>.json` 并剪除对应 history metadata，删除前如果发现 marker 只给概括性提示；profile 可能包含 cookies 与登录态，不能当成普通日志、artifact 或 secret-free 文本处理。
 - **macOS UI information architecture**：`IntatisMacRootView` 仍保留 macOS Chat/Code/Cowork 的 shell 与实现分支，但 Mopelium 左侧产品导航默认并仅展示 Cowork；Chat/Code 不显示入口，也不删除页面、运行时或会话数据。左侧继续由 `NavigationSplitView` 提供系统 sidebar 材质，内部使用一个连贯的自定义结构：`Mopelium` 标题、带 SF Symbol 的 Cowork 单行导航、Cowork 的 `Recent` session history/New 与底部 Settings；选中模式行使用 interactive Liquid Glass。Cowork New session 仍先要求用户选择主 workspace 并初始化 per-session project settings。主 thread header 显示 session durable display name（无 display name 时回退 immutable `SessionID`），不写死 Chat/Code/Cowork，也不承载 New/session/model 控件；Code/Cowork 使用紧凑 12pt 顶部留白，Cowork 不再在标题之前常驻 permission-reviewer 横幅。共享 `IntatisThreadComposer` 固定两排：第一排 model/profile 在左、最近一轮 Context/Input/Cached/Output/Time usage 在右；Chat/Code/Cowork 的选择器共用原生 `Menu` 语义与 40pt 高 interactive Liquid Glass 胶囊，关闭态只显示模型名，不显示 CPU/芯片图标、provider 或 variant/reasoning detail；弹出菜单内部仍按 provider 分组并保留 variant detail。第二排为 action、原生多行 `TextField`、可选 Cowork stop 与 Send；macOS Chat、Code 与 Cowork 复用同一个 shared paperclip/file-import/drop/draft-menu surface，Chat 不再显示独立提示词生图 action；iOS paperclip 仍是 Chat tools menu 而不是通用本地附件。action/stop/Send 使用同一个 40×40 原生圆形控件合同，输入容器单行最小高度同为 40，同行 spacing 为 8，外层保持 bottom alignment，因此多行输入只向上增长。没有 top accessories 时不创建空白第一排。消息本体不使用 agent 头像或通用 Agent badge，缺失的 agent 展示名回退 `Intatis`；除用户消息外，assistant/agent/system 对话行（包括失败/中断回复、通用 Agent message、`information_requested`、`information_replied` 与其他 agent-to-agent 记录）均无外层卡片，并以既有普通回答版式及 exact `sender->recipient` 标识直接落在 canvas。用户消息是唯一对话气泡，使用原生 regular Liquid Glass、trailing 对齐和既有宽度合同；正常 tool、permission、task 等专用结构化项继续保留容器，Code/Cowork error、失败 trace、recovery 与失败 submission 状态只进入右栏统一错误卡；既有字体 token 不随本次视觉架构更新。Thread content 使用共享 responsive layout 计算 horizontal padding、显式 `contentWidth`、message gutter 与 bubble max width；对话行通过 `IntatisThreadBubbleRow` 在整行层面按 user trailing、assistant/agent leading 对齐。Chat 默认无右 inspector；Code/Cowork 的显隐都只由同一个稳定外层 `GeometryReader` 提供的未压缩 outer available width 与用户请求状态决定，不使用已经压缩后的 thread width 反推自身可见性。Code 继续用有界 `HStack` 展示 structured plan/workspace/Git-status-only，并在错误非空时于 inspector 最底部生成唯一错误 section；旧 recent failure section 已移除。Cowork 则把 rail 作为 detail 同一 canvas 上的 trailing overlay：不使用 divider 或整栏 `.bar` 背景，主 thread 复用一个固定 `ScrollView` 根并延伸至 detail 最右端，visible rail 固定 348pt、section 固定 318pt，正文通过 trailing scroll-content margin 给 cards 留位，使原生滚动条位于整个内容区最右端。rail subtree 由只含 rail input 的 Equatable boundary 隔离；每个 passive section 独立使用系统 `Glass.clear` 的稳定 backdrop，不用 `GlassEffectContainer` 组织这些必须保持固定位置的 status cards。第一位显示 compact pending permission 或最近权限结果，其后为 `Agents`、真实 `Goal`、真实 `Tasks`，不显示 Git；错误列表非空时，唯一“错误信息”卡片位于最底部。compact permission 只展示状态、tool、安全摘要与必要 action，不渲染 raw args 或默认详情；pending 且 outer width 足以容纳 rail 时临时固定为可见，窄到无法安全容纳时只在 composer 上方保留同一请求的完整 Material 权限卡兜底，二者不得重复。无 pending 时用户仍可隐藏 Cowork rail；任何窄屏或隐藏状态都不在 thread 顶部复制 Goal/Tasks，也不保留对应高度。Code/Cowork 的 bottom-anchor 恢复使用系统 `onScrollVisibilityChange`，不建立 GeometryReader/PreferenceKey 坐标回写；session controls 位于内容 header，不向 window toolbar 动态增删 item，也不嵌套 SwiftUI `.inspector` preference。Cowork header 不提供独立 MCP Content 快捷按钮，内容浏览位于 `Project Settings → MCP → Browse Content`；header 只用系统 compact 圆形 glass/bordered icon control 切换 status rail。Goal/Tasks 继续来自 durable projections；Cowork 的 Git UI 已移除，但本地 Git controls 仍只通过 Agent Git tools + PermissionEngine 执行。

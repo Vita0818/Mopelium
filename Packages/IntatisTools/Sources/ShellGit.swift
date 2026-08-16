@@ -192,19 +192,23 @@ struct DocumentBackendProcessRunner: DocumentBackendRunner {
     static let maximumGeneratedFileBytes = 1_024 * 1_024 * 1_024
     static let maximumGeneratedTotalBytes = 1_024 * 1_024 * 1_024
     static let maximumGeneratedEntries = 100_000
+    static let maximumResidentBytes: UInt64 = 2 * 1_024 * 1_024 * 1_024
 
     private let timeoutSeconds: TimeInterval
     private let terminationGraceSeconds: TimeInterval
     private let maximumOutputBytes: Int
+    private let maximumResidentBytes: UInt64
     private let workspaceLease: WorkspaceLease?
 
     init(timeoutSeconds: TimeInterval = 300,
          terminationGraceSeconds: TimeInterval = 0.5,
          maximumOutputBytes: Int = 8 * 1_024 * 1_024,
+         maximumResidentBytes: UInt64 = Self.maximumResidentBytes,
          workspaceLease: WorkspaceLease? = nil) {
         self.timeoutSeconds = max(0.05, timeoutSeconds)
         self.terminationGraceSeconds = max(0.05, terminationGraceSeconds)
         self.maximumOutputBytes = max(1_024, maximumOutputBytes)
+        self.maximumResidentBytes = max(1, maximumResidentBytes)
         self.workspaceLease = workspaceLease
     }
 
@@ -259,7 +263,8 @@ struct DocumentBackendProcessRunner: DocumentBackendRunner {
             maximumOutputBytes: maximumOutputBytes,
             generatedOutputRoots: generatedOutputRoots,
             maximumGeneratedTotalBytes: Self.maximumGeneratedTotalBytes,
-            maximumGeneratedEntries: Self.maximumGeneratedEntries)
+            maximumGeneratedEntries: Self.maximumGeneratedEntries,
+            maximumResidentBytes: maximumResidentBytes)
         #else
         throw IntatisError.config(
             "document backend execution is unavailable on this platform")
@@ -347,19 +352,24 @@ enum ManagedProcessOutcome: Sendable {
     case exited(Int32)
     case cancelled
     case timedOut
-    case resourceLimit
+    case resourceLimit(ManagedProcessResourceLimit)
+}
+
+enum ManagedProcessResourceLimit: Sendable {
+    case generatedOutput
+    case residentMemory
 }
 
 enum ManagedProcessStopReason: Sendable {
     case cancelled
     case timedOut
-    case resourceLimit
+    case resourceLimit(ManagedProcessResourceLimit)
 
     var outcome: ManagedProcessOutcome {
         switch self {
         case .cancelled: return .cancelled
         case .timedOut: return .timedOut
-        case .resourceLimit: return .resourceLimit
+        case .resourceLimit(let limit): return .resourceLimit(limit)
         }
     }
 }
@@ -376,6 +386,7 @@ final class ManagedProcessState: @unchecked Sendable {
     private var continuation: CheckedContinuation<ManagedProcessOutcome, Never>?
     private var timeoutWorkItem: DispatchWorkItem?
     private var resourceMonitorWorkItem: DispatchWorkItem?
+    private var residentMemoryMonitorWorkItem: DispatchWorkItem?
 
     init(terminationGraceSeconds: TimeInterval) {
         self.terminationGraceSeconds = terminationGraceSeconds
@@ -418,7 +429,7 @@ final class ManagedProcessState: @unchecked Sendable {
                     roots: roots,
                     maximumBytes: maximumBytes,
                     maximumEntries: maximumEntries) {
-                    self.requestStop(.resourceLimit)
+                    self.requestStop(.resourceLimit(.generatedOutput))
                     return
                 }
                 usleep(20_000)
@@ -427,6 +438,33 @@ final class ManagedProcessState: @unchecked Sendable {
         lock.lock()
         if outcome == nil {
             resourceMonitorWorkItem = item
+            lock.unlock()
+            DispatchQueue.global(qos: .utility).async(execute: item)
+        } else {
+            lock.unlock()
+        }
+    }
+
+    func scheduleResidentMemoryLimit(maximumBytes: UInt64) {
+        guard maximumBytes > 0 else { return }
+        let item = DispatchWorkItem { [weak self] in
+            while let self, self.shouldMonitorResources {
+                self.lock.lock()
+                let root = self.processID
+                self.lock.unlock()
+                if let root,
+                   managedProcessResidentMemoryExceedsBudget(
+                       root: root,
+                       maximumBytes: maximumBytes) {
+                    self.requestStop(.resourceLimit(.residentMemory))
+                    return
+                }
+                usleep(20_000)
+            }
+        }
+        lock.lock()
+        if outcome == nil {
+            residentMemoryMonitorWorkItem = item
             lock.unlock()
             DispatchQueue.global(qos: .utility).async(execute: item)
         } else {
@@ -532,6 +570,8 @@ final class ManagedProcessState: @unchecked Sendable {
         timeoutWorkItem = nil
         resourceMonitorWorkItem?.cancel()
         resourceMonitorWorkItem = nil
+        residentMemoryMonitorWorkItem?.cancel()
+        residentMemoryMonitorWorkItem = nil
         let continuation = self.continuation
         self.continuation = nil
         lock.unlock()
@@ -823,10 +863,6 @@ private func trustedDocumentExecutable(
         path = runtime?.appendingPathComponent("bin/python3").path
     case .pdfcpu:
         path = runtime?.appendingPathComponent("bin/pdfcpu").path
-    case .rbookHelper:
-        path = runtime?.appendingPathComponent("bin/intatis-rbook-helper").path
-    case .epubCheck:
-        path = runtime?.appendingPathComponent("bin/intatis-epubcheck").path
     case .libreOffice:
         #if os(macOS)
         path = intatisLibreOfficeRuntimeAppURL()?
@@ -918,7 +954,8 @@ private func runWorkspaceProcess(executable: URL,
                                  maximumOutputBytes: Int,
                                  generatedOutputRoots: [URL] = [],
                                  maximumGeneratedTotalBytes: Int? = nil,
-                                 maximumGeneratedEntries: Int = 100_000) async throws -> ShellResult {
+                                 maximumGeneratedEntries: Int = 100_000,
+                                 maximumResidentBytes: UInt64? = nil) async throws -> ShellResult {
     let workspace = try validatedWorkspace(cwd)
     let requestedWorkingDirectory: URL?
     if let managedWorkingDirectory {
@@ -1065,7 +1102,8 @@ private func runWorkspaceProcess(executable: URL,
         maximumOutputBytes: maximumOutputBytes,
         generatedOutputRoots: [runtime] + generatedOutputRoots,
         maximumGeneratedTotalBytes: maximumGeneratedTotalBytes,
-        maximumGeneratedEntries: maximumGeneratedEntries)
+        maximumGeneratedEntries: maximumGeneratedEntries,
+        maximumResidentBytes: maximumResidentBytes)
     let managedCommandShimStarted: Bool
     do {
         try startupMarkerHandle.seek(toOffset: 0)
@@ -1193,7 +1231,8 @@ private func runManagedProcess(spec: ManagedProcessSpec,
                                maximumOutputBytes: Int,
                                generatedOutputRoots: [URL] = [],
                                maximumGeneratedTotalBytes: Int? = nil,
-                               maximumGeneratedEntries: Int = 100_000) async throws -> ShellResult {
+                               maximumGeneratedEntries: Int = 100_000,
+                               maximumResidentBytes: UInt64? = nil) async throws -> ShellResult {
     let stdoutPipe = try makeManagedOutputPipe(maximumBytes: maximumOutputBytes)
     let stderrPipe: ManagedOutputPipe
     do {
@@ -1231,6 +1270,9 @@ private func runManagedProcess(spec: ManagedProcessSpec,
                     roots: generatedOutputRoots,
                     maximumBytes: UInt64(maximumGeneratedTotalBytes),
                     maximumEntries: maximumGeneratedEntries)
+            }
+            if let maximumResidentBytes {
+                state.scheduleResidentMemoryLimit(maximumBytes: maximumResidentBytes)
             }
             DispatchQueue.global(qos: .utility).async {
                 state.processExited(waitAndReap(pid: pid))
@@ -1281,8 +1323,10 @@ private func runManagedProcess(spec: ManagedProcessSpec,
         throw CancellationError()
     case .timedOut:
         throw IntatisError.io("shell command timed out after \(timeoutSeconds.formattedForError)s")
-    case .resourceLimit:
+    case .resourceLimit(.generatedOutput):
         throw IntatisError.io("document backend exceeded its generated output budget")
+    case .resourceLimit(.residentMemory):
+        throw IntatisError.io("document backend exceeded its resident-memory budget")
     }
 }
 
@@ -1387,6 +1431,78 @@ func documentGeneratedOutputExceedsBudget(
     return false
 }
 
+/// Bounds the aggregate resident set of the managed process group. Shared
+/// pages can be counted in more than one process, which is intentionally
+/// conservative for an untrusted document. Processes that disappear between
+/// enumeration and inspection are ignored because process-tree cleanup still
+/// waits for and reaps the leader.
+private func managedProcessResidentMemoryExceedsBudget(
+    root: Int32,
+    maximumBytes: UInt64
+) -> Bool {
+    guard maximumBytes > 0 else { return true }
+
+    func exceeds(_ total: inout UInt64, adding value: UInt64) -> Bool {
+        if value > maximumBytes || total > maximumBytes - value {
+            return true
+        }
+        total += value
+        return total > maximumBytes
+    }
+
+    #if canImport(Darwin)
+    var total: UInt64 = 0
+    let processIDs = Set([root] + darwinDescendants(of: root))
+    for processID in processIDs {
+        var info = proc_taskinfo()
+        let expectedSize = MemoryLayout<proc_taskinfo>.size
+        let actualSize = proc_pidinfo(
+            processID,
+            PROC_PIDTASKINFO,
+            0,
+            &info,
+            Int32(expectedSize))
+        guard Int(actualSize) == expectedSize else { continue }
+        if exceeds(&total, adding: UInt64(info.pti_resident_size)) {
+            return true
+        }
+    }
+    return false
+    #elseif canImport(Glibc) || canImport(Musl)
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: "/proc") else {
+        return true
+    }
+    let rawPageSize = sysconf(Int32(_SC_PAGESIZE))
+    guard rawPageSize > 0 else { return true }
+    let pageSize = UInt64(rawPageSize)
+    var total: UInt64 = 0
+    for name in names where !name.isEmpty && name.allSatisfy(\.isNumber) {
+        guard let statText = try? String(
+            contentsOfFile: "/proc/\(name)/stat",
+            encoding: .utf8),
+              let closingParenthesis = statText.lastIndex(of: ")") else { continue }
+        let suffixStart = statText.index(after: closingParenthesis)
+        let fields = statText[suffixStart...].split(whereSeparator: \.isWhitespace)
+        // fields starts at proc(5) field 3 (state); pgrp is field 5 and
+        // resident pages is field 24.
+        guard fields.count > 21,
+              let processGroup = Int32(fields[2]),
+              processGroup == root,
+              let residentPages = Int64(fields[21]),
+              residentPages > 0 else { continue }
+        let pages = UInt64(residentPages)
+        if pages > UInt64.max / pageSize
+            || exceeds(&total, adding: pages * pageSize) {
+            return true
+        }
+    }
+    return false
+    #else
+    _ = root
+    return true
+    #endif
+}
+
 #if canImport(Darwin)
 private func darwinDescendants(of root: pid_t) -> [pid_t] {
     var pending = [root]
@@ -1484,20 +1600,67 @@ func structuredRuntimeReadRoots() -> [URL] {
     return roots
 }
 
-/// Optional user-managed Python environment for structured document parsers.
-/// Intatis never installs into or mutates this directory while running a tool;
-/// it is only added as a narrow read root when the user created it explicitly.
+/// Production apps resolve the architecture-specific, signed runtime embedded
+/// by the release pipeline. CLI/debug builds retain the historical
+/// user-managed location as a development fallback; Intatis never installs
+/// into or mutates that directory while running a tool.
 func intatisDocumentRuntimeRoot() -> URL? {
+    let bundled = intatisBundledDocumentRuntimeRoot()
     #if os(macOS)
-    guard let applicationSupport = FileManager.default.urls(
+    let userManaged = FileManager.default.urls(
         for: .applicationSupportDirectory,
-        in: .userDomainMask).first else { return nil }
-    return applicationSupport
-        .appendingPathComponent("Intatis", isDirectory: true)
-        .appendingPathComponent("document-runtime", isDirectory: true)
+        in: .userDomainMask).first.map {
+            $0.appendingPathComponent("Intatis", isDirectory: true)
+                .appendingPathComponent("document-runtime", isDirectory: true)
+        }
+    return selectDocumentRuntimeRoot(
+        bundledRoot: bundled,
+        userManagedRoot: userManaged,
+        requiresBundledRuntime: Bundle.main.bundleIdentifier == "com.Vita0818.IntatisMac")
     #elseif os(Linux)
-    return FileManager.default.homeDirectoryForCurrentUser
+    let userManaged = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".local/share/intatis/document-runtime", isDirectory: true)
+    return selectDocumentRuntimeRoot(
+        bundledRoot: bundled,
+        userManagedRoot: userManaged,
+        requiresBundledRuntime: false)
+    #else
+    return nil
+    #endif
+}
+
+func selectDocumentRuntimeRoot(
+    bundledRoot: URL?,
+    userManagedRoot: URL?,
+    requiresBundledRuntime: Bool
+) -> URL? {
+    if requiresBundledRuntime {
+        return bundledRoot
+    }
+    return bundledRoot ?? userManagedRoot
+}
+
+func intatisBundledDocumentRuntimeRoot() -> URL? {
+    #if os(macOS)
+    #if arch(arm64)
+    let architecture = "arm64"
+    #elseif arch(x86_64)
+    let architecture = "x86_64"
+    #else
+    return nil
+    #endif
+    guard let resources = Bundle.main.resourceURL else { return nil }
+    let root = resources
+        .appendingPathComponent("DocumentRuntime", isDirectory: true)
+        .appendingPathComponent(architecture, isDirectory: true)
+    let manifest = root.appendingPathComponent("runtime-manifest.json", isDirectory: false)
+    let python = root.appendingPathComponent("bin/python3", isDirectory: false)
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory),
+          isDirectory.boolValue,
+          FileManager.default.fileExists(atPath: manifest.path),
+          FileManager.default.isExecutableFile(atPath: python.path) else { return nil }
+    return root.resolvingSymlinksInPath().standardizedFileURL
     #else
     return nil
     #endif
