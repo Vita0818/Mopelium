@@ -3,7 +3,7 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
-module_cache="${TMPDIR:-/tmp}/intatis-mcp-w10-module-cache"
+module_cache="${TMPDIR:-/tmp}/mopelium-mcp-w10-module-cache"
 mkdir -p "$module_cache"
 
 "$script_dir/official/run-official.sh"

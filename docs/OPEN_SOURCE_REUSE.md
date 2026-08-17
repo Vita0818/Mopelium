@@ -2,14 +2,14 @@
 
 文档状态：当前开源复用政策
 生效日期：2026-07-12
-最近核对：2026-08-16
+最近核对：2026-08-17
 产品基线：v0.10（build 49）
 
 ## 项目立场
 
-Intatis 是 Apple-first、Swift-native 优先的本地 AI workbench。项目不再采用“禁止直接复用外部源码”的严格 clean-room 政策；允许在许可证兼容、来源清晰、归属完整、安全边界不降级的前提下，选择性复制、翻译、修改、链接或以独立进程复用成熟开源实现。
+Mopelium 是 Apple-first、Swift-native 优先的本地 AI workbench。项目不再采用“禁止直接复用外部源码”的严格 clean-room 政策；允许在许可证兼容、来源清晰、归属完整、安全边界不降级的前提下，选择性复制、翻译、修改、链接或以独立进程复用成熟开源实现。
 
-允许复用不等于无条件搬运。Intatis 的产品身份、Apple 平台体验、权限模型、持久化协议和安全边界仍由本项目控制。
+允许复用不等于无条件搬运。Mopelium 的产品身份、Apple 平台体验、权限模型、持久化协议和安全边界仍由本项目控制。
 
 ## 允许的复用形式
 
@@ -34,24 +34,24 @@ external-runtime 以独立 helper/process/service 运行上游实现
 ## 永久禁止项
 
 - 不使用泄露、反编译、绕过访问控制获得的源码或私有 prompt。
-- 不复制第三方产品名称、Logo、图标、截图、UI 资产、商标性外观或品牌文案作为 Intatis 产品身份。
-- 不把上游许可证、版权声明或来源记录删除、模糊化或错误标成 Intatis 原创。
+- 不复制第三方产品名称、Logo、图标、截图、UI 资产、商标性外观或品牌文案作为 Mopelium 产品身份。
+- 不把上游许可证、版权声明或来源记录删除、模糊化或错误标成 Mopelium 原创。
 - 不因复用外部实现而绕过 `DeterministicPolicyGate`、`PermissionEngine`、`CapabilityLease`、`WorkspaceLease`、`PathConfinement`、`SecretScanner`、`Mediator`、durable tool ticket 或 EventLog 审计。
-- 不让外部 runtime 扩大 iOS 平台边界；iOS 仍不得获得本地 workspace Agent、shell、Git 或 Cowork 执行能力。
+- 不得因复用外部 runtime 重新创建 iOS App target 或第二套产品 runtime。
 
 ## Prompt、文案与资产
 
-- 公开仓库中由兼容许可证覆盖的 model-facing prompt 可以按 `derived` 复用，但必须固定上游 commit、记录来源、移除上游品牌/支持链接，并重新核对 Intatis 的工具名、权限语义和安全边界。
+- 公开仓库中由兼容许可证覆盖的 model-facing prompt 可以按 `derived` 复用，但必须固定上游 commit、记录来源、移除上游品牌/支持链接，并重新核对 Mopelium 的工具名、权限语义和安全边界。
 - 私有、泄露或许可证不明确的 prompt 永久禁止使用。
-- 用户可见文案默认由 Intatis 自己编写；若确需复用开源文案，按源码同等记录来源，但不得造成官方关联或商标混淆。
+- 用户可见文案默认由 Mopelium 自己编写；若确需复用开源文案，按源码同等记录来源，但不得造成官方关联或商标混淆。
 - UI 图标、Logo、截图、产品名称和品牌视觉不因源码采用 MIT 等许可证就自动进入允许范围；没有单独确认时不得复用。
 
 ## Apple-first 实现规则
 
-- App shell、SwiftUI/AppKit 界面、EventLog、权限控制、lease、scheduler、workspace bookmark 与 iOS/macOS 平台边界优先保持 Swift 原生。
+- App shell、SwiftUI/AppKit 界面、EventLog、权限控制、lease、scheduler、workspace bookmark 与 macOS 平台边界优先保持 Swift 原生。
 - 从非 Swift 项目复用时，先判断是“选择性翻译核心逻辑”还是“隔离为外部 runtime”更合适，不做无边界的整仓移植。
-- Node/Bun/Rust/Go 等 helper 默认只可作为 macOS DeveloperID 路径的隔离组件评估；引入前必须设计签名、Hardened Runtime、sandbox、更新、进程清理、资源占用和失败降级。不得把它们隐式带入 iOS target。
-- 外部 runtime 必须通过受控协议接入 Intatis，由 Intatis 继续拥有权限决定、工作区授权、事件审计和用户可见状态；不得让上游 runtime 成为不可审计的第二事实源。
+- Node/Bun/Rust/Go 等 helper 默认只可作为 macOS DeveloperID/CLI 路径的隔离组件评估；引入前必须设计签名、Hardened Runtime、sandbox、更新、进程清理、资源占用和失败降级。
+- 外部 runtime 必须通过受控协议接入 Mopelium，由 Mopelium 继续拥有权限决定、工作区授权、事件审计和用户可见状态；不得让上游 runtime 成为不可审计的第二事实源。
 
 ## 每次复用前的检查清单
 
@@ -59,7 +59,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 2. 读取根许可证、目标文件头、NOTICE、依赖清单和相关资产许可证。
 3. 选择 `derived` / `vendored` / `dependency` / `external-runtime` 之一，并说明为何适合 Apple 平台。
 4. 评估 SwiftPM/Xcode target、macOS Developer ID 签名/公证/直接分发、
-   iOS 子集、binary size、更新和供应链影响；不得仅为已取消的 Mac App Store
+   唯一 macOS App、CLI、binary size、更新和供应链影响；不得仅为不存在的 Mac App Store
    产品面引入替代依赖或裁剪能力。
 5. 说明外部实现如何接入现有 Permission/EventLog/Lease/PathConfinement 边界。
 6. 在 `NOTICE.md` 增加当前实际采用项；需要分发完整第三方声明时新增 `ThirdPartyNotices/<project>.md`。
@@ -69,7 +69,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 
 ## OKF / knowledge retrieval 当前准入结论
 
-- Intatis 已把 GoogleCloudPlatform `knowledge-catalog` 的 Open Knowledge Format v0.2
+- Mopelium 已把 GoogleCloudPlatform `knowledge-catalog` 的 Open Knowledge Format v0.2
   `okf/SPEC.md` 固定在 commit `3fcbb9f828c2f23d109c855ee403c3a4c81f3a96`，以
   byte-exact `vendored standard documentation` 形式保存于
   `ThirdPartyStandards/OpenKnowledgeFormat/0.2/`。规范 SHA-256 为
@@ -79,27 +79,27 @@ external-runtime 以独立 helper/process/service 运行上游实现
   `UPSTREAM.md`、`SHA256SUMS`、`NOTICE.md` 和
   `ThirdPartyNotices/OpenKnowledgeFormat.md` 是同一 adoption record，不得只更新其中一处。
 - 本次没有采用或执行上游 reference agent、Python package、prompt、sample bundle、viewer、
-  HTML/CSS/JavaScript 或品牌资产。Intatis 的 Profile、Validator、snapshot/index 和 tool contract
+  HTML/CSS/JavaScript 或品牌资产。Mopelium 的 Profile、Validator、snapshot/index 和 tool contract
   是独立 Swift 集成代码；OKF 本身不定义 embedding、vector store、rerank、ACL 或 RAG runtime。
-- non-iOS `IntatisKnowledge` target 通过 SwiftPM 使用 Yams 6.2.2，固定 commit
+- `MopeliumKnowledge` target 通过 SwiftPM 使用 Yams 6.2.2，固定 commit
   `a27b21e0c81c5bf42049b897a62aaf387e80f279`。复用类型为 `dependency`，许可证 MIT；运行闭包
   是 Yams 及其同包 CYaml/libYAML，无外部 package dependency。完整记录与许可证位于
   `ThirdPartyNotices/KnowledgeRetrieval.md` 和
   `ThirdPartyNotices/Licenses/Yams-6.2.2-MIT.txt`。Yams 只负责 bounded YAML AST；alias、custom
-  tag、node/depth/scalar limits 和不执行输入仍由 Intatis host safety profile 强制。
+  tag、node/depth/scalar limits 和不执行输入仍由 Mopelium host safety profile 强制。
 - Apple NaturalLanguage、Accelerate 和系统加密/文件 API 属系统框架，不新增第三方 NOTICE。
   P0 dense exact KNN、BM25 tokenizer/scorer、RRF 与 embedding-cosine reranker 是仓内 Swift 实现；
   没有复制或链接 SwiftIndex、MLXEmbedders、sqlite-vec、USearch、VecturaKit、Wax、llama.cpp 或
   其它调查项目的源码、模型和 runtime。以后若采用其中任何实现，必须重新固定 commit、license、
-  transitive closure、universal macOS/iOS target 边界并更新 NOTICE。
+  transitive closure、macOS/Linux target 边界并更新 NOTICE。
 
 ## OpenCode 当前准入结论
 
 - 官方活跃仓库：`https://github.com/anomalyco/opencode`
 - 调研时根许可证：MIT
-- 当前状态：`research-only`，截至本政策生效时尚未把 OpenCode 源码、公开 prompt 或 UI 资产加入 Intatis。
+- 当前状态：`research-only`，截至本政策生效时尚未把 OpenCode 源码、公开 prompt 或 UI 资产加入 Mopelium。
 - 后续允许选择性复用其具体实现，但每批必须固定 commit、核对目标文件与传递依赖，并按本政策记录 provenance。
-- Intatis 不使用 OpenCode 名称、Logo、图标或 UI 品牌；若复用 TypeScript 实现，优先选择可验证的逻辑/测试进行 Swift 派生实现，或作为 macOS-only 隔离 runtime 评估。
+- Mopelium 不使用 OpenCode 名称、Logo、图标或 UI 品牌；若复用 TypeScript 实现，优先选择可验证的逻辑/测试进行 Swift 派生实现，或作为 macOS-only 隔离 runtime 评估。
 
 ## OpenCode provider adapter 与 AI SDK wire 参考记录
 
@@ -123,7 +123,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
   `5cef3c562b12c89c7ddbf1c88565e1219af6a302`（Apache-2.0）。另参考 Remeda
   `mergeDeep` 的公开 plain-object recursion/array-scalar replacement 行为；
   本地没有引入 Remeda runtime。
-- 本轮复用形式是 `reference`：Intatis 以 Swift 独立实现 raw npm identity、
+- 本轮复用形式是 `reference`：Mopelium 以 Swift 独立实现 raw npm identity、
   reviewed adapter selection/lowering、deep merge、durable revision 与
   fail-closed 边界；没有复制、逐行翻译、vendor、链接或分发 OpenCode、
   Vercel AI SDK、OpenRouter SDK、Remeda 的源码、测试、prompt、文案、名称、
@@ -137,7 +137,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 - 固定 commit：`1a817bb95d942d4ca93f6ed09c97968713ff6d2a`（调研日期 2026-07-24）
 - 核对结果：根许可证为 Apache-2.0，仓库包含 NOTICE；本轮阅读了 `codex-rs/core/src/unified_exec/process_manager.rs`、`async_watcher.rs`、`head_tail_buffer.rs`、`codex-rs/utils/pty/src/pty.rs`、`process.rs`、`codex-rs/core/src/tools/handlers/unified_exec/write_stdin.rs`、`codex-rs/protocol/src/shell_environment.rs` 与 `codex-rs/sandboxing/src/seatbelt_base_policy.sbpl`。
 - 本轮复用形式是 `reference`：参考了“长进程返回 session、后续继续写 stdin/轮询”“真实 PTY/controlling terminal”“持续 drain 且有界保留 head+tail”“process/session manager 负责取消与清理”“sandbox 与环境由 host 冻结”等行为和测试方向。
-- Intatis 的 `ProcessTerminalSessionManager`、Swift tool/lease/permission/EventLog 接线和 `IntatisPTYLauncher` C helper 均为独立实现；没有复制、逐行翻译、vendor 或链接 Codex Rust/C 源码、prompt、测试、文案、名称、Logo 或 UI 资产。因此本轮没有新增第三方分发物，也没有修改 `NOTICE.md`。如果后续直接采用任何 Codex 文件或表达，必须把对应批次改记为 `derived` / `vendored` / `dependency`，重新核对该 commit 的目标文件、依赖、Apache-2.0 NOTICE 与本地修改摘要后再更新 NOTICE。
+- Mopelium 的 `ProcessTerminalSessionManager`、Swift tool/lease/permission/EventLog 接线和 `MopeliumPTYLauncher` C helper 均为独立实现；没有复制、逐行翻译、vendor 或链接 Codex Rust/C 源码、prompt、测试、文案、名称、Logo 或 UI 资产。因此本轮没有新增第三方分发物，也没有修改 `NOTICE.md`。如果后续直接采用任何 Codex 文件或表达，必须把对应批次改记为 `derived` / `vendored` / `dependency`，重新核对该 commit 的目标文件、依赖、Apache-2.0 NOTICE 与本地修改摘要后再更新 NOTICE。
 
 ## Codex CLI 模型历史参考记录
 
@@ -145,7 +145,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 - 固定 commit：`4c43465133428898aa84f0bfc02c306ed65fb66a`（调研日期 2026-07-25）
 - 核对结果：根许可证为 Apache-2.0，仓库包含 NOTICE；本轮重点阅读 `codex-rs/core/src/state/session.rs`、`context_manager/history.rs`、`context_manager/normalize.rs`、`codex-rs/core/src/session/turn.rs`、`session/rollout_reconstruction.rs`、`codex-rs/protocol/src/models.rs`、`protocol.rs`、`codex-rs/rollout/src/policy.rs` 以及对应 context/history/compaction tests。
 - 本轮复用形式是 `reference`：参考同一 thread 持有有序 model items、completed item 单次入历史、function call/output 按 call ID 配对、请求前对 missing/orphan pair 做 prompt-only 归一化、resume 从 rollout 重建，以及 compaction 保存完整 `replacement_history` 的行为。
-- Intatis 的 `ModelHistoryItemPayload`、EventLog wire event、Swift projector、legacy bridge、AgentLoop 接线和测试均为独立实现；没有复制、逐行翻译、vendor 或链接 Codex Rust 源码、prompt、测试、文案、名称、Logo 或 UI 资产。因此本轮没有新增第三方分发物，也没有修改 `NOTICE.md`。后续若直接采用上游任何文件或表达，必须重新按目标 commit 核对来源与 Apache-2.0 NOTICE，并把复用类型改为 `derived` / `vendored` / `dependency`。
+- Mopelium 的 `ModelHistoryItemPayload`、EventLog wire event、Swift projector、legacy bridge、AgentLoop 接线和测试均为独立实现；没有复制、逐行翻译、vendor 或链接 Codex Rust 源码、prompt、测试、文案、名称、Logo 或 UI 资产。因此本轮没有新增第三方分发物，也没有修改 `NOTICE.md`。后续若直接采用上游任何文件或表达，必须重新按目标 commit 核对来源与 Apache-2.0 NOTICE，并把复用类型改为 `derived` / `vendored` / `dependency`。
 
 ## Codex CLI Skill 生命周期与 replacement-history compaction 参考记录
 
@@ -166,9 +166,9 @@ external-runtime 以独立 helper/process/service 运行上游实现
   budget，缺失时回退 8,000 characters；ext/skills 的 resolved/max-window +
   4k cap 是另一条路径，不能混写成 CLI Core 合同。MCP dependency 正式范围是
   `agents/openai.yaml` 中的 MCP tools，并包含用户确认、配置/OAuth 与 runtime
-  refresh 流程；Intatis 只独立实现了更窄的 metadata + request-owned
+  refresh 流程；Mopelium 只独立实现了更窄的 metadata + request-owned
   fail-closed preflight，没有复制或声称实现该外部变更流程。
-- Intatis 的 OpenCode-compatible profile parser 会在 `context_window` 缺失时
+- Mopelium 的 OpenCode-compatible profile parser 会在 `context_window` 缺失时
   把显式 `limit.context` 归一到 canonical primary `contextWindowTokens`；
   catalog 对该 canonical primary 应用同一 2% 公式，但仍拒绝
   `max_context_window`、compaction threshold 或 model slug 猜测。这是本地
@@ -181,13 +181,13 @@ external-runtime 以独立 helper/process/service 运行上游实现
   continuation summary、完整 replacement history、UUIDv7 window chain 与
   latest-checkpoint-plus-suffix 恢复；同时记录 remote persistence 测试 ignored
   与 network-dependent 测试 skip，未把它们写成上游已完整证明。
-- 本轮复用形式为 `reference`。Intatis 的 Swift protocol/EventLog event、
+- 本轮复用形式为 `reference`。Mopelium 的 Swift protocol/EventLog event、
   compactor、projector、token estimator、profile policy、catalog budget/
   metrics、`agents/openai.yaml` parser、MCP locator fingerprint、
   request-owned host availability assertion、AgentLoop 接线与测试均为独立实现；没有
   复制或逐行翻译 Rust 源码，没有复制 compact/Skill prompt、snapshot、
   fixture、产品文案、名称、Logo 或 UI 资产，也没有 vendor、链接或分发 Codex
-  crate。Intatis 还保留了比上游更强的 EventLog-first
+  crate。Mopelium 还保留了比上游更强的 EventLog-first
   commit-before-live-swap 与 per-agent CAS。
 - 因此没有新增第三方分发物或依赖，`NOTICE.md` 无需修改。若以后直接采用
   Codex prompt、源码表达、测试 fixture 或 remote compact wire 实现，必须按
@@ -207,11 +207,11 @@ external-runtime 以独立 helper/process/service 运行上游实现
   entry bounds、64/1024 metadata limits、8k/2% catalog budget、system→admin→
   repo→user budget order、无歧义 `$name`、完整 `SKILL.md` 激活和 child
   独立加载。
-- 本轮复用形式是 `reference`。`IntatisSkills` 的 Swift loader、snapshot、
+- 本轮复用形式是 `reference`。`MopeliumSkills` 的 Swift loader、snapshot、
   catalog 文案、dynamic tools、permission/durable execution 接线与测试均为
   独立实现；没有复制、逐行翻译、vendor 或链接 Codex Rust 源码、公开 prompt、
-  测试、文案、名称、Logo 或 UI 资产。Intatis 还增加了自己的
-  WorkspaceLease、SecretScanner、48 KiB durable output、iOS linkage 与
+  测试、文案、名称、Logo 或 UI 资产。Mopelium 还增加了自己的
+  WorkspaceLease、SecretScanner、48 KiB durable output、无 iOS App 产品图与
   stricter no-symlink 边界。历史 App Store 分支不是当前复用准入条件。
 - 因此本轮没有新增第三方分发物或依赖，`NOTICE.md` 无需修改。若以后复制
   Codex prompt/源码、支持其 plugin runtime 或改变当前严格 symlink 策略，必须
@@ -225,7 +225,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
   `25af12f7e61572b0bc18ddb1008be543b91519b0`；根许可证为
   Apache-2.0，仓库包含 NOTICE。该固定 release 与本机已安装的 Codex CLI
   0.145.0 对应。
-- 实际采用路径为 `.agents/skills/intatis-skill-creator/`，复用类型从上面的
+- 实际采用路径为 `.agents/skills/mopelium-skill-creator/`，复用类型从上面的
   早期纯调研批次明确变为 `vendored` + `derived`。本批采用
   `SKILL.md`、三个 Python helper 和 `references/openai_yaml.md` 的公开结构与
   表达，并把设计指导重组为本地 `references/design-guide.md`。
@@ -233,11 +233,11 @@ external-runtime 以独立 helper/process/service 运行上游实现
   `$CODEX_HOME/skills/.system`，若再放置同名 `skill-creator`，显式
   `$skill-creator` 会因跨 root 歧义 fail closed。派生版本还改为
   `.agents/skills` 默认路径、Python 标准库实现、48 KiB 资源边界、
-  WorkspaceLease/普通权限链语义，并移除会触发 Intatis SecretScanner 的
+  WorkspaceLease/普通权限链语义，并移除会触发 Mopelium SecretScanner 的
   credential-shaped 示例。
 - 没有复制上游 `agents/openai.yaml`、icon/image/品牌资产、其他系统 Skill
   或 Codex runtime。生成 `agents/openai.yaml` 只是 opt-in
-  cross-harness metadata；Intatis 只消费其中严格的 MCP dependency 子集，
+  cross-harness metadata；Mopelium 只消费其中严格的 MCP dependency 子集，
   interface/policy 字段不授予能力。
 - 完整文件级 provenance、上游 Git blob、修改摘要、执行边界和升级流程在
   `ThirdPartyNotices/OpenAICodexSkillCreator.md`；复用现有完整许可证
@@ -262,10 +262,10 @@ external-runtime 以独立 helper/process/service 运行上游实现
   `resource-loader.ts`。其实现校验 Agent Skills metadata、发现多类 root、
   把 catalog 放入 system prompt，并要求模型用通用 `read` 工具读取
   `SKILL.md` 与相对资源。
-- 两条对照均为 `reference`。Intatis 采用“专用激活 + 渐进披露”的结构判断，
+- 两条对照均为 `reference`。Mopelium 采用“专用激活 + 渐进披露”的结构判断，
   但没有复制两者的源码、prompt、测试或文案；同时明确不采用 Gemini 激活后
   扩大 workspace context、Pi 依赖 generic read/path 的读取方式。
-  `IntatisSkills` 只暴露 snapshot-bound `activate_skill` /
+  `MopeliumSkills` 只暴露 snapshot-bound `activate_skill` /
   `read_skill_resource`，不把 Skill 目录变成新权限根，也不以 `read_file`
   兜底。没有新增第三方分发物或依赖，因此 `NOTICE.md` 无需修改。
 
@@ -286,13 +286,13 @@ external-runtime 以独立 helper/process/service 运行上游实现
 - Linux CLI/MCP 图额外使用官方 `apple/swift-crypto 4.5.1`
   （commit `47d3869a7291f085c1fb9fb1e6d3b97a793f45c6`）的 `Crypto`
   product，替代 Linux 不存在的 CryptoKit；所有 root target dependency
-  都有 `.linux` 平台条件，macOS/iOS 继续只链接系统 CryptoKit。
+  都有 `.linux` 平台条件，macOS 继续只链接系统 CryptoKit。
   其传递闭包包括 `swift-asn1 1.7.1`，且 swift-crypto 内 vendored
   BoringSSL `0226f30467f540a3f62ef48d453f93927da199b6` 和 XKCP
   `11297f566178023faba59ff14b6b399241488283` 的完整许可证/NOTICE、
   精确来源和完整性散列均登记在 `ThirdPartyNotices/SwiftCrypto.md`
   与 `ThirdPartyNotices/Licenses/`；不得换成自制散列/加密 fallback。
-- 上游 `MCP` product 同时含 client/server API，不满足 Intatis
+- 上游 `MCP` product 同时含 client/server API，不满足 Mopelium
   client-only 边界。因此本地衍生包排除 `Server` actor、HTTP Server
   transports、conformance executables、paired in-memory/custom network
   transports 与 server-side OAuth publishing/validation types；只保留
@@ -315,7 +315,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 - 复用形式：公开 `tool_search` wire/history 合同、MCP 搜索文本字段和
   stdio schema cache 行为按 `derived` 登记；未采用 Codex MCP Server、
   UI、品牌资产、私有 prompt 或 Rust runtime。
-- Codex 固定使用 `bm25 2.3.2` 的 English default tokenizer。Intatis
+- Codex 固定使用 `bm25 2.3.2` 的 English default tokenizer。Mopelium
   对 scoring/embedder/tokenizer/Snowball/fxhash 做 Swift 派生实现，
   base64 封装 deunicode 1.6.2 未修改数据，并复制 stop-words 0.9.0 的
   179 项英文表。对应 MIT/BSD-3-Clause/Apache-2.0 来源、crate
@@ -331,10 +331,10 @@ external-runtime 以独立 helper/process/service 运行上游实现
 
 ## MCP 原生 HTTP transport 准入结论
 
-- `Packages/IntatisCurlTransport` 是 Intatis 自有的 C/Swift 边界实现；
+- `Packages/MopeliumCurlTransport` 是 Mopelium 自有的 C/Swift 边界实现；
   没有复制 curl、BoringSSL 或 zlib 源码。复用形式是 `dependency`：
   macOS 链接 Apple SDK/系统提供的 libcurl，Linux CLI 链接官方 Swift
-  Static Linux SDK 提供的静态 archive。iOS 不链接该 target。
+  Static Linux SDK 提供的静态 archive。
 - Apple 路径不 vendor 或随 App bundle 复制 Darwin libcurl；release
   必须用最终 App linkage/bundle inventory 复核这一点。Linux 路径会把
   实际使用的 object code 合入单文件静态 CLI，因此必须随 CLI 提供完整
@@ -399,13 +399,13 @@ external-runtime 以独立 helper/process/service 运行上游实现
   `OpenAICompatibleTranscriber.swift` = `e0d92850431e7f5cb99029e4a8c26c35df876fab389d3739402c44fa6a96d22b`，
   `TranscriptionAdapterRuntimeTests.swift` = `49fc745656792494374f0758d3d92860fe592ea115e1d4b8067ed3847ec35c1c`。
 - Flotis 根目录当前没有 `LICENSE` / `NOTICE`。本批不是把无许可证第三方代码作为开源上游准入；
-  用户在本任务中以两个本地项目所有者身份明确要求把该第一方兄弟项目实现迁入 Intatis。因此本批
+  用户在本任务中以两个本地项目所有者身份明确要求把该第一方兄弟项目实现迁入 Mopelium。因此本批
   仅在该明确第一方授权前提下按 `derived` 记录；若未来无法继续证明同一权利主体或授权范围，必须
   立即按“缺少许可证”规则停止升级/分发，不得把本记录冒充开放许可证。
 - 实际迁移范围是单模型 recorded-file 子系统：录音 format/settings、permission-pending generation、
   stop/cancel/temp cleanup、runtime configuration、普通文件/扩展/大小校验、disk-backed multipart、
   OpenRouter JSON-base64 `input_audio`、严格 JSON response 与对应 tests。Swift 文件头保留相邻来源说明；
-  Intatis 另外保留 exact `transcription_model`/adapter、credential lazy resolution、process-wide microphone
+  Mopelium 另外保留 exact `transcription_model`/adapter、credential lazy resolution、process-wide microphone
   lease、no-redirect provider runtime、bounded shutdown 和 composer draft-only 边界。
 - 明确未采用 Flotis 的多模型并发对比、候选选择、provider/语音设置页、floating panel、全局快捷键、
   review/clipboard、Accessibility 注入、InputMethodKit target、品牌、图标、文案或其他 provider/realtime
@@ -417,7 +417,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 ## 文档读取 external runtime 当前准入结论
 
 - DOCX/PPTX/XLSX/HTML/EPUB 普通读取明确采用 external runtime，不在
-  Intatis 内实现这些格式的语义 parser。固定入口是 Docling 2.117.0 的
+  Mopelium 内实现这些格式的语义 parser。固定入口是 Docling 2.117.0 的
   public `DocumentConverter`，结构遍历/范围 Markdown 序列化/语义导航分别
   使用 docling-core 2.89.0 的 `iterate_items`、`export_to_markdown` 与
   `HierarchicalChunker`；Swift/Python 宿主代码只负责 tool schema、源文件
@@ -426,7 +426,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
   Docling dict 投影。
 - exact direct pins、Heron model revision、model/tessdata SHA-256、JRE 与固定
   validator/runtime layout 位于
-  `Packages/IntatisTools/Runtime/document-runtime/release-spec.json`；来源、
+  `Packages/MopeliumTools/Runtime/document-runtime/release-spec.json`；来源、
   licenses、排除项和二进制分发边界位于
   `ThirdPartyNotices/DocumentReadingRuntime.md`，根 `NOTICE.md` 已登记实际
   采用项。Docling 代码是 MIT；Heron model 是 Apache-2.0；其余 Python、
@@ -450,7 +450,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
 
 ## rbook EPUB helper 当前准入结论
 
-- `Packages/IntatisTools/Runtime/rbook-helper` 是 Intatis 自有的窄 Rust
+- `Packages/MopeliumTools/Runtime/rbook-helper` 是 Mopelium 自有的窄 Rust
   connector，以 `dependency` + `external-runtime` 形式使用 crates.io
   `rbook 0.7.10`；实际 registry checksum 为
   `663ec1a8b0a945c8bb9c9912b1f8b328ba698a05165a81072e16604be019f45d`，
@@ -462,7 +462,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
   live route；旧 `operations[]` 不能作为通用文档写入层恢复。普通 EPUB read 已由固定 Docling
   high-level converter 承担，不经过 rbook helper。若未来要重新采用，必须先证明每个 model-facing
   tool 能一对一映射 rbook 的单一公开 API，并重新走 PermissionEngine、CapabilityLease、
-  WorkspaceLease、sandbox、staging、EPUBCheck 与原子提交；helper 不进入 iOS target。
+  WorkspaceLease、sandbox、staging、EPUBCheck 与原子提交。
 - `Cargo.toml` 对 rbook/serde/serde_json/zip 使用 exact pins，lockfile v4
   固定完整闭包及 crates.io checksum。当前解析闭包只有
   Apache-2.0、MIT、Zlib、0BSD、Unlicense 与 Unicode-3.0 等兼容条款，
@@ -482,7 +482,7 @@ external-runtime 以独立 helper/process/service 运行上游实现
   许可证闭包，因此本项不新增 `NOTICE.md` / `ThirdPartyNotices` 条目。
 - model-facing adapter 只接受 workspace `path`，宿主 service 只做有界字节搬运和 exact-session
   artifact 绑定；图片 type、完整性、尺寸与像素由 ImageIO resolver 验证。不得为了支持更多格式在
-  Intatis 内手写 parser，也不得在该通道叠加 OCR、编辑、缩放、格式转换、网络 fetch 或 fallback。
+  Mopelium 内手写 parser，也不得在该通道叠加 OCR、编辑、缩放、格式转换、网络 fetch 或 fallback。
 - 当前正向格式有意收窄为 PNG/JPEG，与 provider function-output image 和现有 durable model-history
   合同一致。扩展新格式必须先确认 provider 输入支持、系统 decoder 行为、资源上限和跨平台边界，
   不能仅靠文件扩展名放行。
@@ -491,5 +491,5 @@ external-runtime 以独立 helper/process/service 运行上游实现
 
 - 每个已采用上游维护一个 pinned commit 和本地 patch/translation 摘要。
 - 升级时先比较许可证、NOTICE、依赖和安全边界，再比较源码；不能只做版本号替换。
-- 上游的新权限默认、工具能力或网络/文件访问不能自动继承到 Intatis；必须重新映射到 CapabilityLease、WorkspaceLease 和 PermissionEngine。
+- 上游的新权限默认、工具能力或网络/文件访问不能自动继承到 Mopelium；必须重新映射到 CapabilityLease、WorkspaceLease 和 PermissionEngine。
 - 无法确认行为或许可证变化时标记 `UNKNOWN` 并停止合入，不得猜测。

@@ -2,7 +2,7 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Intatis derivative modification: native TextKit 2 inline-math attachments.
+//  Mopelium derivative modification: native TextKit 2 inline-math attachments.
 //
 
 import Foundation
@@ -15,13 +15,13 @@ import UIKit
 import AppKit
 #endif
 
-/// Dedicated attachment type for Intatis inline and display mathematics.
+/// Dedicated attachment type for Mopelium inline and display mathematics.
 ///
 /// The attachment crosses the parser-to-MainActor ownership boundary with
 /// scalar data only. A short-lived `MTMathUILabel` is used for layout preflight,
 /// while TextKit 2 owns the live label used for display.
 final class InlineMathAttachment: NSTextAttachment {
-  static let mimeType = "application/vnd.vita0818.intatis-inline-math+json"
+  static let mimeType = "application/vnd.vita0818.mopelium-inline-math+json"
   static let typeIdentifier: String = {
     guard let type = UTType(
       tag: mimeType,
@@ -38,7 +38,7 @@ final class InlineMathAttachment: NSTextAttachment {
 
   /// The attachment subclass owns its provider directly instead of installing
   /// a process-global provider for a broad public UTI. This also keeps the live
-  /// TextKit 2 path available in package-test hosts that do not export Intatis's
+  /// TextKit 2 path available in package-test hosts that do not export Mopelium's
   /// private UTI in their main-bundle Info.plist.
   override var usesTextAttachmentView: Bool {
     allowsTextAttachmentView && contents != nil
@@ -208,7 +208,7 @@ final class InlineMathAttachment: NSTextAttachment {
 
 /// Registers the dedicated TextKit 2 provider for one exact attachment type.
 ///
-/// Production uses the exact dynamic UTI derived from Intatis's unique MIME
+/// Production uses the exact dynamic UTI derived from Mopelium's unique MIME
 /// tag, so no broad public attachment type is ever registered process-wide.
 @MainActor
 func registerInlineMathAttachmentViewProvider(

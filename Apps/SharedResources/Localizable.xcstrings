@@ -1995,19 +1995,19 @@
         }
       }
     },
-    "Add the exact executable and launch closure, then run intatis mcp test before attaching it." : {
+    "Add the exact executable and launch closure, then run mopelium mcp test before attaching it." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Add the exact executable and launch closure, then run intatis mcp test before attaching it."
+            "value" : "Add the exact executable and launch closure, then run mopelium mcp test before attaching it."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "添加精确的可执行文件和启动闭包，然后在挂载前运行 intatis mcp test。"
+            "value" : "添加精确的可执行文件和启动闭包，然后在挂载前运行 mopelium mcp test。"
           }
         }
       }
@@ -11783,19 +11783,19 @@
         }
       }
     },
-    "Run intatis mcp doctor and resolve every bwrap or launch-artifact error." : {
+    "Run mopelium mcp doctor and resolve every bwrap or launch-artifact error." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Run intatis mcp doctor and resolve every bwrap or launch-artifact error."
+            "value" : "Run mopelium mcp doctor and resolve every bwrap or launch-artifact error."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "运行 intatis mcp doctor，并解决所有 bwrap 或启动产物错误。"
+            "value" : "运行 mopelium mcp doctor，并解决所有 bwrap 或启动产物错误。"
           }
         }
       }

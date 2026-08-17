@@ -2,7 +2,7 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Intatis derivative modification: optional LaTeX delimiter support.
+//  Mopelium derivative modification: optional LaTeX delimiter support.
 //
 
 /// Configuration for the package's optional LaTeX grammar extension.
@@ -10,7 +10,7 @@
 /// Math rendering is disabled by default. Enabling it recognizes the common
 /// inline `$...$` and `\(...\)` forms plus display `$$...$$` and `\[...\]`
 /// forms outside protected Markdown literals. Formula admission does not add
-/// Intatis-specific count or source-size limits.
+/// Mopelium-specific count or source-size limits.
 public struct MathRenderConfig: Hashable, Sendable {
   /// The math grammar selected for a parse request.
   public enum Mode: Hashable, Sendable {

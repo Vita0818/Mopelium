@@ -4,7 +4,7 @@ Scope: `Experiments/WebRendererParity` only.
 
 These npm dependencies are used as exact, package-manager-resolved
 `dependency` reuse. Nothing in this file declares them to be part of the
-Intatis macOS app, iOS app, CLI, SwiftPM graph, or product distribution. The
+Mopelium macOS app, iOS app, CLI, SwiftPM graph, or product distribution. The
 complete transitive package graph and integrity hashes are recorded in
 `package-lock.json`; `npm run licenses` inventories the installed graph and
 fails on licenses outside the experiment allowlist.

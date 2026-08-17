@@ -1,6 +1,6 @@
 # Open Knowledge Format v0.2
 
-Intatis adopts a byte-exact copy of the self-contained Open Knowledge Format
+Mopelium adopts a byte-exact copy of the self-contained Open Knowledge Format
 (OKF) v0.2 specification as a third-party standard baseline for portable
 knowledge content. This adoption does not include or execute the upstream
 reference implementation.
@@ -29,7 +29,7 @@ Included:
 
 - the self-contained `okf/SPEC.md` document;
 - the upstream Apache-2.0 `okf/LICENSE.md` text;
-- Intatis-authored provenance and checksum records.
+- Mopelium-authored provenance and checksum records.
 
 Excluded:
 
@@ -37,7 +37,7 @@ Excluded:
 - public prompts, samples, example data bundles, viewers, HTML, CSS, and JavaScript;
 - executors, attesters, connectors, hosted services, and brand assets.
 
-Intatis' OKF RAG Profile, validator, snapshot store, indexes, and tool
+Mopelium's OKF RAG Profile, validator, snapshot store, indexes, and tool
 contracts are separately authored integration code. They do not modify the
 pinned specification and do not claim that OKF itself defines embeddings,
 vector indexes, reranking, access control, or a RAG runtime.

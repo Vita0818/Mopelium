@@ -1,13 +1,13 @@
 # AI_PROVIDER_MODEL_CONFIGURATION
 
 文档状态：当前 AI 配置操作合同
-最后核对：2026-08-14
-产品代码基线：Intatis v0.10（build 49；来源 commit 标题 v0.54）
+最后核对：2026-08-17
+产品代码基线：Mopelium v0.10（build 49；Intatis 来源 commit 标题 v0.54）
 
 ## 1. 适用范围
 
-本文面向维护 Mopelium 的 AI coding / operations agent。Mopelium 是显示品牌；provider、model、
-variant、catalog、agent binding、CLI 和配置发现继续使用当前 Intatis 后端身份。
+本文面向维护 Mopelium 的 AI coding / operations agent。provider、model、variant、catalog、
+agent binding、CLI 和配置发现均使用 Mopelium canonical identity。
 
 处理以下事项前必须先读本文：
 
@@ -16,32 +16,32 @@ variant、catalog、agent binding、CLI 和配置发现继续使用当前 Intati
 - 配置 Cowork 不同 agent 的 exact profile；
 - 排查配置刷新、现有 agent binding 或 CLI/macOS 解析差异。
 
-本文不授权 AI 获取、查看、迁移或输出真实 API key，也不授权把 `INTATIS_*`、`intatis.json`、
-Intatis 类型或 durable identity 重命名为 Mopelium。产品品牌边界见
+本文不授权 AI 获取、查看、迁移或输出真实 API key，也不授权绕过本文件定义的
+canonical/legacy 优先级、复制配置树或改写 durable binding。产品身份边界见
 `MOPELIUM_PRODUCT_DIRECTION.md`。
 
-## 2. 内部身份保持 Intatis
+## 2. Canonical Mopelium identity
 
 当前规范名称为：
 
-- 配置文件：`intatis.json` / `intatis.jsonc`；
-- 配置选择：`INTATIS_CONFIG`；
-- CLI override：`INTATIS_MODEL`、`INTATIS_BASE_URL`、`INTATIS_API_KEY`、
-  `INTATIS_REASONING`；
-- CLI：`intatis`；
-- GUI catalog 与 storage key：源码中现有 `intatis.*` identity；
-- Swift target/type/path：`Apps/Intatis*`、`Packages/Intatis*`。
+- 配置文件：`mopelium.json` / `mopelium.jsonc`；
+- 配置选择：`MOPELIUM_CONFIG`；
+- CLI override：`MOPELIUM_MODEL`、`MOPELIUM_BASE_URL`、`MOPELIUM_API_KEY`、
+  `MOPELIUM_REASONING`；
+- CLI：`mopelium`；
+- GUI catalog 与 storage key：源码中现有 `mopelium.*` identity；
+- Swift target/type/path：`Apps/Mopelium*`、`Packages/Mopelium*`。
 
-不得为显示 Mopelium 品牌创建 `mopelium.json`、`MOPELIUM_*`、`mopelium` CLI 或一套
-`MopeliumProviders` / `MopeliumCowork` 镜像。任何内部 identity 迁移都必须由用户单独授权，
-并完整评估旧配置、session、catalog、Bundle、CLI 和 durable compatibility。
+这些名称是同一套 runtime 的当前身份，不是镜像。旧 `INTATIS_*`、`intatis.json[c]`、
+`~/.config/intatis/` 和旧 adapter/raw values 只由显式 legacy reader/decoder 接受；新写入和
+模板只能生成 Mopelium。canonical 值存在但非法时必须 fail closed，不能回退旧值。
 
 ## 3. Profile 定义与 Agent 绑定
 
 必须使用以下心智模型：
 
 ```text
-intatis.json/jsonc
+mopelium.json/jsonc
   -> mutable provider/model/variant definitions
   -> immutable InferenceCatalog connection/profile revisions
   -> durable AgentInferenceBinding for each Cowork agent
@@ -62,7 +62,7 @@ top-level permission_reviewer_model
   配置解析层一次性继承同一 JSON 文档的顶层 `model`；显式空值、错误类型、无法解析的 route，
   或所选配置整体损坏/不可读，都必须让 reviewer fail closed。
 - reviewer 不能回退到 UI/UserDefaults selection、session default、live/historical `@main`、
-  `INTATIS_MODEL` 或 ordinary-agent rebind；当前产品也没有 reviewer model picker。
+  `MOPELIUM_MODEL` 或 ordinary-agent rebind；当前产品也没有 reviewer model picker。
 - GoalVerifier 另行冻结首个可解析的 exact `@main` binding；它与 reviewer 是两个独立控制面，
   均不参与普通 agent rebind，也不能互相替代。
 - `spawn_agent` 未显式指定 profile 时精确继承 issuer binding，不重新读取 current default。
@@ -74,13 +74,13 @@ permission audit 或 task snapshot，也不得猜测 opaque profile/connection/r
 
 ### 4.1 当前运行时事实
 
-当前 Intatis runtime 的 compatibility surface 包含 environment、file、auth JSON 和 provider-config
-reference；macOS/iOS 设置入口也可能把用户主动输入的 secret 写入其受控配置/auth 文件。准确行为
-以 `Apps/IntatisMac/Sources/Keychain.swift`、`Apps/IntatisiOS/Sources/Keychain.swift`、
-`Packages/IntatisProviders/Sources/Endpoints.swift` 和对应测试为准。
+当前 Mopelium runtime 的 compatibility surface 包含 environment、file、auth JSON 和 provider-config
+reference；macOS 设置入口也可能把用户主动输入的 secret 写入其受控配置/auth 文件。准确行为
+以 `Apps/MopeliumMac/Sources/Keychain.swift`、
+`Packages/MopeliumProviders/Sources/Endpoints.swift` 和对应测试为准。
 
-显示品牌决定不改变这套 resolver，也不自动迁移既有用户配置。不得把 runtime compatibility
-误写成“当前源码只支持环境变量”。
+旧路径兼容不改变 resolver 的 secret 边界，也不授权 AI 读取或复制 secret。不得把 runtime
+compatibility 误写成“当前源码只支持环境变量”。
 
 ### 4.2 本仓库 AI 的安全写入规则
 
@@ -101,25 +101,30 @@ AI 仍采用更严格的操作纪律：
 
 macOS 当前顺序：
 
-1. `INTATIS_CONFIG`；
-2. `~/.config/intatis/intatis.json`；
-3. `~/.config/intatis/intatis.jsonc`；
-4. Application Support 下的 `intatis.json` / `intatis.jsonc`；
-5. Intatis-owned legacy `config.json` / `config.jsonc` fallback。
+1. `MOPELIUM_CONFIG`；
+2. `~/.config/mopelium/mopelium.json`；
+3. `~/.config/mopelium/mopelium.jsonc`；
+4. Application Support 下的 `mopelium.json` / `mopelium.jsonc`；
+5. Mopelium-owned `config.json` / `config.jsonc` fallback；
+6. 只有前述 canonical 候选都不存在时，才读取 `INTATIS_CONFIG`、
+   `~/.config/intatis/intatis.json[c]`、旧 `config.json[c]` 或迁移后 App Support 中的旧文件名。
 
-CLI modern config 同样优先使用 `INTATIS_CONFIG` 和 Intatis-owned modern paths；精确候选以
-`Apps/intatis-cli/Sources/CLIProviderCatalog.swift` 为准。
+任一优先级更高的 canonical 文件存在但损坏/不可读时不得继续寻找 legacy 文件。
+
+CLI modern config 同样优先使用 `MOPELIUM_CONFIG` 和 Mopelium-owned modern paths；精确候选以
+`Apps/mopelium-cli/Sources/CLIProviderCatalog.swift` 为准。
 
 排障时还要检查以下非秘密 override 是否存在：
 
-- `INTATIS_MODEL`；
-- `INTATIS_BASE_URL`；
-- `INTATIS_REASONING`。
+- `MOPELIUM_MODEL`；
+- `MOPELIUM_BASE_URL`；
+- `MOPELIUM_REASONING`。
 
-`INTATIS_API_KEY` 是 legacy/direct CLI secret 输入，只能检查变量是否存在，不得读取、比较或输出
-其值。新建 modern provider config 时仍优先使用 `options.apiKey: "{env:NAME}"` 的显式引用。
+`MOPELIUM_API_KEY` 是 direct CLI secret 输入；`INTATIS_API_KEY` 只是 canonical 值缺失时的 legacy
+alias。两者都只能检查变量是否存在，不得读取、比较或输出其值。新建 modern provider config 时
+仍优先使用 `options.apiKey: "{env:NAME}"` 的显式引用。
 
-不得同时修改所有候选配置，也不得为了 Mopelium 显示品牌复制一份新配置树。
+不得同时修改所有候选配置，也不得把 legacy reader 变成双写配置树。
 
 ## 6. 推荐配置形状
 
@@ -199,7 +204,7 @@ Cowork 已支持。
 
 通用顺序：
 
-1. 确定唯一实际生效的 Intatis config；
+1. 确定唯一实际生效的 Mopelium config；
 2. 做最小、无秘密的结构修改；
 3. 触发 catalog refresh 或重启 CLI；
 4. 从安全 UI 或 `/profiles` 获取真实 profile ID；
@@ -246,13 +251,13 @@ Cowork 建设，并不意味着删除 Chat/Code 的解析兼容或复制一套 C
 标准 JSON 只检查 parse exit status，不回显内容：
 
 ```sh
-python3 -m json.tool /absolute/path/to/intatis.json >/dev/null
+python3 -m json.tool /absolute/path/to/mopelium.json >/dev/null
 ```
 
-JSONC 必须使用 Intatis loader/catalog refresh 验证。CLI 的无网络配置摘要可使用：
+JSONC 必须使用 Mopelium loader/catalog refresh 验证。CLI 的无网络配置摘要可使用：
 
 ```sh
-INTATIS_CONFIG=/absolute/path/to/intatis.json swift run intatis config
+MOPELIUM_CONFIG=/absolute/path/to/mopelium.json swift run mopelium config
 ```
 
 完整 Cowork catalog 验证通过 macOS refresh 或已获准 session 的 `/profiles`。验证 reviewer 时还必须
@@ -261,7 +266,7 @@ INTATIS_CONFIG=/absolute/path/to/intatis.json swift run intatis config
 网络请求，必须先确认用户授权范围。
 
 修改解析源码或 durable option schema 时至少运行相关 focused tests；只改用户配置时不要把离线
-`intatis selftest` 冒充真实 provider E2E。
+`mopelium selftest` 冒充真实 provider E2E。
 
 ## 11. 报告合同
 
@@ -282,15 +287,15 @@ SECRETS_EXPOSED=NO
 
 ## 12. 当前源码事实源
 
-- `Apps/IntatisMac/Sources/AppConfig.swift`
-- `Apps/IntatisMac/Sources/Keychain.swift`
-- `Apps/IntatisMac/Sources/AppInferenceCatalog.swift`
-- `Apps/intatis-cli/Sources/CLIConfig.swift`
-- `Apps/intatis-cli/Sources/CLIProviderCatalog.swift`
-- `Apps/intatis-cli/Sources/CLIInferenceProfiles.swift`
-- `Packages/IntatisProviders/Sources/Endpoints.swift`
-- `Packages/IntatisProviders/Sources/InferenceCatalog.swift`
-- `Packages/IntatisProtocol/Sources/InferenceProfile.swift`
-- `Packages/IntatisCowork/Sources/Orchestrator.swift`
-- `Packages/IntatisCowork/Sources/PermissionReviewControlPlane.swift`
+- `Apps/MopeliumMac/Sources/AppConfig.swift`
+- `Apps/MopeliumMac/Sources/Keychain.swift`
+- `Apps/MopeliumMac/Sources/AppInferenceCatalog.swift`
+- `Apps/mopelium-cli/Sources/CLIConfig.swift`
+- `Apps/mopelium-cli/Sources/CLIProviderCatalog.swift`
+- `Apps/mopelium-cli/Sources/CLIInferenceProfiles.swift`
+- `Packages/MopeliumProviders/Sources/Endpoints.swift`
+- `Packages/MopeliumProviders/Sources/InferenceCatalog.swift`
+- `Packages/MopeliumProtocol/Sources/InferenceProfile.swift`
+- `Packages/MopeliumCowork/Sources/Orchestrator.swift`
+- `Packages/MopeliumCowork/Sources/PermissionReviewControlPlane.swift`
 - `docs/PER_AGENT_INFERENCE_PROFILES.md`

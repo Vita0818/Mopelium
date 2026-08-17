@@ -1,6 +1,6 @@
 # External MCP HTTP transport third-party notices
 
-This notice covers the native `IntatisCurlTransport` dependency used by the
+This notice covers the native `MopeliumCurlTransport` dependency used by the
 external MCP Server **client**. It does not cover an MCP Server implementation,
 and it does not authorize any server target, server binary, server protocol
 handler, or hosting API.
@@ -9,21 +9,21 @@ handler, or hosting API.
 
 ### Apple platforms
 
-`Package.swift` links `IntatisCurlTransport` with `.linkedLibrary("curl")`.
+`Package.swift` links `MopeliumCurlTransport` with `.linkedLibrary("curl")`.
 For the macOS DeveloperID and App Store products this resolves to the libcurl
-provided by the Apple SDK/operating system. Intatis does not vendor a Darwin
+provided by the Apple SDK/operating system. Mopelium does not vendor a Darwin
 libcurl archive or copy libcurl into an App bundle. This system-library use is
 therefore recorded for build provenance, but it does not add a separately
 redistributed libcurl payload to the Apple application.
 
-The iOS product does not link `IntatisMCP` or `IntatisCurlTransport`.
+The current product graph has no second App target; MCP HTTP transport is macOS/Linux only.
 
 ### Linux CLI
 
 The Linux CLI is built with the official Swift Static Linux SDK. Static
 linking means the required object code is incorporated into the distributed
 CLI executable, so the following component notices must remain readable with
-that executable even though Intatis does not redistribute the SDK archives as
+that executable even though Mopelium does not redistribute the SDK archives as
 standalone files.
 
 - Official artifact:
@@ -66,7 +66,7 @@ claim that the archives contain an OpenSSL 3.x distribution.
 | zlib | SBOM and `zlib.h`: `1.3.1`; Swift recipe checkout: tag `v1.3.1`, commit `51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf`; license `Zlib` | Preserve the zlib notice; do not misrepresent origin or an altered source |
 
 The SDK SBOM's generic `MIT` label for curl conflicts with curl's own shipped
-pkg-config SPDX identifier. Intatis resolves that ambiguity in the
+pkg-config SPDX identifier. Mopelium resolves that ambiguity in the
 license-holder-favorable direction by distributing the upstream `curl`
 license rather than weakening it to a generic MIT label.
 

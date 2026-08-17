@@ -7,15 +7,14 @@
 
 ## 唯一事实源
 
-Intatis 的产品版本由根目录 `project.yml` 的两项全局设置唯一决定：
+Mopelium 的产品版本由根目录 `project.yml` 的两项全局设置唯一决定：
 
 - `MARKETING_VERSION`：用户可见的产品版本；
 - `CURRENT_PROJECT_VERSION`：单调递增的构建号。
 
-XcodeGen 生成的工程、macOS/iOS App 的最终 `Info.plist`、诊断导出和发行文件名都必须
-从这两个值派生。`Apps/IntatisMac/Info.plist` 与 `Apps/IntatisiOS/Info.plist` 当前不是
-XcodeGen shipping target 的输入，但作为仓库参考文件也必须保持相同值，避免搜索和人工
-检查得到冲突答案。
+XcodeGen 生成的工程、macOS App 的最终 `Info.plist`、诊断导出和发行文件名都必须
+从这两个值派生。`Apps/MopeliumMac/Info.plist` 当前不是 XcodeGen shipping target 的输入，
+但作为仓库参考文件也必须保持相同值，避免搜索和人工检查得到冲突答案。
 
 Git commit 标题中的 `v0.x` 只记录里程碑，不是版本事实源；仓库当前没有 Git tag。
 历史设计文档中的 v0.10、v0.12、v0.16 等表示当时引入能力或冻结证据的版本，不应批量
@@ -34,12 +33,12 @@ version 调整而回退。
 每次版本变化必须作为同一个改动完成：
 
 1. 修改 `project.yml` 中的 `MARKETING_VERSION` 与 `CURRENT_PROJECT_VERSION`；
-2. 同步两个仓库参考 `Info.plist`；
+2. 同步 macOS 仓库参考 `Info.plist`；
 3. 更新 `README.md`、`docs/README.md`、`docs/CURRENT_STATE.md` 和
    `docs/PROJECT_MAP.md` 的当前基线；
 4. 运行 `xcodegen generate`；
 5. 运行 `scripts/check-version-consistency.sh`；
-6. 构建 macOS/iOS shipping target，并从最终 App bundle 读取
+6. 构建 `MopeliumMac` shipping target，并从最终 App bundle 读取
    `CFBundleShortVersionString` / `CFBundleVersion`；
 7. 直分发时只允许 `scripts/package-macos-release.sh` 使用最终 bundle 元数据命名产物。
 

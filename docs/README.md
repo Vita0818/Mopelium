@@ -1,24 +1,25 @@
-# Intatis 文档索引
+# Mopelium 文档索引
 
 当前产品基线：**v0.10**（build 49）
-最近核对：2026-08-16
+最近核对：2026-08-17
 
 这个索引区分“当前规范”和“历史证据”。版本、产品状态或下一步判断只允许从当前规范
 读取；带旧版本号的历史文件保留用于解释迁移和兼容性，不能覆盖当前源码。
 
 ## Mopelium 项目覆盖层
 
-当前仓库直接采用 Intatis 快照作为活动源码，但保留以下项目专属文档：
+当前仓库以 `SNAPSHOT.md` 固定的 Intatis 来源为 provenance，活动源码与构建 identity 已原位迁移为 Mopelium：
 
 | 文档 | 权威范围 |
 |---|---|
 | 根 `SNAPSHOT.md` | 来源 exact commit、复制/排除范围、gitlink 和刷新规则 |
-| `MOPELIUM_PRODUCT_DIRECTION.md` | Mopelium 显示品牌边界、Cowork-only 新功能方向、Chat/Code 保留规则 |
+| `MOPELIUM_PRODUCT_DIRECTION.md` | Mopelium 产品面、canonical/legacy identity、Cowork-only 新功能方向 |
+| `MOPELIUM_INTERNAL_IDENTITY_MIGRATION.md` | 内部身份迁移映射、兼容合同、执行清单和完成定义 |
 | `AI_PROVIDER_MODEL_CONFIGURATION.md` | 维护本项目时的 provider/model/variant 与凭据操作合同 |
 | `INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md` | 历史迁移审计；不是当前实现计划或事实源 |
 
 根 `AGENTS.md` 是本仓库的操作入口。两份 `Codex-report/` 事故报告也作为项目历史证据保留。
-若覆盖层历史材料与当前源码、构建配置或下方 Intatis 当前规范冲突，以源码/配置和当前规范为准；
+若覆盖层历史材料与当前源码、构建配置或下方 Mopelium 当前规范冲突，以源码/配置和当前规范为准；
 产品方向冲突则以 `MOPELIUM_PRODUCT_DIRECTION.md` 为准。
 
 ## 当前规范
@@ -37,7 +38,7 @@
 | `COWORK_PRINCIPLES.md` | 当前 Cowork/AgentKernel 编排原则 |
 | `PER_AGENT_INFERENCE_PROFILES.md` | per-agent exact inference binding 契约 |
 | `CURRENT_UI_COLOR_SYSTEM.md` | 当前 Apple 原生表面与 Liquid Glass 规范 |
-| `NEXT_TARGET.md` | 来源快照携带的 Intatis 上游发行目标；当前明确不是 Mopelium 活跃目标 |
+| `NEXT_TARGET.md` | 来源快照携带的 Mopelium 上游发行目标；当前明确不是 Mopelium 活跃目标 |
 
 根 `README.md` 是产品入口；根 `ARCHITECTURE.md` 仅为兼容链接，架构正文只维护在
 `docs/ARCHITECTURE.md`。`AGENTS.md` 及 Claude/Gemini shims 是操作政策，不表达产品版本。
@@ -51,7 +52,7 @@
 - `.agents/skills/` 下的文档：项目级 skill 说明；
 - `codex-report/`、`claude-report/`、`gemini-report/`：按日期冻结的执行报告。
 
-这些资料保留自己的规则、依赖版本或历史日期。不得为追齐 Intatis marketing version 而
+这些资料保留自己的规则、依赖版本或历史日期。不得为追齐 Mopelium marketing version 而
 批量替换其中的版本数字。
 
 ## 历史设计与验证

@@ -9,9 +9,9 @@ const manifest = JSON.parse(
   await readFile(join(directory, "scenario-manifest.json"), "utf8")
 );
 const runner = join(directory, "node_modules", ".bin", "conformance");
-const client = process.env.INTATIS_MCP_CONFORMANCE_CLIENT;
+const client = process.env.MOPELIUM_MCP_CONFORMANCE_CLIENT;
 if (!client) {
-  throw new Error("INTATIS_MCP_CONFORMANCE_CLIENT is required");
+  throw new Error("MOPELIUM_MCP_CONFORMANCE_CLIENT is required");
 }
 if (
   manifest.schemaVersion !== 1 ||

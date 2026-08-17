@@ -1,7 +1,7 @@
 # ARCHITECTURE
 
 文档状态：当前架构规范
-最近核对：2026-08-15
+最近核对：2026-08-17
 产品基线：v0.10（build 49）
 
 文中较早的 v0.x 只表示能力最初引入或兼容格式冻结的里程碑；除明确标为历史的段落外，
@@ -9,17 +9,36 @@
 
 ## macOS 发行架构边界
 
-macOS 唯一发行 App 是 Developer ID 签名、公证和直接分发的 `IntatisMac`。
+macOS 唯一发行 App 是 Developer ID 签名、公证和直接分发的 `MopeliumMac`。
 Mac App Store / App Sandbox 不再是产品架构分支；不得为了它裁剪本地
 terminal、Git、global Skills、stdio MCP、浏览器 helper 或其他 Code/Cowork
-能力。源码中的 `IntatisMacAppStore`、`.macAppStore` 与对应 entitlements
-仅是遗留实现，不属于当前产品矩阵或默认验收。完整决策见
+能力。`MopeliumMacAppStore` target 与对应 entitlements 已从构建图删除；
+`.macAppStore` 只允许保留为旧数据/最受限能力信封兼容值。完整决策见
 [`MACOS_DISTRIBUTION.md`](MACOS_DISTRIBUTION.md)。
 
 这里取消的只是 Mac App Store App Sandbox 产品约束。PermissionEngine、
 Capability/WorkspaceLease、PathConfinement、SecretScanner、durable execution、
 managed terminal 的 workspace-scoped Seatbelt/default-network-deny、
-Hardened Runtime、签名/公证与 iOS target 边界仍是当前架构。
+Hardened Runtime、签名/公证与“不得重新创建第二 App 产品图”仍是当前架构。
+
+## 2026-08-17 Mopelium internal identity migration
+
+构建图、源码目录、project-owned 类型、App、CLI、配置和新 protocol output 已原位迁移到 Mopelium；
+同一 runtime 没有 fork。`MopeliumCore.ApplicationSupportIdentityMigrator` 在 App/CLI composition
+root 的任何 session/config owner 创建前运行：它以 owner-only stable lock 串行化，canonical 根缺失时
+只对安全 legacy Intatis root 做同父目录 atomic rename，并复核 device/inode 与目录 durability；dual-root、
+leaf symlink、foreign/unsafe mode 或不确定提交 fail closed。EventLog/session/config/runtime bytes 不重新编码。
+
+macOS UserDefaults 只按 allowlist 从旧 bundle domain 导入 provider catalog/selection、workspace、Cowork
+settings 与 renderer mode；新 key 已存在时不覆盖。config/env/auth 使用 canonical-first candidate selection；
+只有 canonical 完全缺失时才读 predecessor 值，选中的 canonical 文件损坏不会触发 legacy fallback。
+Provider adapter 对三个旧 project-owned raw values做窄 canonicalization，unknown identity 仍 byte-exact。
+
+fresh tool registries 为 `mopelium.standard.v8` / `mopelium.cowork.v8`；automatic review sidecar 为
+`__mopelium_authorization_context`。旧 durable registry strings 继续由 additive Codable 读取，但 exact
+authorization/registry mismatch 仍 fail closed，不能借 namespace alias 执行。旧 config/Knowledge paths
+继续加入安全 deny floor；已有 `.intatis/git-worktrees` 仅按 Git metadata 验证后识别，新创建使用
+`.mopelium/git-worktrees`。browser/Knowledge 深层状态没有安全 drain/lock 证明时不自动移动。
 
 ## 2026-08-10 模型驱动 Knowledge 工具架构
 
@@ -82,7 +101,7 @@ grounding revalidation 完成，并在 augmenter close/shutdown 时 revoke、can
 Host augmentation 的关闭是 checked contract：timeout 后仍有 active access 时返回失败，Code/Cowork/
 CLI 不得把它吞成正常 completion；runtime shutdown 继续报告该 drain failure，并保留 fail-closed 状态。
 
-发布布局使用 `.intatis-rag-store.json`、`.intatis-rag-snapshots/` 和 `.intatis-rag-host/`。三者是
+发布布局使用 `.mopelium-rag-store.json`、`.mopelium-rag-snapshots/` 和 `.mopelium-rag-host/`。三者是
 WorkspaceLease 与 managed terminal 的不可移除、大小写无关 deny floor，因此普通 file/patch/Git/
 process/terminal 即使拿到 workspace read-write 也不能改写或删除已发布内容。只有 Knowledge module
 内部从同一 exact lease 派生的最小 managed-content projection 可进入 writer/Validator 路径。旧
@@ -108,7 +127,7 @@ nDCG@5 回退。该结果必须保留，不能把“required reranker 被调用�
 surface 已由上节和 `codex-report/08_10_26-16_57-model-driven-knowledge-tools-design.md` 覆盖。
 
 08-09 第一版知识库设计保持四组件边界：仓内固定的 Open Knowledge Format v0.2 文档、
-`IntatisKnowledge` 的薄 Profile/build adapter、同 target 内不调用模型的
+`MopeliumKnowledge` 的薄 Profile/build adapter、同 target 内不调用模型的
 deterministic Validator，以及唯一 model-facing `search_knowledge` 工具。外部知识连接器、
 PDF/Office/OCR 解析、建库 UI、Chat/iOS 接入和 MCP Server 都不属于该组件；它们不能被
 `search_knowledge` 在查询时隐式执行。
@@ -131,8 +150,8 @@ workspace 内 OKF draft
   -> final answer 前重开 exact handle/snapshot 并机械重验 citation
 ```
 
-知识正文仍是普通 OKF Markdown/YAML；`.intatis-rag/profile.json`、`chunks.jsonl`、
-dense/lexical index、checksums 和 store pointer 都是 Intatis 派生合同。Profile 冻结完整
+知识正文仍是普通 OKF Markdown/YAML；`.mopelium-rag/profile.json`、`chunks.jsonl`、
+dense/lexical index、checksums 和 store pointer 都是 Mopelium 派生合同。Profile 冻结完整
 embedding compatibility identity（model/revision/tokenizer/runtime binding/dimension/scalar/
 quantization/pooling/L2/cosine/document+query instruction/max input/truncation）、component
 revision、chunk manifest、retrieval policy、reranker binding 和 composite snapshot revision。
@@ -140,7 +159,7 @@ revision、chunk manifest、retrieval policy、reranker binding 和 composite sn
 
 08-09 P0 local route 使用 Apple NaturalLanguage sentence embedding 的 exact language/revision/
 dimension/runtime binding，向量在写入与查询时按冻结 L2/cosine 合同验证；存储为 Swift
-`Float32` exact KNN JSON。lexical route 使用 Intatis 多语言/代码 tokenizer 与 BM25，融合使用
+`Float32` exact KNN JSON。lexical route 使用 Mopelium 多语言/代码 tokenizer 与 BM25，融合使用
 deterministic RRF。`KnowledgeEmbeddingCosineRerankerProvider` 是可选的最小本地 reranker，
 明确不是 cross-encoder；required runtime 缺失时 fail closed，optional 缺失时结构化返回
 `rerank_applied=false`。remote embedding/reranker 只有 host 把 registration 标为 network-backed
@@ -160,7 +179,7 @@ path、provider、model、backend、credential 或 ACL；单库 knowledge handle
 Code/Cowork 通过 generic `HostToolRegistryAugmenter` opt in；host 传 store path、exact session/
 agent/task/capability/workspace leases，并取得 query-owned mount lease。默认 augmenter 为 `nil`，
 因此普通 Code/Cowork 不暴露该工具；Chat 继续使用无工具 `ChatLoop`，iOS 依赖图继续不含
-`IntatisKnowledge`。截至 08-09，CLI call site 仍不构造 adapter，也没有 mount command；这些
+`MopeliumKnowledge`。截至 08-09，CLI call site 仍不构造 adapter，也没有 mount command；这些
 产品接线已由上节的 08-10 实现替代。工具调用仍经过 ToolRegistry、CapabilityLease、WorkspaceLease、三层权限门和
 durable prepared/result/settled 事件，不存在 Knowledge 私有执行旁路。
 
@@ -186,7 +205,7 @@ Validator 不声称证明现实世界真伪或自然语言蕴含。
 
 automatic Cowork 不再在业务 tool call 之后二次调用 acting model。主模型第一次看到完整任务上下文时，
 如果选择业务 function call，必须在同一个 arguments object 内同时输出 string
-`__intatis_authorization_context`。宿主仅在 deterministic gate 实际进入 Cowork automatic ask 时消费并验证这条
+`__mopelium_authorization_context`。宿主仅在 deterministic gate 实际进入 Cowork automatic ask 时消费并验证这条
 字符串；deterministic allow/deny 忽略它。sidecar 只应简述相关用户意图、进展或证据，以及为什么
 这个 exact action 有必要。它是主模型的未信任语义解释，不是授权事实。
 
@@ -194,7 +213,7 @@ automatic Cowork 不再在业务 tool call 之后二次调用 acting model。主
 acting model request (once)
   -> business tool name
   + complete business arguments
-  + per-call __intatis_authorization_context
+  + per-call __mopelium_authorization_context
   -> host uniquifies/binds call ID and splits the two views
      -> stripped canonical business args
         -> original schema validation
@@ -301,7 +320,7 @@ truncated。unified log、proxy、hang、crash 或某个 session 读取失败时
 并把失败写入 `manifest.json` / `collection-errors.json`。临时目录、成员文件和最终 ZIP
 均为 owner-only，拒绝 symlink/hardlink 形状；进程 runner 使用绝对可执行路径、最小
 环境、并发 bounded stdout/stderr drain、timeout/cancel 和 TERM/KILL 清理。该功能不
-新增或修改 EventLog schema，不进入 iOS target，也不改变 PermissionEngine 或运行时
+新增或修改 EventLog schema，不创建第二 App target，也不改变 PermissionEngine 或运行时
 权限决策。
 
 ## 2026-08-02 自动权限瞬时故障恢复边界
@@ -327,7 +346,7 @@ byte”简写在 tool-calling 路径上的精确解释；普通 Chat streaming �
 稳定模型线程不再无限回放所有历史 item。稳定 Code conversation 与 Cowork
 `@main` 在 exact model context policy 可证明时，按 Codex 的本地
 replacement-history 结构执行
-pre-turn / mid-turn 压缩，同时保留 Intatis 的 EventLog-first 持久化：
+pre-turn / mid-turn 压缩，同时保留 Mopelium 的 EventLog-first 持久化：
 
 ```text
 complete-known EventLog replay
@@ -398,8 +417,8 @@ world-state patch/rollback/fork；这些不能被当前主链表述为全量 Cod
 
 ## 2026-07-27 Code / Cowork Skill capability
 
-`IntatisSkills` 把 Skill 建模为有界上下文能力，不是新的执行权限。生产链路按
-Codex 的 catalog → activation → progressive resources 三层组织，但由 Intatis
+`MopeliumSkills` 把 Skill 建模为有界上下文能力，不是新的执行权限。生产链路按
+Codex 的 catalog → activation → progressive resources 三层组织，但由 Mopelium
 独立实现并继续服从现有安全边界：
 
 ```text
@@ -435,7 +454,7 @@ workspace roots 是从 agent workspace 到 current directory 的
 `.agents/skills`（当前 host 的 current directory 等于该 exact workspace）。
 DeveloperID/CLI 显式开启 Codex-compatible user/legacy/system/admin roots；
 遗留 App Store target 的 workspace-only 分支不再构成产品约束。iOS 不链接
-`IntatisSkills`。Skill tool 不增加 `ToolCapability`，不授予 filesystem、
+`MopeliumSkills`。Skill tool 不增加 `ToolCapability`，不授予 filesystem、
 shell、network、MCP、communication 或 delegation；Skill 中描述的任何动作仍
 只能使用当次请求真实出现的普通工具。`read_file` 不作为 Skill 读取兜底，
 resource 只能以 opaque Skill ID + relative frozen path 读取。
@@ -455,7 +474,7 @@ catalog 预算，也没有 ext/skills 路径的额外 4k cap。renderer
 只把 Skill metadata 行计入该预算，trusted developer envelope 不计；冻结
 snapshot 保存不含名称、路径或正文的 kept/omitted/truncated count metrics 与
 warning，catalog 自身保留 omitted marker。metrics/warning 目前没有
-App/CLI/EventLog consumer，renderer 也保持 Intatis 的公平截断实现，并非 Codex
+App/CLI/EventLog consumer，renderer 也保持 Mopelium 的公平截断实现，并非 Codex
 逐字节同构。
 
 可选 `agents/openai.yaml` 只解析有界的 `dependencies.tools` MCP 子集。无歧义
@@ -465,17 +484,17 @@ request-owned snapshot。只有其中 exact server ID 与
 transport-locator fingerprint 成对匹配，正文/资源才可披露；没有 MCP host、
 无效 metadata、同名 server 改 endpoint 或 live/config-only 状态均 fail
 closed。snapshot 只携带 server/tool identifiers 与不可逆 locator fingerprint，
-不携带 endpoint、command、header、credential 或 query。Intatis 当前不实现
+不携带 endpoint、command、header、credential 或 query。Mopelium 当前不实现
 Codex 的 Install/Continue-anyway、OAuth、外部配置持久化和 runtime refresh，
 这是有意保持的更窄边界，而不是隐式兜底。production availability 只从该请求
 经过 capability/policy 过滤后的 `MCPAgentToolCatalogView.entries` 构造；server
 必须至少贡献一个当前 agent-visible tool 才可能形成 assertion。低层 `.frozen`
 factory 是 trusted host construction seam，不是自认证或网络握手证明；手工构造
 它的 deterministic tests 不能冒充真实 MCP E2E。
-Intatis 对目录 symlink 采取比 Codex 更严格的 fail-closed 策略；不能把当前
+Mopelium 对目录 symlink 采取比 Codex 更严格的 fail-closed 策略；不能把当前
 实现描述为全部 Codex feature parity。
 
-`IntatisSkills` 另通过 SwiftPM resource bundle 发布 host-authored
+`MopeliumSkills` 另通过 SwiftPM resource bundle 发布 host-authored
 `cowork-agent-orchestration`。`SkillDiscoveryConfiguration.standard` 把
 `Bundle.module/BundledSkills` 作为 bundled root 交给既有 discovery；在允许
 system roots 的 Developer ID / CLI host 中，它以 system-scope catalog entry
@@ -530,26 +549,22 @@ write-capable 或需要持久身份的 worker 必须走显式 `spawn_agent` 后�
 
 ## 2026-07-27 外部 MCP Server 客户端
 
-Intatis 只实现连接外部 MCP Server 的客户端角色；没有 Intatis MCP
+Mopelium 只实现连接外部 MCP Server 的客户端角色；没有 Mopelium MCP
 Server target、server transport、server OAuth、server executable、hosting
 API 或产品入口。SDK 中保留的 sampling、elicitation 和 client-hosted Tasks
 handler 是外部 server 向 client 发起的标准 request，由客户端宿主受控处理，
-不构成 MCP Server。开发期 `IntatisMCPConformanceClient` 也只是 official
+不构成 MCP Server。开发期 `MopeliumMCPConformanceClient` 也只是 official
 client conformance driver，不进入发行产品。
 
 平台/target 边界如下：
 
 | 产品 | External MCP client core | Streamable HTTP / OAuth | stdio | 产品表面 |
 |---|---|---|---|---|
-| `IntatisMac` | `IntatisMCP` | `IntatisCurlTransport` | `IntatisMCPStdio` + `IntatisMCPStdioGuard` | Code/Cowork 设置、会话内容与审批 |
-| `intatis` CLI | `IntatisMCP` | 原生 HTTP/OAuth | `IntatisMCPStdio` + guard | 管理命令、Code/Cowork exact-session owner |
-| `IntatisiOS` | 不链接 | 不链接 | 不链接 | 无 MCP runtime、transport 或产品 UI |
+| `MopeliumMac` | `MopeliumMCP` | `MopeliumCurlTransport` | `MopeliumMCPStdio` + `MopeliumMCPStdioGuard` | Code/Cowork 设置、会话内容与审批 |
+| `mopelium` CLI | `MopeliumMCP` | 原生 HTTP/OAuth | `MopeliumMCPStdio` + guard | 管理命令、Code/Cowork exact-session owner |
 
-`IntatisMacAppStore` 的 HTTP-only linkage 仍可能存在于当前源码图，但它是
-legacy/non-shipping target，不属于上表的产品架构或验收矩阵。
-
-`IntatisProtocol` 中 SDK-independent、可旧日志解码的 MCP payload 仍可由共享
-模块编译；这不等于 iOS 获得 MCP 客户端能力。
+`MopeliumProtocol` 中 SDK-independent、可旧日志解码的 MCP payload 仍可由共享模块编译；
+这不等于存在第二个 App 产品。
 
 每次模型 dispatch 的主链是：
 
@@ -606,10 +621,10 @@ macOS session 页面明确分成三层：
 | 层 | owner / identity | 内容 | session 切换 |
 |---|---|---|---|
 | Runtime | 进程级 `AppSessionRuntimeManager` + exact `{SessionKind, SessionID}` | provider / AgentLoop / Orchestrator / projection / permission / workspace scope | 保留并继续运行 |
-| Window presentation | 每个 `IntatisMacRootView` | mode、当前 session、inspector 显隐 | 只影响本窗口 |
-| Session presentation | `IntatisThreadPresentationScope` + 该窗口 thread 的 `@StateObject` | ScrollView、bottom-follow、scroll generation、临时 geometry | scope 改变即销毁/重建 |
+| Window presentation | 每个 `MopeliumMacRootView` | mode、当前 session、inspector 显隐 | 只影响本窗口 |
+| Session presentation | `MopeliumThreadPresentationScope` + 该窗口 thread 的 `@StateObject` | ScrollView、bottom-follow、scroll generation、临时 geometry | scope 改变即销毁/重建 |
 
-`IntatisThreadPresentationScope` 不写入 EventLog，也不是 runtime key。相同 session 在两个窗口中可共享 runtime，但每个窗口构造独立的 scroll coordinator；任一窗口的 cancel/deactivate 不会取消另一窗口的展示任务。Code / Cowork 详情和 thread subtree 以 scope 建立 SwiftUI identity，bottom sentinel 使用 `IntatisThreadBottomAnchorID(scope:)`，因此旧 session 的 anchor 或 task 无法命中新 session。
+`MopeliumThreadPresentationScope` 不写入 EventLog，也不是 runtime key。相同 session 在两个窗口中可共享 runtime，但每个窗口构造独立的 scroll coordinator；任一窗口的 cancel/deactivate 不会取消另一窗口的展示任务。Code / Cowork 详情和 thread subtree 以 scope 建立 SwiftUI identity，bottom sentinel 使用 `MopeliumThreadBottomAnchorID(scope:)`，因此旧 session 的 anchor 或 task 无法命中新 session。
 
 自动滚动是一条有 owner 的可取消状态机，而不是 main-queue 闭包。每个 coordinator 最多一个 pending request，携带 scope、generation、reason 与 bottom-following snapshot；scope 改变、用户开始滚动或新请求到达都会使旧 generation 失效。initial restore 与 live/rich correction 不动画，completion 可短动画。Scroll geometry 只区分是否在 24pt bottom tolerance 内及 material content-height change。raw item signature 或 content width 变化显式开启 layout epoch；一个 epoch 可以沿第一次 shrink 降低 baseline，并在第一次 regrowth correction 后永久关闭该 recovery window，防止 `800↔900` 高度振荡重新触发无界 scroll。用户主动离开底部后不再自动跟随。
 
@@ -640,32 +655,31 @@ composer 的 Send 与 Stop 是同一个主操作槽位。工作态使用 SwiftUI
 
 ## 总体架构
 
-Intatis 是 Apple-first、Swift-native 优先的本地 AI 工作区，三个产品面：Chat（普通多模态对话）/ Code（单 agent 本地工作区）/ Cowork（多 agent 本地工作区协作）。项目允许按 `docs/OPEN_SOURCE_REUSE.md` 选择性复用兼容许可证的公开源码，但 Intatis 继续拥有自己的产品身份、权限/lease/EventLog 控制面和 Apple 平台边界。Apple 应用与 SwiftPM 声明的最低系统为 macOS 26 / iOS 26。默认 `IntatisMac` 是 DeveloperID/non-sandbox 本地 workbench，提供全量 macOS 产品面；iOS 仍是 chat 子集。
+Mopelium 是 Apple-first、Swift-native 优先的本地 AI 工作区，保留 Chat（普通多模态对话）/ Code（单 agent 本地工作区）/ Cowork（多 agent 本地工作区协作）三套源码能力。项目允许按 `docs/OPEN_SOURCE_REUSE.md` 选择性复用兼容许可证的公开源码，但 Mopelium 继续拥有自己的产品身份、权限/lease/EventLog 控制面和 Apple 平台边界。唯一 App 与 SwiftPM 声明的最低系统为 macOS 26；`MopeliumMac` 是 DeveloperID/non-sandbox 本地 workbench，当前用户可见入口只有 Cowork。CLI 保留 headless Chat/Code/Cowork。
 
 ```text
                     ┌─────────────────────────────────────┐
-                    │      Intatis* 内核模块（共享）        │
+                    │      Mopelium* 内核模块（共享）        │
                     │  Core / Protocol / Providers         │
                     │  Conversation / Artifacts / Multimodal│
                     │  Tools / Permission / AgentKernel     │
                     │  Cowork / SharedUI                   │
                     └──────────────┬──────────────────────┘
                                    │
-            ┌──────────────────────┼──────────────────────┐
-            │                      │                      │
-   ┌────────▼─────────┐  ┌────────▼─────────┐  ┌─────────▼──────────┐
-   │  IntatisMac       │  │  IntatisiOS       │  │  intatis-cli        │
-   │  Chat/Code/Cowork │  │  Chat 子集        │  │  CLI                │
-   │  (全量内核)        │  │  (无 workspace)   │  │                    │
-   └───────────────────┘  └───────────────────┘  └────────────────────┘
+                    ┌──────────────┴──────────────┐
+                    │                             │
+           ┌────────▼─────────┐         ┌─────────▼──────────┐
+           │  MopeliumMac     │         │  mopelium CLI      │
+           │  全量 macOS      │         │  macOS/Linux       │
+           └──────────────────┘         └────────────────────┘
 ```
 
 ## 主要链路
 
-### Chat 链路（无工具，iOS/macOS chat 子集）
+### Chat 链路（无工具；macOS/CLI compatibility surface）
 
 ```text
-macOS root sidebar or iOS drawer/top New Chat -> selected SessionID -> per-session EventLog
+macOS/CLI host action -> selected SessionID -> per-session EventLog
   -> Chat composer -> GoalInputParser (/goal metadata) -> ChatLoop.send()
   -> buildHistory() from current EventLog
   -> ProviderRegistry resolves selected provider/model from GUI catalog
@@ -742,7 +756,7 @@ model tool_call exec_command / write_stdin
   -> exact authorization + WorkspaceLease + root identity revalidation
   -> ProcessTerminalSessionManager
      -> non-TTY: sandboxed managed pipes
-     -> tty=true: IntatisPTYLauncher forkpty -> controlling terminal
+     -> tty=true: MopeliumPTYLauncher forkpty -> controlling terminal
      -> macOS Seatbelt workspace allow-list + default network deny
      -> bounded continuous stdout/stderr drain + timeout/cancel TERM→KILL
   -> input echo/diagnostic scrub
@@ -768,12 +782,12 @@ EventLog raw message text + Envelope.ts (single source of truth)
         + task-only fallback + actionable error
         (same-task exact task_completed mirror is trace-only)
      -> backend debug opt-in: preserve the complete prior tool/patch/note trace
-  -> role policy + IntatisMessageRendererMode
+  -> role policy + MopeliumMessageRendererMode
      -> user / system / structured special card: existing plain or dedicated view
      -> assistant / agent + plainSafe: no upstream parser/view
         -> history/activation/reentry/correction/truncation/final: exact raw SwiftUI Text
         -> append-only intermediate snapshots: 100 ms fixed-window leading/trailing latest-only Text projection
-     -> assistant / agent + microsoft: IntatisMessageContentView(.richText)
+     -> assistant / agent + microsoft: MopeliumMessageContentView(.richText)
         -> first paint/current semantic revision: exact raw SwiftUI Text
         -> pending/rejected/oversize append-only fallback: same persistent 100 ms raw projection
         -> syntax-agnostic admission: non-empty and UTF-8 <= 64 KiB
@@ -815,9 +829,9 @@ EventLog 输入。permission、submission、task、Goal、stats 与 terminal 等
 delta 事件立即形成 barrier。session reattach 或切换使用 fresh generation；
 旧 timer、snapshot 或较低 `throughSeq` 无权写入新 presentation。
 
-Code/Cowork 的 presentation gate 只控制哪些 `CodeItem` 进入 SwiftUI 会话树、自动滚动签名和 Code inspector。默认隐藏 `.toolCall` / `.toolResult` / `.patch` / `.note`，避免把大型 JSON 风格工具过程当成长文本气泡排版；`.agentToAgent` 保持可见，因此媒介化的通用 agent 消息以及 `information_requested` / `information_replied` 会进入默认会话。`CodeProjection` 另以 agent single-flight 的 `task_started` 边界关联该 `{TaskID, attempt}` 最后一个完整 `message_completed`：只有同一 TaskID、同一 attempt、同一 agent 且正文与 `task_completed.result` 完全相同，才给后者附加非 wire 的 `.executionTrace` 展示来源，默认隐藏这个 scheduler lifecycle 镜像；没有匹配 message、attempt 不一致、正文不同、retry 未生成对应 message 或跨任务同文时，task result 继续作为 conversation fallback 显示。迟到旧 attempt 的 terminal 只清理自己的配对，不会清掉当前新 attempt。user、真实 agent message、媒介化 agent-to-agent communication 与 `.error` 仍显示，权限卡片/提交状态等专用结构化 UI 不受影响。完整 `task_completed` 事件、tool observation、AgentInvocation candidate result、agent 上下文、恢复与审计仍由 EventLog / projection 持有。后台启动参数 `-IntatisShowExecutionTrace` 或环境变量 `INTATIS_SHOW_EXECUTION_TRACE=1` 会恢复此前完整视图；该开关默认关闭、没有 UI 或 UserDefaults、进程启动时解析。
+Code/Cowork 的 presentation gate 只控制哪些 `CodeItem` 进入 SwiftUI 会话树、自动滚动签名和 Code inspector。默认隐藏 `.toolCall` / `.toolResult` / `.patch` / `.note`，避免把大型 JSON 风格工具过程当成长文本气泡排版；`.agentToAgent` 保持可见，因此媒介化的通用 agent 消息以及 `information_requested` / `information_replied` 会进入默认会话。`CodeProjection` 另以 agent single-flight 的 `task_started` 边界关联该 `{TaskID, attempt}` 最后一个完整 `message_completed`：只有同一 TaskID、同一 attempt、同一 agent 且正文与 `task_completed.result` 完全相同，才给后者附加非 wire 的 `.executionTrace` 展示来源，默认隐藏这个 scheduler lifecycle 镜像；没有匹配 message、attempt 不一致、正文不同、retry 未生成对应 message 或跨任务同文时，task result 继续作为 conversation fallback 显示。迟到旧 attempt 的 terminal 只清理自己的配对，不会清掉当前新 attempt。user、真实 agent message、媒介化 agent-to-agent communication 与 `.error` 仍显示，权限卡片/提交状态等专用结构化 UI 不受影响。完整 `task_completed` 事件、tool observation、AgentInvocation candidate result、agent 上下文、恢复与审计仍由 EventLog / projection 持有。后台启动参数 `-MopeliumShowExecutionTrace` 或环境变量 `MOPELIUM_SHOW_EXECUTION_TRACE=1` 会恢复此前完整视图；该开关默认关闭、没有 UI 或 UserDefaults、进程启动时解析。
 
-每个可见窗口独立持有 `IntatisThreadScrollCoordinator`。geometry callback
+每个可见窗口独立持有 `MopeliumThreadScrollCoordinator`。geometry callback
 只观测 bottom proximity 与 material content height，不直接或同步间接调用
 `scrollTo`。live-content follow 使用 100 ms fixed-window cadence；同一窗口
 最多一个 executor request 和一个 replaceable pending request。rich settle
@@ -827,36 +841,36 @@ exact revision。
 
 `ConversationProjection` 与 `CodeProjection` 同时把 assistant/agent 消息首次出现时的 `Envelope.ts` 固定在 presentation model；若历史只含 completion，则以 completion envelope 补齐，已经存在的时间不会被后续 streaming delta 或 completion 改写。SharedUI 只在 assistant/agent 名称旁显示这项元数据：相对当前时刻不足 24 小时为本地短时间，不足 7 天为本地化完整星期 + 短时间，其余为本地化中等日期（含年/月/日）+ 短时间，并遵循系统 locale、calendar、time zone 与 12/24 小时偏好。该字段不是 wire/schema 变化，EventLog 仍以既有 `Envelope.ts` 为唯一事实来源，用户与系统行不显示名称旁时间。
 
-界面文案本地化同样停在 presentation boundary：两个 Apple App 的主 bundle 共用 English-source `Localizable.xcstrings`，显式提供 `en` / `zh-Hans`；静态 SwiftUI 文案由系统解析，先构造成普通 `String` 的动态标签通过 `IntatisLocalization` 从 `Bundle.main` 查表并以原 English key 回退。系统 Preferred Languages / App Language 负责进程启动时的 bundle localization，不在根 View 注入 locale，也不另存应用内语言状态。用户/模型正文、session 与 agent identity、provider/model ID、路径、EventLog、协议 token、工具参数和 model-facing prompt 不进入该层；否则同一 durable 数据会随界面语言被改写，破坏回放和安全边界。
+界面文案本地化同样停在 presentation boundary：两个 Apple App 的主 bundle 共用 English-source `Localizable.xcstrings`，显式提供 `en` / `zh-Hans`；静态 SwiftUI 文案由系统解析，先构造成普通 `String` 的动态标签通过 `MopeliumLocalization` 从 `Bundle.main` 查表并以原 English key 回退。系统 Preferred Languages / App Language 负责进程启动时的 bundle localization，不在根 View 注入 locale，也不另存应用内语言状态。用户/模型正文、session 与 agent identity、provider/model ID、路径、EventLog、协议 token、工具参数和 model-facing prompt 不进入该层；否则同一 durable 数据会随界面语言被改写，破坏回放和安全边界。
 
 macOS Chat/Code/Cowork 的顶层消息容器采用固定 history window，而不是消息粒度
-virtualization：`IntatisThreadHistoryWindow` 每页最多 16 个 row，页内使用 eager
-`VStack`，更多历史由 `IntatisThreadHistoryPager` 显式 Earlier/Newer/Latest。
+virtualization：`MopeliumThreadHistoryWindow` 每页最多 16 个 row，页内使用 eager
+`VStack`，更多历史由 `MopeliumThreadHistoryPager` 显式 Earlier/Newer/Latest。
 请求 latest 时 upper bound 为 nil，append 会滑动最新窗口；显式历史页冻结其
 requested upper bound，append 不改变该页。page scope 将 bottom anchor、
 scroll coordinator、viewport admission 与 rich-settle generation 隔离，
 thinking/live-follow 只属于 latest page；Send、Cowork Retry 和 Latest 都先
 恢复最新 page。这个设计既不让 `LazyVStack` 反复 mount/unmount 混合
 SwiftUI/AppKit rich native row，也不把整个会话无界 eager mount。4-row
-`IntatisThreadRichEntryPolicy` 只控制首次 rich admission 是否等 initial
+`MopeliumThreadRichEntryPolicy` 只控制首次 rich admission 是否等 initial
 restore，不再选择容器。底部 16pt 留白仍属于带 ID 的 1pt bottom sentinel。
 没有 completed-document、native paragraph view 或消息高度 cache。
-`IntatisAdaptiveThreadStack` 只保留给共享 iOS/兼容路径；iOS Chat 尚未迁移，
+`MopeliumAdaptiveThreadStack` 只保留为 dormant shared compatibility code；当前无 iOS App，
 必须独立验证。
 
-`IntatisMessageRendererMode` 是 renderer-neutral 的产品熔断层，不是第二套 Markdown renderer。持久键仍为 `intatis.messageRendering.mode.v1`；无偏好默认 `.microsoft`，未知值 fail closed 到 `.plainSafe`。`-IntatisMicrosoftMarkdownMessages` / `-IntatisPlainSafeMessages` 是当前启动 override，plain-safe 在冲突时胜出；旧持久值 `rich` 与 `-IntatisRichTextMessages` 只映射到 `.microsoft` 以保留用户意图。应用内 Picker 与 iOS `Settings.bundle` 共用 `microsoft` / `plainSafe` values。运行中 mode 变化会撤销旧 view activation；raw `EventLog`、projection、provider 请求和 session schema 均不变。
+`MopeliumMessageRendererMode` 是 renderer-neutral 的产品熔断层，不是第二套 Markdown renderer。持久键仍为 `mopelium.messageRendering.mode.v1`；无偏好默认 `.microsoft`，未知值 fail closed 到 `.plainSafe`。`-MopeliumMicrosoftMarkdownMessages` / `-MopeliumPlainSafeMessages` 是当前启动 override，plain-safe 在冲突时胜出；旧持久值 `rich` 与 `-MopeliumRichTextMessages` 只映射到 `.microsoft` 以保留用户意图。应用内 Picker 与 iOS `Settings.bundle` 共用 `microsoft` / `plainSafe` values。运行中 mode 变化会撤销旧 view activation；raw `EventLog`、projection、provider 请求和 session schema 均不变。
 
-`IntatisMessageContentView` 是很薄的显示/生命周期 adapter。Markdown grammar、AST、inline attributed content、代码块、table layout 与 code-aware delimiter integration 归经审计的 `SwiftStreamingMarkdown` 派生包，TeX parse/layout 归 exact iosMath 2.5.0；Intatis 产品 facade 不遍历或改写 AST，也不另写 Markdown parser、lexer、TeX 排版或 layout。Intatis 只决定消息角色是否允许 rich、是否低于 64 KiB、何时申请 parse permit、是否仍是最新 revision、上游 document 何时可替换 raw Text，以及整段 raw SwiftUI `Text` 何时允许重新投影。raw 投影是 Markdown 无关的 MainActor latest-only 状态机：一个 facade lifetime 内保留最新源，100 ms fixed-window leading/trailing throttle 不随每个 token 重置；activation/reentry、非 append correction/truncation 和 final 同步精确直出，timer 与 task generation 双重拒绝旧发布。75 ms 初始候选在正式 replay 中有 2/20 轮 interaction p95 超过冻结门，因此不能恢复。派生包基于 Microsoft v0.6.0 exact commit，升级到 `swift-markdown`/`swift-cmark` 0.8，使用 public `@concurrent ... sending` parse boundary；返回的 non-Sendable `RenderableDocument` 不越过 MainActor ownership。
+`MopeliumMessageContentView` 是很薄的显示/生命周期 adapter。Markdown grammar、AST、inline attributed content、代码块、table layout 与 code-aware delimiter integration 归经审计的 `SwiftStreamingMarkdown` 派生包，TeX parse/layout 归 exact iosMath 2.5.0；Mopelium 产品 facade 不遍历或改写 AST，也不另写 Markdown parser、lexer、TeX 排版或 layout。Mopelium 只决定消息角色是否允许 rich、是否低于 64 KiB、何时申请 parse permit、是否仍是最新 revision、上游 document 何时可替换 raw Text，以及整段 raw SwiftUI `Text` 何时允许重新投影。raw 投影是 Markdown 无关的 MainActor latest-only 状态机：一个 facade lifetime 内保留最新源，100 ms fixed-window leading/trailing throttle 不随每个 token 重置；activation/reentry、非 append correction/truncation 和 final 同步精确直出，timer 与 task generation 双重拒绝旧发布。75 ms 初始候选在正式 replay 中有 2/20 轮 interaction p95 超过冻结门，因此不能恢复。派生包基于 Microsoft v0.6.0 exact commit，升级到 `swift-markdown`/`swift-cmark` 0.8，使用 public `@concurrent ... sending` parse boundary；返回的 non-Sendable `RenderableDocument` 不越过 MainActor ownership。
 
-iosMath 的 `MTMathUILabel`/attachment 是 AppKit/UIKit 对象：TextKit 2 attachment view provider 在 MainActor 读取 iosMath intrinsic size 并展示 live label；只有无效 TeX 或非有限/非正 geometry 才恢复 exact literal，不再有 Intatis 自设的固定 attachment 尺寸阈值。attachment file type 由唯一 MIME `application/vnd.vita0818.intatis-inline-math+json` 动态派生，并由 attachment subclass 直接返回 exact provider；不得给 public `.json` / `.data` 等宽泛 UTI 注册 process-global provider。AppKit 还必须清除默认 generic `attachmentCell`。`ParagraphNSView()` 显式建立 `NSTextContentStorage → NSTextLayoutManager → NSTextContainer`，强持有 root content storage；`setAttributedString` 整段替换后必须恢复 `primaryTextLayoutManager`，内容或有效宽度变化后在下一 main-queue turn 合并调用 `textViewportLayoutController.layoutViewport()`。这是 production live provider 真正实例化的生命周期合同，禁止通过 legacy `NSTextView.layoutManager` accessor 偷回 TextKit 1。macOS paragraph 的横向尺寸只有 SwiftUI proposal 一个 owner：`ParagraphNSView.intrinsicContentSize.width` 必须为 `NSView.noIntrinsicMetric`，`ParagraphView.sizeThatFits` 返回 exact proposal width 与 measured height。measurement memo 只保存最新一个 exact width，不得 rounding、bucketing 或累计 resize 历史；width change 可以清理 height memo并调度 TextKit 2 viewport layout，但不得产生 width-driven intrinsic invalidation。该 memo 只保存标量 measurement，不是 document、native view 或 attachment cache。`CATransaction.flush()` 只用于测试确定性跨过 AppKit transaction boundary，production 不 flush、sleep 或 spin。view 从当前 AppKit/UIKit appearance 解析 semantic color；SharedUI 将 `DynamicTypeSize` 映射为 typography revision并缩放 parse/display font config，避免旧色彩/旧字号发布。这里不创建 raster preview，也没有公式 bitmap cache。同步 formula parse/update 留在 UI owner，不能伪装成 Sendable work 放进 output-free permit scheduler。传递的 swift-markdown manifest 仍使用 Swift 5 language mode，iosMath 是 Objective-C target；因此不能把整张依赖图表述为 Swift 6 strict-clean。
+iosMath 的 `MTMathUILabel`/attachment 是 AppKit/UIKit 对象：TextKit 2 attachment view provider 在 MainActor 读取 iosMath intrinsic size 并展示 live label；只有无效 TeX 或非有限/非正 geometry 才恢复 exact literal，不再有 Mopelium 自设的固定 attachment 尺寸阈值。attachment file type 由唯一 MIME `application/vnd.vita0818.mopelium-inline-math+json` 动态派生，并由 attachment subclass 直接返回 exact provider；不得给 public `.json` / `.data` 等宽泛 UTI 注册 process-global provider。AppKit 还必须清除默认 generic `attachmentCell`。`ParagraphNSView()` 显式建立 `NSTextContentStorage → NSTextLayoutManager → NSTextContainer`，强持有 root content storage；`setAttributedString` 整段替换后必须恢复 `primaryTextLayoutManager`，内容或有效宽度变化后在下一 main-queue turn 合并调用 `textViewportLayoutController.layoutViewport()`。这是 production live provider 真正实例化的生命周期合同，禁止通过 legacy `NSTextView.layoutManager` accessor 偷回 TextKit 1。macOS paragraph 的横向尺寸只有 SwiftUI proposal 一个 owner：`ParagraphNSView.intrinsicContentSize.width` 必须为 `NSView.noIntrinsicMetric`，`ParagraphView.sizeThatFits` 返回 exact proposal width 与 measured height。measurement memo 只保存最新一个 exact width，不得 rounding、bucketing 或累计 resize 历史；width change 可以清理 height memo并调度 TextKit 2 viewport layout，但不得产生 width-driven intrinsic invalidation。该 memo 只保存标量 measurement，不是 document、native view 或 attachment cache。`CATransaction.flush()` 只用于测试确定性跨过 AppKit transaction boundary，production 不 flush、sleep 或 spin。view 从当前 AppKit/UIKit appearance 解析 semantic color；SharedUI 将 `DynamicTypeSize` 映射为 typography revision并缩放 parse/display font config，避免旧色彩/旧字号发布。这里不创建 raster preview，也没有公式 bitmap cache。同步 formula parse/update 留在 UI owner，不能伪装成 Sendable work 放进 output-free permit scheduler。传递的 swift-markdown manifest 仍使用 Swift 5 language mode，iosMath 是 Objective-C target；因此不能把整张依赖图表述为 Swift 6 strict-clean。
 
 当前公式面识别 `$...$` / `\(...\)` 行内形式和 `$$...$$` / `\[...\]` display 形式；display 内容可跨行。预处理器先通过首份 raw Markdown AST 保护 fenced/inline code、link/image/autolink 与 raw HTML，再以 request-local、随机 namespace 的 catalog 把原始 TeX 和 inline/display presentation 交给 attributed attachment。该路径不再设置每消息公式数量、单公式 UTF-8 或固定附件尺寸上限；原始 source 仍用于 literal fallback、selection/copy 与 accessibility。未闭合、转义、货币样式、不合规 candidate 或 iosMath 无法解析的 TeX 不得吞字。plain-safe 在任何 Markdown/math parser 或 view 构造前完全绕开该路径。64 KiB whole-message rich admission 与 1-running/32-pending parser scheduler 是语法无关的 facade 资源边界，不是公式限制。图片、citations、文字动画与语法高亮仍关闭；代码块显示完整可选择纯文本、语言标签、原生 Copy 与水平滚动，table copy/download actions 不进入 UI。链接点击只允许 `http`、`https`、`mailto`。因此本版本仍没有 JavaScriptCore/highlight.js 运行、远程图片请求或模型输出 `eval`。零 completed-document cache、零 paragraph native-view cache；这一选择减少旧历史 session 的常驻原生 view graph，之后只有得到测量证据才可重新引入 cache。
 
-当前 Intatis dependency 声明已删除旧 MarkdownUI/NetworkImage/swift-cmark0.5/HighlightSwift 和 vendor highlight 资源；完整可构建 Microsoft derivative vendored 于 `Vendor/SwiftStreamingMarkdown`，根 `Package.swift` 使用仓内相对路径。派生包 exact-pins `swift-markdown` 0.8（传递 `swift-cmark` 0.8）以及只在 iOS/macOS 链接的 iosMath 2.5.0 commit `838cddc01fdd67efd530f8bb67959ad2715f9b06`；根与 vendor 两份 `Package.resolved` 已匹配。Microsoft MIT `LICENSE` 与永久 patch ledger 和源码一起由 Intatis 根 Git revision 固定；iosMath MIT、八套 unmodified math font 的 GUST/LPPL 或 OFL 条款、资源清单与用户批准另由 `ThirdPartyNotices/MathRendering.md` 固定。iosMath 自身无传递 package dependency；其 `fonts/` payload 是 8 OTF、8 math-table plist、5 license、4 README 与一个 conversion script，共 26 files / 7,234,424 bytes，完整 built `iosMath_iosMath.bundle` 加生成的根 `Info.plist` 后为 27 files。这套公式字体不改变产品 UI 字体选择。三个 exact-pinned remote dependency 在无缓存解析时仍需要网络，完全离线供应链不在本轮范围。
+当前 Mopelium dependency 声明已删除旧 MarkdownUI/NetworkImage/swift-cmark0.5/HighlightSwift 和 vendor highlight 资源；完整可构建 Microsoft derivative vendored 于 `Vendor/SwiftStreamingMarkdown`，根 `Package.swift` 使用仓内相对路径。派生包 exact-pins `swift-markdown` 0.8（传递 `swift-cmark` 0.8）以及只在 macOS 链接的 iosMath 2.5.0 commit `838cddc01fdd67efd530f8bb67959ad2715f9b06`；根与 vendor 两份 `Package.resolved` 已匹配。Microsoft MIT `LICENSE` 与永久 patch ledger 和源码一起由 Mopelium 根 Git revision 固定；iosMath MIT、八套 unmodified math font 的 GUST/LPPL 或 OFL 条款、资源清单与用户批准另由 `ThirdPartyNotices/MathRendering.md` 固定。iosMath 自身无传递 package dependency；其 `fonts/` payload 是 8 OTF、8 math-table plist、5 license、4 README 与一个 conversion script，共 26 files / 7,234,424 bytes，完整 built `iosMath_iosMath.bundle` 加生成的根 `Info.plist` 后为 27 files。这套公式字体不改变产品 UI 字体选择。三个 exact-pinned remote dependency 在无缓存解析时仍需要网络，完全离线供应链不在本轮范围。
 
 2026-07-18 事故前验证基线：renderer focused 37/37；完整 SwiftPM 755/14 skipped/0 failures；固定 fixture 为 17 messages / 1,249 deltas、SHA-256 `fb548849d0b708d31e8c6d055805f29f5c09ee4c8306bf9adc537a48e95707f1`。100 ms Plain 与 production-shaped `LazyVStack` Microsoft 各完成 5 cold + 20 replay、25/25 exact 并通过 interaction p95 ≤8 ms / max ≤50 ms 门；Plain cold/replay worst p95/max 为 6.152250/30.395208 ms、4.370458/29.591167 ms，Microsoft 为 4.020458/37.840875 ms、4.876292/36.596500 ms，Microsoft replay peak/residual RSS 最高 102.953/101.375 MiB。eager `VStack` cold 5/5、replay 20/20 p95 超门；当时 xctrace 17/17 exact、>250 ms hang 0、旧 lifecycle warning pattern 0。main/RSS/footprint/CPU 没有冻结 gate，普通 AttributeGraph sampling 也不能证明零 cycle。以下事故后段落是当前 release authority，并明确覆盖这组窄协议可能造成的 release-ready 推断；真实设备仍为 `UNKNOWN`。
 
-事故后 renderer hardening 仍遵守同一所有权边界，没有新增 Intatis parser/layout：vendored `DocumentView` 和两平台 `ParagraphView` 恢复 upstream-equivalent 手写 `Equatable`。patch group 8 的双平台 width tracker 是历史基线；patch group 11 后 UIKit 继续使用该 bounded invalidation 合同，AppKit 改为 flexible intrinsic width、proposal-owned exact measurement、zero width-driven intrinsic invalidation 和 one-entry measurement memo。Intatis rich facade 不再给整棵 `DocumentView` 套第二个 SwiftUI `SelectionOverlay`，plain `Text`、native selectable paragraph、table/code SwiftUI leaf 各自拥有 selection。没有 document/native-view cache；单项 height memo 也不能单独证明 SwiftUI/TextKit 总 graph 内存有界。
+事故后 renderer hardening 仍遵守同一所有权边界，没有新增 Mopelium parser/layout：vendored `DocumentView` 和两平台 `ParagraphView` 恢复 upstream-equivalent 手写 `Equatable`。patch group 8 的双平台 width tracker 是历史基线；patch group 11 后 UIKit 继续使用该 bounded invalidation 合同，AppKit 改为 flexible intrinsic width、proposal-owned exact measurement、zero width-driven intrinsic invalidation 和 one-entry measurement memo。Mopelium rich facade 不再给整棵 `DocumentView` 套第二个 SwiftUI `SelectionOverlay`，plain `Text`、native selectable paragraph、table/code SwiftUI leaf 各自拥有 selection。没有 document/native-view cache；单项 height memo 也不能单独证明 SwiftUI/TextKit 总 graph 内存有界。
 
 2026-07-18 三实例 GUI/Computer Use `FAIL / ABORTED` 现在是历史 adverse evidence：Force Quit 对主实例显示 129.63 GB application memory；CPU diagnostic incident `FA228932-2C40-4AC2-A0C2-62EF41342B4A` 记录 160 秒内 90 秒 CPU 与 sampled footprint 109.16 MB→803.30 MB，重栈含 SwiftUICore/AttributeGraph/lazy layout/`ParagraphView`/`SelectionOverlay`。缺少 malloc stack/heap graph，根因/最终 retaining edge 仍为 `UNKNOWN`。2026-07-24 hash-pinned 单实例验证已通过同一 Microsoft renderer 的 math-disabled/enabled structure A/B，以及 math-one/thirty-two/history/stream isolation；Light/Dark `math-structure` Computer Use 各稳定运行约 47.47 秒并看到真实公式字形、literal code 与原始 TeX AX 描述，所有 run exit 0、未用 TERM/KILL且无残留。vendor 82/82、SharedUI 25/25、root 938/14 skipped/0 failures、macOS/iOS Debug/Release 与双端 bundle/notice/font inventory也通过。以上关闭“从未受控启动”和单美元公式不可见两个问题，但仍短于历史 160 秒窗口，也没有真实 clipboard/VoiceOver、malloc retaining-edge 或低端 iOS 真机证据；因此不能据此宣称历史事故根因已解决或 renderer 已 release-ready。
 
@@ -878,29 +892,29 @@ rich+lazy 卡死，plain+lazy 与 rich+eager 均正常，关闭代码块/表格 
 不能消除卡死；sample 的主线程持续经过
 `GraphHost.flushTransactions → AG::Subgraph::update → UpdateStack`。因此当前
 生产 authority 是前述 16-row bounded eager pages。最终 69 项 focused test、
-IntatisMac Debug build、真实 `cowork_tf2lkjbh` entry/scroll/A→B→A 和
+MopeliumMac Debug build、真实 `cowork_tf2lkjbh` entry/scroll/A→B→A 和
 55-message Earlier/Latest 通过；旧 lazy soak 只保留为历史证据，不验证当前
 容器的长时表现。
 
 ### Provider 模型请求扩展
 
-macOS 的 Intatis-owned OpenCode-compatible 配置把 `provider.<id>.models.<model>.options` 视为开放的 model-scoped JSON 请求扩展点。`AppConfig` 不解释厂商字段，而是保真为 `[String: JSONValue]`，按 model ID 挂到 `ProviderEndpoint.modelRequestOptions`；`provider.<id>.npm` 与 model object 内的 `provider.npm` 也分别保留为 provider adapter 与 model override。当前 OpenAI wire runtime 在构造 Chat/Code request body 时先加载这些扩展，再由 exact package adapter 解释已知选项，最后写入运行时字段。因此 routing、sampling、reasoning、response format 或未来厂商自定义嵌套对象无需为每个 provider 增加 Swift 配置字段。此处“开放 JSON”只描述兼容 `ProviderEndpoint` 路径；Cowork durable catalog 有独立的显式 allowlisted schema，不能用这一段推导 unknown option 可被持久化。
+macOS 的 Mopelium-owned OpenCode-compatible 配置把 `provider.<id>.models.<model>.options` 视为开放的 model-scoped JSON 请求扩展点。`AppConfig` 不解释厂商字段，而是保真为 `[String: JSONValue]`，按 model ID 挂到 `ProviderEndpoint.modelRequestOptions`；`provider.<id>.npm` 与 model object 内的 `provider.npm` 也分别保留为 provider adapter 与 model override。当前 OpenAI wire runtime 在构造 Chat/Code request body 时先加载这些扩展，再由 exact package adapter 解释已知选项，最后写入运行时字段。因此 routing、sampling、reasoning、response format 或未来厂商自定义嵌套对象无需为每个 provider 增加 Swift 配置字段。此处“开放 JSON”只描述兼容 `ProviderEndpoint` 路径；Cowork durable catalog 有独立的显式 allowlisted schema，不能用这一段推导 unknown option 可被持久化。
 
 顶层 `model` 解析先在启用的 provider model map 中按完整字符串精确匹配；只有未命中时才解释为 `provider/model`。这使 `deepseek/deepseek-v4-pro` 一类本身含 `/` 的 endpoint model ID 与显式 `OpenRouter/deepseek/...` provider-qualified 形式可以共存，且多 provider 出现同名 model 时只有显式 selected provider 才能消除歧义。
 
-`model`、`messages`、`tools`、`stream` 是 Intatis 运行时拥有的结构字段，配置不得覆盖；单次 runtime 明确设置的 `temperature`、reasoning effort、`max_tokens`、usage 选项也只在 exact adapter 支持的边界内覆盖配置默认。OpenAI-compatible Chat/Agent builder 还会对每个请求无条件移除配置提供的 `stream_options`、`n`、`best_of`、`num_return_sequences`、`candidate_count`。`@ai-sdk/openai-compatible` 与 `@openrouter/ai-sdk-provider` adapter 按 pinned OpenCode package 省略 `n`，依赖 API 默认的单候选行为，并且不把 parallel-safe tool metadata 自动翻译成 `parallel_tool_calls`；legacy Intatis wire 保留原来的显式 `n = 1` 与 call-level parallel 开关。只有 host `includeUsage` 可重建受控 `stream_options.include_usage`；host output ceiling 另会移除竞争 token aliases。provider-level `options.baseURL` / `apiKey` / `chatEndpoint` 仍分别属于 endpoint、secret 与 transport 配置，不会被盲目复制到请求 body。
+`model`、`messages`、`tools`、`stream` 是 Mopelium 运行时拥有的结构字段，配置不得覆盖；单次 runtime 明确设置的 `temperature`、reasoning effort、`max_tokens`、usage 选项也只在 exact adapter 支持的边界内覆盖配置默认。OpenAI-compatible Chat/Agent builder 还会对每个请求无条件移除配置提供的 `stream_options`、`n`、`best_of`、`num_return_sequences`、`candidate_count`。`@ai-sdk/openai-compatible` 与 `@openrouter/ai-sdk-provider` adapter 按 pinned OpenCode package 省略 `n`，依赖 API 默认的单候选行为，并且不把 parallel-safe tool metadata 自动翻译成 `parallel_tool_calls`；legacy Mopelium wire 保留原来的显式 `n = 1` 与 call-level parallel 开关。只有 host `includeUsage` 可重建受控 `stream_options.include_usage`；host output ceiling 另会移除竞争 token aliases。provider-level `options.baseURL` / `apiKey` / `chatEndpoint` 仍分别属于 endpoint、secret 与 transport 配置，不会被盲目复制到请求 body。
 
 控制面调用也遵守同一兼容性规则：Permission Reviewer、legacy `ModelPermissionReviewer`、GoalVerifier 与 chat/agent health check 默认保持 sampling/output 参数为 `nil`，不得为了“确定性”硬编码 `temperature=0` 或固定输出上限。只有用户/host 显式策略、Goal token budget 或真实 context-window postcondition 才可添加相应 request control。
 
-开放配置与最终 wire 是两个边界：配置文件、immutable profile 和 UI 投影继续保留原始 key/value；最终 Chat Completions builder 按冻结的 `ProviderRequestAdapter` 执行 package-specific lowering，而不是应用跨 provider 的全局 camel/snake/nested 优先级。Intatis-owned custom provider 的选择顺序是显式 model `provider.npm` → provider `npm` → `@ai-sdk/openai-compatible`；只有字段真正缺失（`nil`）才进入下一层，显式空串或空白 package identity 必须原样保留并 fail closed。Intatis 不导入 OpenCode 的 models.dev catalog，因此没有其 built-in model metadata fallback。adapter 作为 connection/profile 语义进入 immutable revision；未知 package、以及当前 Chat 路径不支持的 `@ai-sdk/openai` 都在网络前 fail closed，不能按 endpoint 名称猜测或退回 compatible。
+开放配置与最终 wire 是两个边界：配置文件、immutable profile 和 UI 投影继续保留原始 key/value；最终 Chat Completions builder 按冻结的 `ProviderRequestAdapter` 执行 package-specific lowering，而不是应用跨 provider 的全局 camel/snake/nested 优先级。Mopelium-owned custom provider 的选择顺序是显式 model `provider.npm` → provider `npm` → `@ai-sdk/openai-compatible`；只有字段真正缺失（`nil`）才进入下一层，显式空串或空白 package identity 必须原样保留并 fail closed。Mopelium 不导入 OpenCode 的 models.dev catalog，因此没有其 built-in model metadata fallback。adapter 作为 connection/profile 语义进入 immutable revision；未知 package、以及当前 Chat 路径不支持的 `@ai-sdk/openai` 都在网络前 fail closed，不能按 endpoint 名称猜测或退回 compatible。
 
 当前 reviewed Chat adapters 精确区分：
 
 - `@ai-sdk/openai-compatible@2.0.41` 消费 `reasoningEffort` 并生成 `reasoning_effort`，camel 与 raw snake 同时存在时 camel 的生成值获胜；只有 raw `reasoning_effort` 而没有 camel 时，按该 SDK 的实际构造顺序最终不发送该字段。独立的 nested `reasoning` 对象仍可同时存在。`textVerbosity` 同理生成 `verbosity`，`strictJsonSchema` 是 SDK 控制项而不是 wire key，未知选项和 OpenRouter `provider` routing object 保持原结构。
 - `@openrouter/ai-sdk-provider@2.9.0` 不把 `reasoningEffort` 转成 snake；host typed reasoning 使用 nested `reasoning.effort`，配置也应使用该 adapter 支持的 nested 结构。其 `provider.only` / `allow_fallbacks` / `require_parameters` 保持原结构。
-- 缺失 adapter 的历史 Intatis endpoint/profile 解码为 `intatis:legacy-openai-wire`，保留旧请求语义与旧 fingerprint；新的 OpenCode-shaped App/CLI 配置总会冻结显式 adapter。
+- 缺失 adapter 的历史 Mopelium endpoint/profile 解码为 `mopelium:legacy-openai-wire`，保留旧请求语义与旧 fingerprint；新的 OpenCode-shaped App/CLI 配置总会冻结显式 adapter。
 
-现有 Responses dialect 仍是 Intatis 自有兼容路径，不等于完整实现 `@ai-sdk/openai` Responses SDK；该边界不得据此宣传为所有 OpenCode npm provider 已支持。未来增加其他 package/wire 时，应独立实现并测试其协议映射，不得复用 compatible adapter 或静默丢弃未知配置。Chat 托管网络搜索在普通 Chat adapter 之外解析独立的 exact `hosted_web_search` capability 与 provider dialect：OpenAI native `web_search`、OpenRouter `openrouter:web_search` 和未来厂商映射互不等价，`responsesEndpoint`、compatible wire 或 provider/model 名称都不能自动证明支持。当前 planner 只会为普通 Chat adapter 已实现且 exact model 明确声明能力的 route 提供搜索；OpenRouter dialect 已进入运行时，OpenAI Responses encoder 已独立实现，但 `@ai-sdk/openai` 的普通 Chat adapter 仍未实现，因此该 exact adapter 继续在网络前 fail closed。完整合同见 `docs/CHAT_HOSTED_SEARCH.md`。
+现有 Responses dialect 仍是 Mopelium 自有兼容路径，不等于完整实现 `@ai-sdk/openai` Responses SDK；该边界不得据此宣传为所有 OpenCode npm provider 已支持。未来增加其他 package/wire 时，应独立实现并测试其协议映射，不得复用 compatible adapter 或静默丢弃未知配置。Chat 托管网络搜索在普通 Chat adapter 之外解析独立的 exact `hosted_web_search` capability 与 provider dialect：OpenAI native `web_search`、OpenRouter `openrouter:web_search` 和未来厂商映射互不等价，`responsesEndpoint`、compatible wire 或 provider/model 名称都不能自动证明支持。当前 planner 只会为普通 Chat adapter 已实现且 exact model 明确声明能力的 route 提供搜索；OpenRouter dialect 已进入运行时，OpenAI Responses encoder 已独立实现，但 `@ai-sdk/openai` 的普通 Chat adapter 仍未实现，因此该 exact adapter 继续在网络前 fail closed。完整合同见 `docs/CHAT_HOSTED_SEARCH.md`。
 
 Code/Cowork 对同一协议另有显式 Agent Tool 包装，但不复用 Chat 产品面：
 `ResolvedAgentRuntimeRoute` / `ResolvedInferenceProfile` 可原子携带 optional
@@ -911,7 +925,7 @@ inference 来自同一次 exact resolve。`ProviderHostedWebSearchToolService` �
 tool 并使用 `tool_choice:required`，shape unsupported 时 fail closed；Chat 仍使用 `auto` 和受限的同路由
 ordinary fallback。该工具不能选择或退回 browser、URL fetch、MCP、shell、另一个模型或隐藏 backend。
 
-配置解析与 UI 展示是独立的只读投影。`AppConfig` 在内存保留完整 model object；`ModelConfigurationPresentation` 可从原始 model metadata 与 `options` 识别常见 reasoning/thinking effort、thinking level 或 token budget 的原始值，供模型列表显示灰色辅助标签。该识别覆盖 OpenRouter/OpenAI 常见 `reasoning.effort` / `reasoning_effort`、OpenCode/SDK 常见 `reasoningEffort` / `thinking.budgetTokens`、Anthropic 常见 `output_config.effort` / `thinking.budget_tokens` 等拼写，但只代表“配置中存在这个值”，不代表 Intatis 验证了目标模型支持它。投影不得改变 key/value、不得回写配置。`variants` 是同一 model 的命名请求参数预设：macOS 把基础项与未禁用 variants 摊平成菜单选择，持久化 provider/model/variant identity；选中 variant 后按 OpenCode/Remeda `mergeDeep` 语义覆盖基础 model `options`：只有两侧都是 plain object 时递归，array、scalar 与 null 由后层整体替换；发给 provider 的 model ID 不变。未显式选择 variant 时，UI 与请求都不得任选一个 variant 冒充活动配置。
+配置解析与 UI 展示是独立的只读投影。`AppConfig` 在内存保留完整 model object；`ModelConfigurationPresentation` 可从原始 model metadata 与 `options` 识别常见 reasoning/thinking effort、thinking level 或 token budget 的原始值，供模型列表显示灰色辅助标签。该识别覆盖 OpenRouter/OpenAI 常见 `reasoning.effort` / `reasoning_effort`、OpenCode/SDK 常见 `reasoningEffort` / `thinking.budgetTokens`、Anthropic 常见 `output_config.effort` / `thinking.budget_tokens` 等拼写，但只代表“配置中存在这个值”，不代表 Mopelium 验证了目标模型支持它。投影不得改变 key/value、不得回写配置。`variants` 是同一 model 的命名请求参数预设：macOS 把基础项与未禁用 variants 摊平成菜单选择，持久化 provider/model/variant identity；选中 variant 后按 OpenCode/Remeda `mergeDeep` 语义覆盖基础 model `options`：只有两侧都是 plain object 时递归，array、scalar 与 null 由后层整体替换；发给 provider 的 model ID 不变。未显式选择 variant 时，UI 与请求都不得任选一个 variant 冒充活动配置。
 
 ### Cowork per-agent inference profile
 
@@ -1021,7 +1035,7 @@ provider tool_call -> AgentLoop schema validation
   output/CAS 字段；mutation 工具只增加 source/SHA 与该 external API 自己的参数。共用 Swift transport
   只冻结输入、替换已审查路径、运行 fixed backend、检查安全输出并原子提交，不解释或组合业务操作。
 - macOS LibreOffice fixed runner 为每次调用建立当前用户 `0700` 的短路径
-  `/private/tmp/intatis-lo-<12 hex>`，通过 `-env:OSL_SOCKET_PATH=...` 设置 LibreOffice bootstrap
+  `/private/tmp/mopelium-lo-<12 hex>`，通过 `-env:OSL_SOCKET_PATH=...` 设置 LibreOffice bootstrap
   变量。Seatbelt 只允许该根内文件访问及 exact `OSL_PIPE_*` 本地 Unix socket 的 bind/connect，
   IP 网络与其他 socket 继续默认拒绝；调用结束必须清理 exact root。不得把该值退化为普通进程环境
   变量，也不得改回会超过 `sockaddr_un.sun_path` 的长 Darwin temp path。
@@ -1047,10 +1061,10 @@ provider tool_call -> AgentLoop schema validation
 
 设计取舍：
 - “structured runner”只是 host-owned 固定连接器：Swift 选择已审计 executable/operation，发送 versioned JSON request 或固定 argv，并控制环境、工作目录、精确输入/输出根、断网、timeout/cancel、process-tree cleanup、stdout/stderr cap、生成文件的单项/聚合/entry 预算，以及独立的 2 GiB leader + descendant aggregate RSS ceiling；模型不能提交命令、executable、environment、临时目录或 fallback 顺序。
-- 普通读取语义由 Docling 高层 converter 拥有；Intatis 只做 strict schema、权限/路径校验、输入
+- 普通读取语义由 Docling 高层 converter 拥有；Mopelium 只做 strict schema、权限/路径校验、输入
   snapshot、固定调用、输出预算与错误映射。显式 write/edit 仍保留按格式的 allowlisted operation
   mapper、postcondition verifier、staging 与原子提交，但不与普通读取工具或读取输出协议混在一起。
-  Intatis 不自行实现 PDF content stream、OOXML/EPUB parser、OCR/layout/formula engine。
+  Mopelium 不自行实现 PDF content stream、OOXML/EPUB parser、OCR/layout/formula engine。
 - production App runtime 只从 bundle 的
   `Contents/Resources/DocumentRuntime/<active-architecture>` 解析；CLI/debug 才允许用户 Application
   Support fallback。release spec 固定 CPython/Docling/format deps、Heron model revision/hashes、
@@ -1071,7 +1085,7 @@ provider tool_call -> AgentLoop schema validation
   `tool_result` 与 failed/unknown settlement，作为 observation 返回主模型，并继续同批其他文件；
   普通工具的 denied/failed observation 都不会在 final 前升级为副作用完成阻断。`safeToReplay` 只决定
   旧 task attempt 的自动重放资格；写入、网络、OCR 与其他 non-replayable process 仍保持 `.doNotReplay`。
-- `IntatisTools` 仍只进入 macOS/CLI workspace stack；iOS Chat target 不链接 Tools、Permission、AgentKernel、Cowork 或文档 runtime。
+- `MopeliumTools` 仍只进入 macOS/CLI workspace stack；iOS Chat target 不链接 Tools、Permission、AgentKernel、Cowork 或文档 runtime。
 
 ### Agent Git control 工具链路（Codex-aligned 本地 Git 控制面，Code / Cowork / CLI）
 
@@ -1100,8 +1114,8 @@ provider tool_call -> AgentLoop schema validation
 - `git_stage_patch` / `git_unstage_patch`：用 patch 级别修改 index，作为 Codex-style hunk/file stage/unstage 的底层能力。
 - `git_revert_patch`：反向应用 unified diff；非 cached 真实 revert 会先 best-effort stage patch 已存在路径，再用 `git apply --3way -R`，降低 index mismatch；这是 destructive 工具，要求显式 `confirmRevert:true` 并走权限门。
 - `git_worktree_list`：读取 `git worktree list --porcelain`。
-- `git_worktree_create`：只在 workspace `.intatis/git-worktrees/<name>` 下创建受管 linked worktree；默认 detached HEAD，可显式指定新 branch。
-- `git_worktree_remove`：只移除 `.intatis/git-worktrees/<name>` 下受管 worktree；这是 destructive 工具，要求 `confirmName` 精确匹配。
+- `git_worktree_create`：只在 workspace `.mopelium/git-worktrees/<name>` 下创建受管 linked worktree；默认 detached HEAD，可显式指定新 branch。
+- `git_worktree_remove`：只移除 `.mopelium/git-worktrees/<name>` 下受管 worktree；这是 destructive 工具，要求 `confirmName` 精确匹配。
 - `git_remotes`：列出已配置 remote，并遮蔽 remote URL 中的凭据/token。
 - `git_fetch`：只从已配置 remote name 拉取；不接受 URL remote，默认不切工作区，`prune` 显式可选；这是 write + network 工具。
 - `git_pull_ff`：只对当前 clean working tree 的当前分支执行 `git pull --ff-only <remote> <branch>`；要求 `confirmRemote` / `confirmBranch` 精确匹配；这是 write + network 工具。
@@ -1109,14 +1123,14 @@ provider tool_call -> AgentLoop schema validation
 - `git_switch`：只在 clean working tree 上切换到既有本地分支；要求 `confirmBranch` 精确匹配；这是 destructive 工具，不做 `checkout .` / discard。
 
 设计取舍：
-- 本轮对照 Codex App/Worktrees/CLI 官方文档与 openai/codex 开源实现后，Intatis 采用相同方向：Git 不是开放 shell，而是受限工具能力，围绕 read-only 状态、diff、patch preflight/apply/revert/stage、受管 worktree 和权限审批暴露。当前已落地 Git slice 没有复制 Codex 源码或文案；未来若选择性复用兼容许可证实现，必须按 `docs/OPEN_SOURCE_REUSE.md` 固定来源并适配现有安全边界。
+- 本轮对照 Codex App/Worktrees/CLI 官方文档与 openai/codex 开源实现后，Mopelium 采用相同方向：Git 不是开放 shell，而是受限工具能力，围绕 read-only 状态、diff、patch preflight/apply/revert/stage、受管 worktree 和权限审批暴露。当前已落地 Git slice 没有复制 Codex 源码或文案；未来若选择性复用兼容许可证实现，必须按 `docs/OPEN_SOURCE_REUSE.md` 固定来源并适配现有安全边界。
 - 继续使用 `GitService` 抽象 + 本地 `git` wrapper，不新增第三方依赖。
   libgit2/SwiftGit2 只有在出现独立产品需求时才重新评估，并先做许可证、
   native build、安全和维护成本审查；不得仅为已取消的 App Store 分发引入。
 - `ProcessGitService` 不拼 shell 字符串，而是通过 `Process` 以参数数组调用 `git`；内部 Git 命令统一设置 `GIT_TERMINAL_PROMPT=0`、`GIT_OPTIONAL_LOCKS=0`、`core.hooksPath=/dev/null`、`core.fsmonitor=false`，本地 metadata/patch 命令用 5 秒 command timeout，remote fetch/pull/push 用 60 秒 timeout。动态 branch/ref/path/message/diff patch/remote name 不进入 shell。
-- Git repository root 必须与 agent workspace root 一致。普通 repository 的 git metadata 必须在 workspace 内；`.intatis/git-worktrees/<name>` linked worktree 允许 `.git` file 指向 owning workspace repository 的 `worktrees/` metadata，但 workspace path 仍必须在 owner root 之内。
+- Git repository root 必须与 agent workspace root 一致。普通 repository 的 git metadata 必须在 workspace 内；`.mopelium/git-worktrees/<name>` linked worktree 允许 `.git` file 指向 owning workspace repository 的 `worktrees/` metadata，但 workspace path 仍必须在 owner root 之内。
 - `git_stage` / `git_unstage` 的 path 参数先经过 `PathConfinement`；patch 工具从 `diff --git` / `+++` / `---` 解析 changed paths，并在权限与执行前做 workspace confinement。工具 observation 只返回相对路径 metadata，patch 正文只作为工具 diff 结果，不当作长期 schema。
-- Remote Git 只接受已配置 remote name，不接受 URL remote/refspec；工具输出会遮蔽 URL 凭据与常见 Git hosting token。`git_pull_ff` 与 `git_switch` 要求 clean working tree；`git_push` 不支持 force / force-with-lease。真实 remote auth 由用户本机 Git credential helper/SSH agent 决定，Intatis 不读取、存储或展示凭据。
+- Remote Git 只接受已配置 remote name，不接受 URL remote/refspec；工具输出会遮蔽 URL 凭据与常见 Git hosting token。`git_pull_ff` 与 `git_switch` 要求 clean working tree；`git_push` 不支持 force / force-with-lease。真实 remote auth 由用户本机 Git credential helper/SSH agent 决定，Mopelium 不读取、存储或展示凭据。
 - Cowork `ToolCapability.gitControl` 下 coordinator lease 默认可用本地 Git control；`ToolCapability.gitRemote` 下 coordinator lease 默认可用 remote Git control；worker lease 默认不暴露任何 Git 工具。旧 `runShell` lease 仍只暴露 `git_status` / `git_diff` / `git_info` / `git_recent_commits` / `git_diff_base` 这类 read-only 兼容工具。
 - 仍未实现 merge/rebase/reset/clean、force-push、remote auth 管理、PR/CI/review workflow；这些后续必须单独做风险分级、UI/权限和测试设计。
 
@@ -1128,11 +1142,11 @@ provider tool_call -> AgentLoop schema validation
   -> web_fetch: URLSession HTTP(S)
   -> browser_*: ToolContext.browserBackend
        -> typed BrowserBackendInvocation
-       -> BrowserBackendProcessRunner -> fixed Intatis-generated Node driver
+       -> BrowserBackendProcessRunner -> fixed Mopelium-generated Node driver
        -> Playwright persistent context when available
        -> otherwise Node built-in WebSocket + Chrome DevTools Protocol fallback
        -> Chromium / Chrome / Microsoft Edge persistent profile
-       -> workspace .intatis/browser profile/state/history
+       -> workspace .mopelium/browser profile/state/history
   -> ToolObservation(output, changedFiles)
   -> tool_result event -> CodeProjection / CoworkProjection / CLI
 ```
@@ -1141,14 +1155,14 @@ provider tool_call -> AgentLoop schema validation
 - `web_fetch`：轻量 HTTP(S) 获取，无浏览器登录态、JS 或 cookie。
 - `browser_diagnostics`：检查本地 Node.js、Playwright 解析位置、浏览器 channel 探测和当前 profile/state/history/downloads 路径；即使 Playwright 缺失也应返回可行动诊断。
 - `browser_profiles`：列出 workspace 内持久浏览器 profile 的安全 metadata（当前 URL/title、state/history/download 计数、目录统计、Chromium runtime marker 存在性），不读取 cookie/localStorage/profile 数据库、runtime marker 内容或下载内容。
-- `browser_profile_delete`：显式删除一个 workspace-scoped persistent browser profile 的 profile data、state file、downloads 目录和 Intatis history metadata；这是 `.destructive` 工具，必须要求 `confirmProfile` 与目标 profile 匹配，并仍通过权限门；若删除前发现 active/lock runtime marker，只输出概括性提示，不列 marker 文件名或内容。
-- `browser_history`：只读取 `.intatis/browser/history.jsonl` 中的非 secret 历史 metadata，支持 profile 和条数过滤，不读取 cookie/localStorage/profile 数据库。
-- `browser_navigate` / `browser_snapshot` / `browser_handoff` / `browser_reload` / `browser_back` / `browser_forward`：用持久浏览器 profile 打开 URL、读取当前页、打开有界 headed 浏览器窗口供用户手动登录/接管、刷新当前页，或按 Intatis profile 导航栈前进/后退，返回页面 title、URL、可见文本、链接和可定位交互元素摘要。
+- `browser_profile_delete`：显式删除一个 workspace-scoped persistent browser profile 的 profile data、state file、downloads 目录和 Mopelium history metadata；这是 `.destructive` 工具，必须要求 `confirmProfile` 与目标 profile 匹配，并仍通过权限门；若删除前发现 active/lock runtime marker，只输出概括性提示，不列 marker 文件名或内容。
+- `browser_history`：只读取 `.mopelium/browser/history.jsonl` 中的非 secret 历史 metadata，支持 profile 和条数过滤，不读取 cookie/localStorage/profile 数据库。
+- `browser_navigate` / `browser_snapshot` / `browser_handoff` / `browser_reload` / `browser_back` / `browser_forward`：用持久浏览器 profile 打开 URL、读取当前页、打开有界 headed 浏览器窗口供用户手动登录/接管、刷新当前页，或按 Mopelium profile 导航栈前进/后退，返回页面 title、URL、可见文本、链接和可定位交互元素摘要。
 - `browser_click` / `browser_type` / `browser_submit` / `browser_select_option` / `browser_press_key` / `browser_scroll` / `browser_wait`：通过 CSS selector、文本或 accessibility role/name 对当前浏览器页面点击、输入、提交当前或目标表单、选择下拉项、按键/快捷键、滚动页面/元素，或等待指定 selector/text/role 状态；动作后的 observation 也返回按钮、输入框、下拉框等交互元素的 role/name/selector/options 摘要，供下一步定位；会打开新 tab/window 的 click/type-submit/select/submit/press 动作会在 Playwright 路径用 page/popup 事件、在 CDP fallback 路径用真实鼠标点击 + target polling 跟随到新页面，并把最终页面写入 state/history；`browser_type` 会从工具 observation 中遮蔽本次输入值，并在 Swift 工具入口与 Playwright/CDP 后端 DOM 执行前拒绝疑似密码、2FA、token 或 API key 输入目标，要求改用 `browser_handoff` 让用户接管登录/验证。
 - `browser_screenshot`：把当前页或指定 URL 渲染为 PNG 写入工作区路径，并通过 `changedFiles` 暴露产物。
 - `browser_upload_file`：把 workspace 内文件附加到当前页面的 file input；Playwright 路径使用 `locator.setInputFiles`，CDP fallback 使用 `DOM.setFileInputFiles`。
-- `browser_download`：点击预期会触发下载的元素，并把下载文件保存到 `.intatis/browser/downloads/<profile>`，通过 `changedFiles` 暴露下载路径；CDP fallback 使用真实鼠标事件触发，避免只靠 DOM `click()` 的非用户手势限制。
-- `browser_downloads`：只列出 `.intatis/browser/downloads/<profile>` 下的文件 metadata（路径、大小、修改时间），不读取文件内容。
+- `browser_download`：点击预期会触发下载的元素，并把下载文件保存到 `.mopelium/browser/downloads/<profile>`，通过 `changedFiles` 暴露下载路径；CDP fallback 使用真实鼠标事件触发，避免只靠 DOM `click()` 的非用户手势限制。
+- `browser_downloads`：只列出 `.mopelium/browser/downloads/<profile>` 下的文件 metadata（路径、大小、修改时间），不读取文件内容。
 - `browser_search`：在持久 profile 中用 DuckDuckGo/Google/Bing 搜索。
 
 设计取舍：
@@ -1159,7 +1173,7 @@ provider tool_call -> AgentLoop schema validation
   workspace identity、WorkspaceLease access rules 和 mandatory denied patterns。
   action 的写集必须完整声明 profile、downloads、state、history 与本次额外
   output/input path，且在创建目录前完成预检。macOS 不给 Chromium 进程树再套一层
-  Intatis Seatbelt，因为继承的外层 sandbox 会让 Chromium helper 触发
+  Mopelium Seatbelt，因为继承的外层 sandbox 会让 Chromium helper 触发
   `forbidden-sandbox-reinit`；这不是关闭隔离，浏览器自身 native sandbox 必须保持
   启用，绝不添加 `--no-sandbox`。Linux 浏览器 lane 继续要求 Bubblewrap。
 - 浏览器 Node 进程使用 sanitized environment、参数数组、bounded head/tail
@@ -1174,7 +1188,7 @@ provider tool_call -> AgentLoop schema validation
   target WebSocket 必须是同 port 的 loopback endpoint；该规则同时覆盖
   `/json/list` 和无现有 page 时的 `/json/new` PUT/GET fallback，任何 target 都须
   在构造 `CDPClient` 前完成校验。
-- 浏览器 profile、cookies、localStorage、下载目录、state、history metadata 放在 workspace `.intatis/browser/` 下：`profiles/<profile>`、`downloads/<profile>`、`state/<profile>.json`、`history.jsonl`。`state/<profile>.json` 保存当前页面 metadata 以及 Intatis 管理的 `navigationStack` / `navigationIndex`，供跨工具调用的 back/forward 使用；这些 profile 可能包含登录态，不写入 OS Keychain，不应作为普通 artifact 展示、提交或跨 agent 原文转发；`browser_profiles` / `browser_history` 只暴露受控 metadata，`browser_profiles` 只检查少数 Chromium active/lock marker 的存在性来提示可能有浏览器进程占用，不读取 marker 内容或 profile 数据库；页面摘要可暴露交互控件定位 metadata，但不得打印 cookies/localStorage/profile DB、密码/token 或当前文本输入值。
+- 浏览器 profile、cookies、localStorage、下载目录、state、history metadata 放在 workspace `.mopelium/browser/` 下：`profiles/<profile>`、`downloads/<profile>`、`state/<profile>.json`、`history.jsonl`。`state/<profile>.json` 保存当前页面 metadata 以及 Mopelium 管理的 `navigationStack` / `navigationIndex`，供跨工具调用的 back/forward 使用；这些 profile 可能包含登录态，不写入 OS Keychain，不应作为普通 artifact 展示、提交或跨 agent 原文转发；`browser_profiles` / `browser_history` 只暴露受控 metadata，`browser_profiles` 只检查少数 Chromium active/lock marker 的存在性来提示可能有浏览器进程占用，不读取 marker 内容或 profile 数据库；页面摘要可暴露交互控件定位 metadata，但不得打印 cookies/localStorage/profile DB、密码/token 或当前文本输入值。
 - 同一进程内，Playwright/CDP-backed `browser_*` 命令按 workspace profile 路径串行化，避免多个 agent 同时打开或写入同一 persistent profile、state/history 或导航栈；不同 profile 不做全局互斥，仍可并行执行。`browser_back` / `browser_forward` 的目标 URL 选择和真实浏览器执行必须处在同一 profile 临界区内。
 - `web_fetch` 是 `.network` 工具；`browser_profiles` / `browser_history` / `browser_downloads` 是 `.readOnly` metadata 工具；`browser_profile_delete` 是 `.destructive` 工具；`browser_diagnostics` 是 `.exec` 但不标记 network risk；页面导航、headed handoff、刷新、前进/后退、交互、表单提交、滚动、等待、截图、上传、下载和搜索类 `browser_*` 是 `.exec` 且 `risksNetwork == true`。`DeterministicPolicyGate` 必须先检查 exec/shell-disabled/read_only 边界，再进入网络审批，避免无 shell 能力的 host 被 network ask 误放行。
 - Cowork coordinator lease 可用 `browse_web`；worker 默认不获得 `web_fetch` 或任何 `browser_*` 工具。
@@ -1343,7 +1357,7 @@ MessageBus.deliver -> Mediator.mediate
 - `finish_run` / `stop_run` 是模型可见、宿主执行的 current-run close tools，只进入 exact `@main`、issuer=nil、带 non-nil ContinuationRunID 的 root invocation，并要求 main-only `controlRun` capability；worker、child coordinator、mailbox task 与 reviewer 均不可见。模型参数只有 1–1000 字符 reason，不能选择 SessionID、RunID、GoalID、SubmissionID、root TaskID 或 close source。工具仍经过 schema、registry、lease、PermissionEngine、durable execution ticket；获准后 close installation 先成为 actor-local admission/authorization tombstone，EventLog 再在 complete-known history 与跨进程锁内为 exact RunID 安装 first-write `continuation_run_close_requested` claim，且 durable claim 必须早于等待既有 admission 与 exact-run drain。claim 不替代既有 run completed/cancelled checkpoint：Orchestrator 只 drain 同 RunID 的其余 task/message，允许当前 root 返回一次最终文本，并在 restore 时先兑现 fence；不同 run 不受影响。普通自然语言 final 不伪造显式 claim；root failure/cancel/timeout、用户 Stop 与 session shutdown 分别保留 runtime/user/hostLifecycle source，并在 provider/tool cleanup 前关闭精确 run。
 - `rename_session` 也是普通 ToolCall，而不是隐藏标题模型或 UI 特例。模型参数只有 1–120 字符的 `name`；当前 SessionID/SessionKind 与 durable operation ID 由宿主分别从 runtime 和 execution ticket 注入。Code 单 agent 与 Cowork exact `@main` 可见，worker、spawn coordinator、其他 agent 与 reviewer 不可见；Chat 保持无工具。工具仍经过 strict schema、ToolRegistry、CapabilityLease（Cowork）、PermissionEngine、durable prepare/settle 与 `tool_result`，但 exact current-session intent 是 deterministic low-risk allow，不生成用户弹窗或 reviewer 请求。名称先 secret-scan，raw value 不进入 durable tool-call arguments；EventLog rename source/operation ID 使 exact executor retry 幂等。Code 与 Cowork 不增加宿主自动命名 trigger：Code runtime system prompt 与 Cowork coordinator/exact `@main` prompt 只在 session 第一轮用户任务完成验证或确认真实 blocker 后、且 authoritative tools 实际含该工具时，要求模型调用一次具体任务/结果标题；日期、时间、SessionID 与泛化占位词禁止。后续轮次只响应用户明确改名请求。Cowork worker 不收到该提示；exact `@main` 把改名作为最后一个非 run-control tool，若当前 run 还需 `finish_run` / `stop_run`，必须在改名成功后再调用。
 - `GoalVerifierControlPlane` 与数据面 agent、`@permission-reviewer` 分离：使用独立 system/context 和无工具 provider 请求，不写 EventLog；默认不注入 sampling、output-token 或字符上限，显式 host policy 才可启用。WorkTask result/evidence 只是 agent-reported；host 从同一 Goal 下 durable 成功 tool-execution settlement 中，仅按 validation-tool allowlist 派生 `validationEvidence`，再校验 verifier 的 requirement/evidence 引用。malformed/tool call/缺完成标记/普通 provider failure/timeout/cancel 只返回 continue。Goal completion proof 必须非空、没有 remaining work/blocker、每条 requirement proven 且带 host-bound evidence，并按规范化文本逐项覆盖 Goal objective、全部 success criteria 与 constraints；重复 requirement 也必须按次数覆盖。只有该完整证明可驱动 Goal completed。
-- Code 与 Cowork 不维护两套执行内核：二者使用同一个 Swift-native headless `AgentRuntime` 工厂，统一 registry、permission、completion、durable tool ticket 和单次请求参数。`RuntimeEnvironmentManifest` 在每次请求的首个 system message 中稳定声明 Intatis/Code 或 Cowork、外部动作只能通过 API tools、严格 JSON Schema 和 ToolResult 完成语义；动态 agent/workspace/task/lease/event 仍只进入有界 user-role untrusted context。
+- Code 与 Cowork 不维护两套执行内核：二者使用同一个 Swift-native headless `AgentRuntime` 工厂，统一 registry、permission、completion、durable tool ticket 和单次请求参数。`RuntimeEnvironmentManifest` 在每次请求的首个 system message 中稳定声明 Mopelium/Code 或 Cowork、外部动作只能通过 API tools、严格 JSON Schema 和 ToolResult 完成语义；动态 agent/workspace/task/lease/event 仍只进入有界 user-role untrusted context。
 - 用户指令不是一段脱离任务图的直接 AgentLoop 调用：它必须成为 root `TaskContract`，经历 durable queue 与严格终态后 `send` 才返回。`created` / `assigned` / `queued` / `running` 不能被投影为完成；失败、取消和不完整 provider finish 必须保留原因与 attempt。
 - Cowork final turn 不再从既往 tool denial/failure 派生副作用完成 ledger，也不做二次完成拦截。provider 正常完成且没有 tool call 时，最终 `message_completed`、final assistant model-history item、agent idle 与 `turn_outcome(completed)` 在一个 EventLog batch 中提交。failed/interrupted outcome 仍是其他运行时失败的权威终态：`CodeProjection` 会把旧日志中先写出的 completed 气泡纠正为失败/未完成，`AgentModelHistoryProjector` 保留真实 user/tool history，但不把该轮失效的 final assistant 回灌下一次 provider request；同一 TurnID 的冲突终态 fail closed。
 - root、delegation、mailbox wake、retry、agent attach/reviewer attach 与 crash requeue 都遵循 persistence-first admission：先写完执行所需的 roster/lease/task/queue 事件，再提交 registry/taskGraph/scheduler 内存状态。关键 admission 事件写入失败时不得运行 provider；已写入的半 admission task 立即补 `task_cancelled`，恢复时 orphan default lease 也不得进入可执行状态。
@@ -1475,38 +1489,38 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
 | `TaskContract` / `TaskReportPayload`（AgentInvocation execution layer） | 单次 root/child agent invocation 契约与结构化回报；不是用户可见 WorkTask | `task_created/assigned/queued/started/completed/failed/cancelled` 既有事件；queue/start/terminal 记录 attempt | 契约记录 kind、issuer/assignee/objective/roleHint/deliverable/lease、reply mode、timeout、maxAttempts，并以可选字段绑定 submission、WorkTask/ContinuationRun/Goal、exact inference binding 与 mailbox MessageIDs；`mailboxMessageIDs == nil` 仅表示 legacy/non-mailbox，new mailbox admission 必须冻结非空、去重、最多 8 项。Phase A root task 冻结 `submissionID`，main-hosted root admission 先要求 live `@main` 与 immutable submission 的 `mainAgentInferenceBinding` 全等，再把同一值冻结进 TaskContract；delegated/mailbox child 继承 submission scope。普通用户消息与每个 Goal run 均创建 root invocation。执行前 frozen binding 必须与 live roster 一致；完成只产生 candidate result；新 admission 使用当时 policy 并冻结 timeout，历史已落盘的 300 秒合同不得静默改写；追加字段保持旧 JSONL 可解码 |
 | `AgentScheduler` / `CoworkExecutionPolicy` / `AgentExecutionBudget` | claim、并发、恢复、取消/超时、attempt 与 token 预算 | scheduler 从 task/message events 重建；token 用量从 `turn_stats` 重算 | 默认同 agent single-flight、跨 agent 最多 4 个任务并行、新 admission 每次 invocation 3,600 秒、最多 3 attempts；CapabilityLease 的默认 delegation `maxDepth=1` 保持不变。仅 eligible non-root/CLI read-only crash recovery 增加 attempt；GUI restored root submission 保持 paused/interrupted 直至 exact Retry；session-lifetime 共享 token meter 在 provider dispatch 前预留 input estimate + output slice，响应/失败/超时按 reported 或估算 usage settle，配置切换不丢 outstanding reservation；预算明确是 soft；取消不自动 retry |
 | `ContextBundle.taskGroupEvents` | Cowork worker prompt 的共享任务状态摘要 | `ContextProjector` 从 task events 投影，随本轮模型请求临时进入 prompt，不单独持久化 | 只包含当前/父/兄弟/子/related task 的任务 ID、状态、agent 和关系；不得泄漏其他任务的 objective、expected deliverable、tool args、结果文本或私有路径 |
-| `SessionSummary` / `SessionHistoryStore` | 最近会话摘要、显示名称与路径生成 | 扫描 app support root 下 `<session>/events.jsonl`，读取 EventLog-derived `<session>/session.json` | Chat/Code/Cowork 按 `sess_` / `code_` / `cowork_` 前缀区分；手工/model-tool Rename 都 EventLog-first，显示名称不改变 `SessionID`，model 无目标 session 参数；旧 metadata 只作兼容迁移输入；macOS/iOS 共用实现，平台层只传 root 与 `SessionID` |
-| `CoworkSessionSettings` / `CoworkProjectInfo` | Cowork project-mode canonical metadata 与右侧 inspector 投影 | `session_settings_updated` in EventLog；`session.json` 为派生缓存；旧 `intatis.cowork.projectSettings.<sessionID>` 只作迁移输入 | 保存主 agent 名称、未来新 agent exact inference default、默认 permission profile、可选 token budget 与 secret-free workspace metadata；bookmark bytes 独立进入 `workspace-access.plist`；不得重写现有 agent或授予 lease；fresh bootstrap 固定七事件，历史 main/reviewer 走 host-authorized exact recovery；direct multi-root tool context 尚未实现 |
+| `SessionSummary` / `SessionHistoryStore` | 最近会话摘要、显示名称与路径生成 | 扫描 app support root 下 `<session>/events.jsonl`，读取 EventLog-derived `<session>/session.json` | Chat/Code/Cowork 按 `sess_` / `code_` / `cowork_` 前缀区分；手工/model-tool Rename 都 EventLog-first，显示名称不改变 `SessionID`，model 无目标 session 参数；旧 metadata 只作兼容迁移输入；macOS 使用同一共享实现，平台层只传 root 与 `SessionID` |
+| `CoworkSessionSettings` / `CoworkProjectInfo` | Cowork project-mode canonical metadata 与右侧 inspector 投影 | `session_settings_updated` in EventLog；`session.json` 为派生缓存；旧 `mopelium.cowork.projectSettings.<sessionID>` 只作迁移输入 | 保存主 agent 名称、未来新 agent exact inference default、默认 permission profile、可选 token budget 与 secret-free workspace metadata；bookmark bytes 独立进入 `workspace-access.plist`；不得重写现有 agent或授予 lease；fresh bootstrap 固定七事件，历史 main/reviewer 走 host-authorized exact recovery；direct multi-root tool context 尚未实现 |
 | `Agent` | agent 值类型 | lifecycle 事件 durable，运行时 roster 内存重建 | ordinary agent 的 `agentInferenceBinding` 是推理权威；兼容 `model` 不能覆盖 binding。`coordinationDepth` 是当前 coordinator 工具兼容 fuse；默认 permission profile `.reviewed`；自动权限审查者固定 `read_only` + `coordinationDepth=0` |
 | `Capability` | provider 能力枚举 | 配置 | chat/tool_calling/vision/realtime/audio/image/video/embedding |
-| `PlatformProfile` | 平台能力信封 | launch-time | 当前产品使用 `.iOS`（最受限）/`.macDeveloperID`；`.macAppStore` 仅保留 legacy source/decode compatibility；`current` 默认 `.iOS` |
+| `PlatformProfile` | 平台能力信封 | launch-time | shipping 只使用 `.macDeveloperID`；`.iOS` 仍是 `current` 的最受限默认值，`.macAppStore` 仅为 legacy decode，不对应 App target |
 | `PermissionProfile` | 每 agent 模式 | agent | manual/reviewed/autopilot/read_only/locked；硬 DENY 优先 |
-| GUI provider catalog | GUI provider/model/variant 设置与 iOS 显式文件导入 | UserDefaults `intatis.providerCatalog.v1` + secret ref；当前聊天选择 `intatis.providerSelection.v1`；macOS 可由 `INTATIS_CONFIG` 显式指定文件、`~/.config/intatis/intatis.json` / `intatis.jsonc`、app support `intatis.json` / `intatis.jsonc` JSON/JSONC 覆盖；iOS 通过系统 Files picker 显式导入后写 app-owned `Intatis/imported-chat-configuration.json` schema-v1 protected snapshot；不自动发现 `opencode.json` 或 OpenCode app 配置；旧 `config.json` / direct `providers` 兜底兼容读取 | provider 持久化 `baseURL` / `chatEndpoint` / secret ref；model 持久化 id / 展示名；macOS variant 只持久化 identity，参数仍来自配置文件；iOS 导入保留 base model raw options/adapter/capabilities，但当前不导入 variants并明确警告；聊天页切换只改当前选择，不改写外部 JSON；明文 API key 不得进 UserDefaults 或 imported snapshot；旧 `intatis.baseURL`/`intatis.model` 仅迁移/兼容 |
+| GUI provider catalog | GUI provider/model/variant 设置 | UserDefaults `mopelium.providerCatalog.v1` + secret ref；当前选择 `mopelium.providerSelection.v1`；macOS 优先读取 `MOPELIUM_CONFIG`、`~/.config/mopelium/mopelium.json[c]` 或 App Support 配置；canonical 候选不存在时才读取有界旧 Intatis config/env；不自动发现 OpenCode app 配置 | provider 保存 endpoint/secret ref，model 保存 id/展示名，variant 只保存 identity；新写只用 Mopelium，明文 API key 不得进 UserDefaults |
 
 ## 同步 / 通信机制
 
 - **进程内**：当前 GUI/CLI kernel 仍在单进程内运行；
   `Orchestrator`/`EventLog`/`MessageBus` 均为 `actor`。这是当前事实，不是仅限 v0.1 的规划。
-- **JSON-RPC 2.0 词汇**已定义（`JSONRPC.swift`：Command→request、Envelope→event notification），但**尚未挂传输**。未来 `intatis agent --stdio` / `intatis daemon` 是规划中管道。`UNKNOWN` — 当前无 out-of-process 传输实现。
+- **JSON-RPC 2.0 词汇**已定义（`JSONRPC.swift`：Command→request、Envelope→event notification），但**尚未挂传输**。未来 `mopelium agent --stdio` / `mopelium daemon` 是规划中管道。`UNKNOWN` — 当前无 out-of-process 传输实现。
 - **Provider 线协议**：OpenAI 兼容 HTTP/SSE（chat completion endpoint streaming）。`WireFormat.openai` 是唯一 shipped 格式；`ProviderEndpoint.chatEndpoint` 可覆盖默认 `baseURL + /chat/completions`，保留 `baseURL` 给 image/transcription 等后续路径。
 - **Provider tool-call delta 兼容**：`OpenAIToolCalling` 仍输出既有 `ToolCall(id:name:arguments:)`，但解码更宽容：单工具调用可缺省 `index`，`index` 可是字符串，`function.arguments` 可是字符串或 JSON object/array/number/bool，非字符串值会被压缩编码回 JSON 字符串再交给既有工具参数解析。Chat/tool-calling streaming 会遍历同一 SSE chunk 的全部 choices，不再只消费 `choices.first`；如果首个 choice 为空但后续 choice 带 content、tool_calls 或 `finish_reason`，仍会输出对应 delta/tool calls 并完成流；如果多个 choice 同时给出 finish reason，`tool_calls` / `function_call` 优先于普通 `stop`，避免工具轮被错误标成文本完成。若 provider 以 `finish_reason:"tool_calls"` 或旧式 `finish_reason:"function_call"` 结束但没有发出完整 tool-call delta / tool name，或已出现 tool-call delta 但最终错误给出 `stop` 且仍缺 tool name，则抛出 provider tool-call stream 兼容错误，不把空工具调用合成为成功。非空累计 `function.arguments` 在发出 `ToolCall` 前必须能解码为 JSONValue，截断或非法 JSON 会作为 provider tool-call stream 兼容错误暴露；空 arguments 仍保留，以兼容无参工具。此行为不改变 EventLog schema，不绕过权限门。
-- **Provider/runtime 错误反馈**：`ProviderErrorFormatting` 统一处理 OpenAI-compatible HTTP 非 2xx、streaming provider error payload、malformed SSE chunk、`URLError`/取消/transport error，并只保留裁剪后的 provider message 或 response preview；HTTP 非 2xx 响应体只有结构化 `error`/`message`/`detail`/`error_description` 才显示为 `Provider said`，HTML/纯文本代理错误页只显示 `Preview`。`ProviderEndpoint` 在 chat streaming、tool-calling streaming、image generation、transcription 发起网络前统一校验 Chat endpoint 或 Base URL 必须是带 host 的 `http`/`https` URL，非 HTTP、缺 scheme 或缺 host 归类为 `IntatisError.config`，不把 file URL 或底层 URLSession 失败泄漏到 UI。非流式 image/transcription 对 HTTP 2xx 响应也会校验成功 payload shape；如果 provider 返回错误 JSON、HTML、缺 `data[].b64_json`、坏 base64、缺 `text` 或其他不兼容结构，会抛出裁剪后的 `IntatisError.decoding`，提示检查 endpoint、provider path、model 与 response format；只有结构化 `error`/`message`/`detail`/`error_description` 才显示为 `Provider said`，普通 HTML/缺字段 JSON/坏 base64 只显示 `Preview`。`RuntimeErrorPresentation` 把 `IntatisError`/`URLError` 映射成 `ErrorPayload.code + message`，供 ChatLoop/AgentLoop 写入 append-only `error` 事件。`ConversationProjection` 与 `CodeProjection` 从该 payload 派生 `RuntimeRecoveryAdvice`；Chat 继续在正文旁显示恢复建议，而 Code/Cowork 由 SharedUI presentation 将 error、失败 execution row、recovery、失败 submission 与 host 页面级错误去重后统一放入右栏唯一的条件式错误卡。若错误发生在当前 assistant/agent partial delta 之后，投影层会把该未完成气泡标记为 stopped 并附加 partial-response 恢复建议，已输出文本继续保留；Code/Cowork 只把恢复说明移入右栏，partial 文本仍留在 transcript。状态码提示覆盖 400/401/403/404/408/422/429/5xx 等常见接入问题，但真实 provider 格式仍需矩阵验证。
+- **Provider/runtime 错误反馈**：`ProviderErrorFormatting` 统一处理 OpenAI-compatible HTTP 非 2xx、streaming provider error payload、malformed SSE chunk、`URLError`/取消/transport error，并只保留裁剪后的 provider message 或 response preview；HTTP 非 2xx 响应体只有结构化 `error`/`message`/`detail`/`error_description` 才显示为 `Provider said`，HTML/纯文本代理错误页只显示 `Preview`。`ProviderEndpoint` 在 chat streaming、tool-calling streaming、image generation、transcription 发起网络前统一校验 Chat endpoint 或 Base URL 必须是带 host 的 `http`/`https` URL，非 HTTP、缺 scheme 或缺 host 归类为 `MopeliumError.config`，不把 file URL 或底层 URLSession 失败泄漏到 UI。非流式 image/transcription 对 HTTP 2xx 响应也会校验成功 payload shape；如果 provider 返回错误 JSON、HTML、缺 `data[].b64_json`、坏 base64、缺 `text` 或其他不兼容结构，会抛出裁剪后的 `MopeliumError.decoding`，提示检查 endpoint、provider path、model 与 response format；只有结构化 `error`/`message`/`detail`/`error_description` 才显示为 `Provider said`，普通 HTML/缺字段 JSON/坏 base64 只显示 `Preview`。`RuntimeErrorPresentation` 把 `MopeliumError`/`URLError` 映射成 `ErrorPayload.code + message`，供 ChatLoop/AgentLoop 写入 append-only `error` 事件。`ConversationProjection` 与 `CodeProjection` 从该 payload 派生 `RuntimeRecoveryAdvice`；Chat 继续在正文旁显示恢复建议，而 Code/Cowork 由 SharedUI presentation 将 error、失败 execution row、recovery、失败 submission 与 host 页面级错误去重后统一放入右栏唯一的条件式错误卡。若错误发生在当前 assistant/agent partial delta 之后，投影层会把该未完成气泡标记为 stopped 并附加 partial-response 恢复建议，已输出文本继续保留；Code/Cowork 只把恢复说明移入右栏，partial 文本仍留在 transcript。状态码提示覆盖 400/401/403/404/408/422/429/5xx 等常见接入问题，但真实 provider 格式仍需矩阵验证。
 - **Provider runtime retry/timeout/rate-limit headers**：`ProviderRuntimePolicy` 由 OpenAI-compatible chat streaming、tool-calling streaming、image generation、transcription 共享，但按交互类型分流 timeout：Chat streaming 为 120 秒，Code/Cowork Agent streaming 与 non-streaming image/transcription 为 180 秒。Chat/Agent streaming最多6 attempts，即首次请求后最多5次reconnect，默认退避1/2/4/8/16秒；non-streaming仍最多2 attempts。URLRequest 会设置 request timeout；408/409/425/429/5xx 与短暂网络/timeout 错误可 retry。stream replay fence按“已经向consumer交付语义输出”而非“收到任意byte/typed status”决定：空SSE、heartbeat、Responses `created/in_progress`、结构化retryable error和仅在本地累计的未完成tool-call fragment不关闭重连；一旦yield文本、完整tool call、usage或done，失败就按错误反馈路径暴露且不得自动重放，避免重复输出或重复工具调用。hosted-search unsupported→ordinary-chat fallback仍使用独立的typed acceptance fence，因此status-only事件不会错误触发协议降级。Chat/tool-calling streaming 接受 `[DONE]` 或 chunk `finish_reason` 作为完成信号；`finish_reason` 不会立刻截断底层流，后续 usage chunk 仍会被读取，done 只投递一次；若底层流结束时没有任何完成信号，则抛出 completion-marker 兼容错误而不是合成成功。非流式 image/transcription 由 `ProviderRuntime.sendData` 统一重试并给 timeout 生成可行动错误。`HTTPDataResponse` 与 `URLSessionStreamingClient` 会保留 HTTP response headers；`ProviderErrorFormatting` 解析 `Retry-After`、`x-ratelimit-reset`、`x-ratelimit-reset-requests`、`x-ratelimit-reset-tokens`、`ratelimit-reset`，支持数字秒、HTTP 日期和 `750ms` / `1m30s` 等 duration 字符串，用于 retry delay 与用户可读说明，长等待由 policy cap。
 - **Provider health check**：`ProviderRegistry.healthCheck(role:options:)` 复用当前 provider catalog、chat selection、secret resolver 与 `OpenAIWireProvider`，发起最小 chat/agent 流式请求，输出 `ProviderHealthReport`。chat 与 agent health check 均请求 `stream_options.include_usage`，并使用共享 `Usage` 合并规则处理 split usage chunk。报告显式区分 ok、timeout、partial stream、unknown endpoint、非法 provider URL、provider/transport/config 错误，并带 endpoint/model/wire/耗时/首 token/usage 与裁剪预览；兼容缺 `[DONE]` 但有 `finish_reason` 的 provider，只有完成信号缺失才标记 partial stream，并保留已收到的裁剪预览；macOS 与 iOS 设置页共用该 provider 层 API，只做不同布局，不写入 EventLog 或持久状态。
 - **Goal 输入命令**：`GoalInputParser` 在 UI/ViewModel 层识别行首 `/goal`，要求后面有目标文本。Chat / Code 保留 v0.12 legacy 语义：剥离命令前缀，把清洗文本送入 provider，并在 `UserMessagePayload.tags = ["Goal"]` / `goal` 保存标签元数据供 bubble 投影。Cowork 的同一语法已升级为 durable Goal authority：创建 `Goal` 与首个 `ContinuationRun` 后由 host 驱动 scoped root AgentInvocation，不把它当成普通标签消息；仍在 mention 路由前后解析以接受 `/goal @Agent ...` 与 `@Agent /goal ...` 作为请求上下文，但 Goal continuation 始终由 `@main` 主持，因此 Goal Send 也冻结当时的 next-main exact binding，不能把生命周期、模型选择或终态 authority 下放给 mentioned agent。
 - **工具执行反馈**：AgentLoop 对未知工具、权限拒绝、工具抛错分别写入结构化 `tool_result` observation，并在执行前追加 `agent_status(tool)`。模型给出的 raw arguments 在 `.tool_call` 持久化前先分类；unknown/invalid、作为 inference-control surface 的全部 `spawn_agent` inputs、含用户自定义标题的 `rename_session` inputs，以及永不允许落原文的 `write_stdin` inputs 只记录 bounded redacted placeholder + count/redacted，且不写 raw-value digest；`rename_session` 还在 authorization/prepare 前按结构化 `name` 做 secret scan。schema-valid 其他工具先 secret-scrub/限长，只有未脱敏/未截断的 canonical 参数才可附加 digest。稳定 `@main` 另把一次 assistant 返回的完整 function-call batch 作为一个 model-facing item 在任何工具执行前原子持久化；其参数只有在 registration/schema/secret/size 检查全部通过时才原样保留，否则写固定合法 JSON placeholder。每个已清洗、有界的 function output 与对应 audit result/execution settlement 同 batch，因而不存在“工具已经结算、模型历史还没写”的可取消窗口；含图output还必须与同turn/call的唯一`tool_result`及同`{callID, agent, taskID, attempt}`的唯一settlement精确绑定，stable Code工具票据使用model-history规范化的attempt 1。只有完整 direct output 存在时才去除 ContextBundle 里的同一 audit result。UI/audit `tool_call` / `tool_result` 仍是独立记录，不能反向冒充模型历史。同一 turn 内空或重复 call ID 会改写为唯一 turn-local ID，并在后续关联位置一致使用。随后，已知工具在权限判断和执行前会校验参数必须是 JSON object，并满足 descriptor schema 的 required 字段、基础类型、数字 `minimum`/`maximum` 约束、字符串 `minLength`/`maxLength` 约束与 `additionalProperties:false` 未知字段规则，`read_file.maxBytes` 当前要求 `>= 1`，标准工具 path/query/command/diff 字符串当前要求非空，required 为空的无参工具可把空参数 / `null` 归一为 `{}`，坏 JSON、非对象、缺 required 字段、基础类型错误、数值越界、字符串过短/过长或未知字段会写入 `invalid tool input:` 的 `tool_result`，不生成 `permission_request`，也不执行工具。当前 shipped tools schema 默认声明 `additionalProperties:false`，因此模型给出的额外字段不能被 `try?` 默认值吞掉后进入权限或工具执行。`CodeProjection` 根据 `tool_call_id` 将结果标题回填为 `result · <toolName>`，把 `tool error:` / `permission denied:` / `unknown tool:` / `invalid tool input:` 标成失败项，并通过 `RuntimeRecoveryAdvice` 派生恢复建议。GUI 与 CLI 均消费事件投影/observation，不解析 assistant transcript。
-- **Automatic permission sidecar durability**：Cowork automatic 收到 provider tool call 后，先从 arguments 顶层抽出 provider-required string `__intatis_authorization_context`，再 canonicalize business object。provider-required 是 strict wire 表示；宿主只在 automatic ask 分支消费并验证它，deterministic allow/deny 忽略其语义。valid sidecar 只在当前 turn 的 acting-model 内存 conversation 中保留为格式示例；`message_completed`、durable `model_history_item(functionCallBatch)`、`.tool_call`、permission request、denial signature、durable ticket 与 executor 都只看到 stripped business view。outer JSON 无法解析时 durable history 只写固定合法 placeholder。valid automatic ask 的 `permission_request.context` 可写 generation/snapshot/context digest/status receipt；raw sidecar 永不落盘，reviewer transient exact-args 副本不进入 permission lifecycle。missing/malformed/secret-bearing sidecar 不建 `permission_request` / `permission_resolved`，只写 failed/runtimeFailed `tool_result`，不调用 reviewer、也不消耗 denial fuse；同 business args 补正后仍可进入 reviewer。binding 不一致另按 authorization snapshot failure typed fail closed。manual/nonautomatic 模式出现保留字段只写 redacted audit 并拒绝，不把字段交给业务工具。deterministic allow 仍执行拆包，但不依赖 sidecar。该边界只覆盖保留字段：acting model 自行复述到普通 assistant text 的内容仍走普通消息持久化；malformed provider error preview 仍依赖通用 diagnostic sanitizer，而不是 sidecar codec。
+- **Automatic permission sidecar durability**：Cowork automatic 收到 provider tool call 后，先从 arguments 顶层抽出 provider-required string `__mopelium_authorization_context`，再 canonicalize business object。provider-required 是 strict wire 表示；宿主只在 automatic ask 分支消费并验证它，deterministic allow/deny 忽略其语义。valid sidecar 只在当前 turn 的 acting-model 内存 conversation 中保留为格式示例；`message_completed`、durable `model_history_item(functionCallBatch)`、`.tool_call`、permission request、denial signature、durable ticket 与 executor 都只看到 stripped business view。outer JSON 无法解析时 durable history 只写固定合法 placeholder。valid automatic ask 的 `permission_request.context` 可写 generation/snapshot/context digest/status receipt；raw sidecar 永不落盘，reviewer transient exact-args 副本不进入 permission lifecycle。missing/malformed/secret-bearing sidecar 不建 `permission_request` / `permission_resolved`，只写 failed/runtimeFailed `tool_result`，不调用 reviewer、也不消耗 denial fuse；同 business args 补正后仍可进入 reviewer。binding 不一致另按 authorization snapshot failure typed fail closed。manual/nonautomatic 模式出现保留字段只写 redacted audit 并拒绝，不把字段交给业务工具。deterministic allow 仍执行拆包，但不依赖 sidecar。该边界只覆盖保留字段：acting model 自行复述到普通 assistant text 的内容仍走普通消息持久化；malformed provider error preview 仍依赖通用 diagnostic sanitizer，而不是 sidecar codec。
 - **Agent 文档/媒体工具**：`ToolRegistry.standard()` 暴露 PDFKit `inspect_pdf` / `read_pdf`、五个 fixed-format Docling Markdown reader 及其 continuation、`ocr_pdf`、`pdf_render_page`、四个 exact PDF export、DOCX/PPTX/XLSX 一操作一工具的写入 surface、Tectonic-only `compile_latex` 和生图写入工作区；不暴露 PDF mutation、旧文档聚合工具、HTML/EPUB write 或扫描件重建 wrapper。PDFKit 路径在 macOS 可直接工作；Linux 或无 PDFKit 平台会返回配置错误并提示使用受审查的外部后端。process-backed 文档工具和 LaTeX 编译不内置模型或 TeX 发行版，只调用已安装且版本锁定的成熟工具；缺少命令时返回可行动的配置错误。生图工具不直接知道 provider secret，只通过注入的 `ImageGenerationToolService` 使用现有 provider registry。
-- **Chat 与 Agent 托管网络搜索**：macOS/iOS/CLI Chat 不展示搜索按钮、菜单项、开关、状态或 provider/model 路由提示。每次 Send 只冻结用户当前选择的 exact Chat provider/model/variant/request adapter；`ProviderRegistry.chatRuntimeRoute()` 先验证普通 Chat adapter，再同时要求 exact model 的 `hosted_web_search` 声明与受审 adapter dialect。满足时向当前模型提供对应能力并保持 `tool_choice: auto`，由当前模型自行决定是否搜索；明确不支持、未声明、无法确认或尚未适配时，在同一 route 上静默发送普通 Chat，不提示、不切换模型，也不调用 Agent `hosted_web_search`、`web_fetch`、`browser_search`、本地浏览器、MCP 或第三方搜索后端。Chat 能力不进入 PermissionEngine/AgentLoop，也不扩大 iOS linkage。Code/Cowork/CLI Code 则可在 exact agent route + read-write capability lease 同时成立时广告 strict query-only `hosted_web_search` Tool，使用同路由 `tool_choice:required` provider 请求，且经普通 tool permission/durable lifecycle；provider hosted shape 被拒绝时不允许 ordinary fallback。OpenAI Responses `web_search` 与 OpenRouter `openrouter:web_search` 分别编码；unknown/compatible/legacy/custom 接入点默认不声明搜索。只有 provider 返回结构化 URL annotation 时才形成来源；Chat 保存 optional citations，Agent 工具把去重来源纳入有界 observation。裸 404、自由文本和 partial payload 不可触发 Chat 重放。精确合同见 `docs/CHAT_HOSTED_SEARCH.md`。
-- **Agent 网络/浏览器工具**：`ToolRegistry.standard()` 暴露轻量 `web_fetch` 和 Playwright/CDP-backed `browser_*` 工具。浏览器工具依赖用户环境里已安装的 Node.js，并优先使用 Playwright + Chromium/Chrome/Edge channel；若 Playwright 不可解析，则通过 Node.js 内置 `WebSocket` 使用 Chrome DevTools Protocol 启动已安装 Chrome/Edge/Chromium。缺少后端时返回配置错误或 `browser_diagnostics` 的可行动诊断。profile/state/history/downloads 全部通过 `PathConfinement` 限定在 workspace `.intatis/browser/` 下，刷新、历史前进/后退、表单点击/输入/提交/下拉选择/按键/滚动/等待交互通过 locator 或当前焦点执行；click/download 的 CDP 路径使用真实鼠标事件，打开新页面的交互会跟随到新 tab/window 并把最终页面写回 state/history；截图只能写入工作区 PNG 路径，上传只能引用 workspace 内文件，显式下载只能写入 `.intatis/browser/downloads/<profile>`；`browser_profiles` 可报告 active browser / profile lock runtime marker 是否存在，但不得列内部 marker 文件名或读取内容；`browser_profile_delete` 只在目标 profile 与 `confirmProfile` 匹配时删除 `.intatis/browser/profiles/<profile>`、`downloads/<profile>`、`state/<profile>.json` 并剪除对应 history metadata，删除前如果发现 marker 只给概括性提示；profile 可能包含 cookies 与登录态，不能当成普通日志、artifact 或 secret-free 文本处理。
-- **macOS UI information architecture**：`IntatisMacRootView` 仍保留 macOS Chat/Code/Cowork 的 shell 与实现分支，但 Mopelium 左侧产品导航默认并仅展示 Cowork；Chat/Code 不显示入口，也不删除页面、运行时或会话数据。左侧继续由 `NavigationSplitView` 提供系统 sidebar 材质，内部使用一个连贯的自定义结构：`Mopelium` 标题、带 SF Symbol 的 Cowork 单行导航、Cowork 的 `Recent` session history/New 与底部 Settings；选中模式行使用 interactive Liquid Glass。Cowork New session 仍先要求用户选择主 workspace 并初始化 per-session project settings。主 thread header 显示 session durable display name（无 display name 时回退 immutable `SessionID`），不写死 Chat/Code/Cowork，也不承载 New/session/model 控件；Code/Cowork 使用紧凑 12pt 顶部留白，Cowork 不再在标题之前常驻 permission-reviewer 横幅。共享 `IntatisThreadComposer` 固定两排：第一排 model/profile 在左、最近一轮 Context/Input/Cached/Output/Time usage 在右；Chat/Code/Cowork 的选择器共用原生 `Menu` 语义与 40pt 高 interactive Liquid Glass 胶囊，关闭态只显示模型名，不显示 CPU/芯片图标、provider 或 variant/reasoning detail；弹出菜单内部仍按 provider 分组并保留 variant detail。第二排为 action、原生多行 `TextField`、可选 Cowork stop 与 Send；macOS Chat、Code 与 Cowork 复用同一个 shared paperclip/file-import/drop/draft-menu surface，Chat 不再显示独立提示词生图 action；iOS paperclip 仍是 Chat tools menu 而不是通用本地附件。action/stop/Send 使用同一个 40×40 原生圆形控件合同，输入容器单行最小高度同为 40，同行 spacing 为 8，外层保持 bottom alignment，因此多行输入只向上增长。没有 top accessories 时不创建空白第一排。消息本体不使用 agent 头像或通用 Agent badge，缺失的 agent 展示名回退 `Intatis`；除用户消息外，assistant/agent/system 对话行（包括失败/中断回复、通用 Agent message、`information_requested`、`information_replied` 与其他 agent-to-agent 记录）均无外层卡片，并以既有普通回答版式及 exact `sender->recipient` 标识直接落在 canvas。用户消息是唯一对话气泡，使用原生 regular Liquid Glass、trailing 对齐和既有宽度合同；正常 tool、permission、task 等专用结构化项继续保留容器，Code/Cowork error、失败 trace、recovery 与失败 submission 状态只进入右栏统一错误卡；既有字体 token 不随本次视觉架构更新。Thread content 使用共享 responsive layout 计算 horizontal padding、显式 `contentWidth`、message gutter 与 bubble max width；对话行通过 `IntatisThreadBubbleRow` 在整行层面按 user trailing、assistant/agent leading 对齐。Chat 默认无右 inspector；Code/Cowork 的显隐都只由同一个稳定外层 `GeometryReader` 提供的未压缩 outer available width 与用户请求状态决定，不使用已经压缩后的 thread width 反推自身可见性。Code 继续用有界 `HStack` 展示 structured plan/workspace/Git-status-only，并在错误非空时于 inspector 最底部生成唯一错误 section；旧 recent failure section 已移除。Cowork 则把 rail 作为 detail 同一 canvas 上的 trailing overlay：不使用 divider 或整栏 `.bar` 背景，主 thread 复用一个固定 `ScrollView` 根并延伸至 detail 最右端，visible rail 固定 348pt、section 固定 318pt，正文通过 trailing scroll-content margin 给 cards 留位，使原生滚动条位于整个内容区最右端。rail subtree 由只含 rail input 的 Equatable boundary 隔离；每个 passive section 独立使用系统 `Glass.clear` 的稳定 backdrop，不用 `GlassEffectContainer` 组织这些必须保持固定位置的 status cards。第一位显示 compact pending permission 或最近权限结果，其后为 `Agents`、真实 `Goal`、真实 `Tasks`，不显示 Git；错误列表非空时，唯一“错误信息”卡片位于最底部。compact permission 只展示状态、tool、安全摘要与必要 action，不渲染 raw args 或默认详情；pending 且 outer width 足以容纳 rail 时临时固定为可见，窄到无法安全容纳时只在 composer 上方保留同一请求的完整 Material 权限卡兜底，二者不得重复。无 pending 时用户仍可隐藏 Cowork rail；任何窄屏或隐藏状态都不在 thread 顶部复制 Goal/Tasks，也不保留对应高度。Code/Cowork 的 bottom-anchor 恢复使用系统 `onScrollVisibilityChange`，不建立 GeometryReader/PreferenceKey 坐标回写；session controls 位于内容 header，不向 window toolbar 动态增删 item，也不嵌套 SwiftUI `.inspector` preference。Cowork header 不提供独立 MCP Content 快捷按钮，内容浏览位于 `Project Settings → MCP → Browse Content`；header 只用系统 compact 圆形 glass/bordered icon control 切换 status rail。Goal/Tasks 继续来自 durable projections；Cowork 的 Git UI 已移除，但本地 Git controls 仍只通过 Agent Git tools + PermissionEngine 执行。
-- **UI 配色与跨平台设计语言**：macOS detail 由 `IntatisSystemCanvas` 使用 SwiftUI `.windowBackground`（macOS 13 fallback 为 `NSVisualEffectView.Material.windowBackground`）提供动态系统 window surface，`NavigationSplitView` sidebar 不再被自定义底色覆盖。`IntatisThreadStyle.intatisMac` / `.standard` 注入系统 `.primary` / `.secondary`、separator、accent 与错误语义；assistant/agent/system 对话正文（包括失败/中断回复）直接继承系统 canvas，不叠 Material 或描边；用户消息是唯一对话气泡，使用原生 `Glass.regular` 且不叠加自定义 accent stroke。正常 tool、权限、数据卡片和 artifact 等专用结构化内容层默认使用 `.regularMaterial`；Code/Cowork error 仅使用右栏统一错误卡。composer、模型菜单、主要操作及确实需要融合的紧凑 action group 在 macOS 26 / iOS 26 使用 `glassEffect`、`GlassEffectContainer` 与 `.glass` / `.glassProminent`，旧系统走 Material / bordered control fallback；用户消息气泡与用户明确指定的 Cowork 紧凑 trailing status rail 是仅有的内容层玻璃例外，后者的权限、Agents、Goal、Tasks 与条件式错误卡各自使用独立原生 `Glass.clear` backdrop，不绘制固定灰框或自制玻璃，也不由一个会重组 shape 的 container 包住。macOS 与 iOS Chat composer 现在都采用共享两排结构：首排为关闭态只显示模型名的 interactive glass `Menu` 与可用 usage，第二排为当前产品面已有 action、输入、紧邻主操作左侧的 voice 和唯一 Send/Stop；iOS 仍只提供 paperclip Chat 功能菜单，不能伪造通用附件。iOS 将该排 `GlassEffectContainer` 的 merge spacing 固定为 0，保留 8pt 布局间距但禁止输入胶囊、voice 与 Send/Stop 物理融合；四个 icon action 都从 composer 专用 modifier 获得同一 40×40 外框，iOS 使用 `.small` 原生 control size，避免 `.regular` glass chrome 超出 40pt 并抬高中心线，macOS 继续使用本来就与 40pt 合拍的 `.regular`。主排继续 bottom alignment，保证多行输入只向上增长。macOS sidebar `Recent` 旁 `+` 使用 30×30 原生小型圆形 glass control；iOS 左抽屉使用同一品牌/模式/history/Settings 层级，并支持从 24pt 屏幕左缘、具有水平优势的右滑打开，避免抢占 transcript/TextField 的纵向或编辑手势。`IntatisTypography` 是两平台字体角色的单一实现：品牌、session 与页面级标题使用相同名义字号/字重的系统 serif，Chat 正文、输入和控件使用系统 sans，技术值使用系统 monospaced；iOS 只在这些共享名义值之上应用 Dynamic Type 缩放。Markdown/代码/公式继续保持 renderer 的语义字体。Glass 不铺页面或整段 transcript。iOS 根视图与约 82% 抽屉继续使用系统容器背景，不复制参考应用固定渐变或另建平台私有底色。当前规范见 `docs/CURRENT_UI_COLOR_SYSTEM.md`；上一版方案独立保存在 `docs/UI_COLOR_SYSTEM.md`。
-- **GUI token/turn stats**：ChatLoop 与 AgentLoop 每轮结束追加 `turn_stats`，包含 endpoint 返回的 prompt/completion/total token（若有）、可选 cached prompt tokens、可选 context window tokens、TTFT、总耗时和 model。OpenAI-compatible `prompt_tokens_details.cached_tokens` 会进入 `Usage.cachedPromptTokens`；未缓存 input 可由 prompt-cached 在 UI 层展示。ChatLoop、AgentLoop 与 ProviderHealthCheck 共用 `Usage` 规则：同一次响应内的 usage chunk 字段级合并，Agent 工具循环中多个模型请求再按请求累计。GUI 不解析消息文本计算 token，而是通过共享 `TurnStatsProjection` 折叠最近一轮统计；macOS Chat / Code / Cowork 与 iOS Chat 均复用 `IntatisComposerUsageStrip` 在 composer 第一排右侧显示低噪音 usage，第一排左侧保留 model/profile。endpoint 不返回 cached/context usage 时，只显示可证明字段，不虚构数值。
-- **Chat/Code/Cowork session/history**：macOS `IntatisMacRootView` 通过 root-owned view models 和 `SessionHistoryStore.recentSessions(kind:)` 将当前 mode 的最近 sessions 投影到同一 sidebar navigation/session center；Chat 启动时优先恢复最近 Chat session，无历史时才使用 `sess_default`，Code/Cowork 在首次进入时创建对应 session。iOS `IOSAppEnvironment` 仍只恢复 Chat session，无历史时才使用 `sess_ios`。新建会话生成新的 `SessionID.new()`，打开独立 `EventLog` 与 artifact store，停止旧 view model 并重建当前 view model。恢复历史会话只切换到对应 `events.jsonl`，不会把新消息继续追加到旧的固定默认日志。macOS session row 的原生右键菜单支持 Rename/Delete；Code 与 Cowork `@main` 另可通过 `rename_session` 改当前会话，model 不提供 SessionID/kind。两条 Rename 路径都先追加 EventLog settings rename 事件并刷新派生 `<session>/session.json`，再通过 exact-session、revision/seq 有序的低频 publisher 更新所有窗口；不改目录名、`SessionID` 或既有 envelope。Delete 在二次确认后删除目标 session 目录及其 session-owned bookmark/settings/projection，不触碰绑定工作区内容，当前运行中的 session 禁止删除。路径与元数据规则在 `IntatisCore` 复用，平台层只传不同 application-support root。
+- **Chat 与 Agent 托管网络搜索**：macOS/CLI Chat 不展示搜索按钮、菜单项、开关、状态或 provider/model 路由提示。每次 Send 只冻结用户当前选择的 exact Chat provider/model/variant/request adapter；`ProviderRegistry.chatRuntimeRoute()` 先验证普通 Chat adapter，再同时要求 exact model 的 `hosted_web_search` 声明与受审 adapter dialect。满足时向当前模型提供对应能力并保持 `tool_choice: auto`，由当前模型自行决定是否搜索；明确不支持、未声明、无法确认或尚未适配时，在同一 route 上静默发送普通 Chat，不提示、不切换模型，也不调用 Agent `hosted_web_search`、`web_fetch`、`browser_search`、本地浏览器、MCP 或第三方搜索后端。Chat 能力不进入 PermissionEngine/AgentLoop。Code/Cowork/CLI Code 则可在 exact agent route + read-write capability lease 同时成立时广告 strict query-only `hosted_web_search` Tool，使用同路由 `tool_choice:required` provider 请求，且经普通 tool permission/durable lifecycle；provider hosted shape 被拒绝时不允许 ordinary fallback。OpenAI Responses `web_search` 与 OpenRouter `openrouter:web_search` 分别编码；unknown/compatible/legacy/custom 接入点默认不声明搜索。只有 provider 返回结构化 URL annotation 时才形成来源；Chat 保存 optional citations，Agent 工具把去重来源纳入有界 observation。裸 404、自由文本和 partial payload 不可触发 Chat 重放。精确合同见 `docs/CHAT_HOSTED_SEARCH.md`。
+- **Agent 网络/浏览器工具**：`ToolRegistry.standard()` 暴露轻量 `web_fetch` 和 Playwright/CDP-backed `browser_*` 工具。浏览器工具依赖用户环境里已安装的 Node.js，并优先使用 Playwright + Chromium/Chrome/Edge channel；若 Playwright 不可解析，则通过 Node.js 内置 `WebSocket` 使用 Chrome DevTools Protocol 启动已安装 Chrome/Edge/Chromium。缺少后端时返回配置错误或 `browser_diagnostics` 的可行动诊断。profile/state/history/downloads 全部通过 `PathConfinement` 限定在 workspace `.mopelium/browser/` 下，刷新、历史前进/后退、表单点击/输入/提交/下拉选择/按键/滚动/等待交互通过 locator 或当前焦点执行；click/download 的 CDP 路径使用真实鼠标事件，打开新页面的交互会跟随到新 tab/window 并把最终页面写回 state/history；截图只能写入工作区 PNG 路径，上传只能引用 workspace 内文件，显式下载只能写入 `.mopelium/browser/downloads/<profile>`；`browser_profiles` 可报告 active browser / profile lock runtime marker 是否存在，但不得列内部 marker 文件名或读取内容；`browser_profile_delete` 只在目标 profile 与 `confirmProfile` 匹配时删除 `.mopelium/browser/profiles/<profile>`、`downloads/<profile>`、`state/<profile>.json` 并剪除对应 history metadata，删除前如果发现 marker 只给概括性提示；profile 可能包含 cookies 与登录态，不能当成普通日志、artifact 或 secret-free 文本处理。
+- **macOS UI information architecture**：`MopeliumMacRootView` 仍保留 macOS Chat/Code/Cowork 的 shell 与实现分支，但 Mopelium 左侧产品导航默认并仅展示 Cowork；Chat/Code 不显示入口，也不删除页面、运行时或会话数据。左侧继续由 `NavigationSplitView` 提供系统 sidebar 材质，内部使用一个连贯的自定义结构：`Mopelium` 标题、带 SF Symbol 的 Cowork 单行导航、Cowork 的 `Recent` session history/New 与底部 Settings；选中模式行使用 interactive Liquid Glass。Cowork New session 仍先要求用户选择主 workspace 并初始化 per-session project settings。主 thread header 显示 session durable display name（无 display name 时回退 immutable `SessionID`），不写死 Chat/Code/Cowork，也不承载 New/session/model 控件；Code/Cowork 使用紧凑 12pt 顶部留白，Cowork 不再在标题之前常驻 permission-reviewer 横幅。共享 `MopeliumThreadComposer` 固定两排：第一排 model/profile 在左、最近一轮 Context/Input/Cached/Output/Time usage 在右；Chat/Code/Cowork 的选择器共用原生 `Menu` 语义与 40pt 高 interactive Liquid Glass 胶囊，关闭态只显示模型名，不显示 CPU/芯片图标、provider 或 variant/reasoning detail；弹出菜单内部仍按 provider 分组并保留 variant detail。第二排为 action、原生多行 `TextField`、可选 Cowork stop 与 Send；macOS Chat、Code 与 Cowork 复用同一个 shared paperclip/file-import/drop/draft-menu surface，Chat 不再显示独立提示词生图 action；iOS paperclip 仍是 Chat tools menu 而不是通用本地附件。action/stop/Send 使用同一个 40×40 原生圆形控件合同，输入容器单行最小高度同为 40，同行 spacing 为 8，外层保持 bottom alignment，因此多行输入只向上增长。没有 top accessories 时不创建空白第一排。消息本体不使用 agent 头像或通用 Agent badge，缺失的 agent 展示名回退 `Mopelium`；除用户消息外，assistant/agent/system 对话行（包括失败/中断回复、通用 Agent message、`information_requested`、`information_replied` 与其他 agent-to-agent 记录）均无外层卡片，并以既有普通回答版式及 exact `sender->recipient` 标识直接落在 canvas。用户消息是唯一对话气泡，使用原生 regular Liquid Glass、trailing 对齐和既有宽度合同；正常 tool、permission、task 等专用结构化项继续保留容器，Code/Cowork error、失败 trace、recovery 与失败 submission 状态只进入右栏统一错误卡；既有字体 token 不随本次视觉架构更新。Thread content 使用共享 responsive layout 计算 horizontal padding、显式 `contentWidth`、message gutter 与 bubble max width；对话行通过 `MopeliumThreadBubbleRow` 在整行层面按 user trailing、assistant/agent leading 对齐。Chat 默认无右 inspector；Code/Cowork 的显隐都只由同一个稳定外层 `GeometryReader` 提供的未压缩 outer available width 与用户请求状态决定，不使用已经压缩后的 thread width 反推自身可见性。Code 继续用有界 `HStack` 展示 structured plan/workspace/Git-status-only，并在错误非空时于 inspector 最底部生成唯一错误 section；旧 recent failure section 已移除。Cowork 则把 rail 作为 detail 同一 canvas 上的 trailing overlay：不使用 divider 或整栏 `.bar` 背景，主 thread 复用一个固定 `ScrollView` 根并延伸至 detail 最右端，visible rail 固定 348pt、section 固定 318pt，正文通过 trailing scroll-content margin 给 cards 留位，使原生滚动条位于整个内容区最右端。rail subtree 由只含 rail input 的 Equatable boundary 隔离；每个 passive section 独立使用系统 `Glass.clear` 的稳定 backdrop，不用 `GlassEffectContainer` 组织这些必须保持固定位置的 status cards。第一位显示 compact pending permission 或最近权限结果，其后为 `Agents`、真实 `Goal`、真实 `Tasks`，不显示 Git；错误列表非空时，唯一“错误信息”卡片位于最底部。compact permission 只展示状态、tool、安全摘要与必要 action，不渲染 raw args 或默认详情；pending 且 outer width 足以容纳 rail 时临时固定为可见，窄到无法安全容纳时只在 composer 上方保留同一请求的完整 Material 权限卡兜底，二者不得重复。无 pending 时用户仍可隐藏 Cowork rail；任何窄屏或隐藏状态都不在 thread 顶部复制 Goal/Tasks，也不保留对应高度。Code/Cowork 的 bottom-anchor 恢复使用系统 `onScrollVisibilityChange`，不建立 GeometryReader/PreferenceKey 坐标回写；session controls 位于内容 header，不向 window toolbar 动态增删 item，也不嵌套 SwiftUI `.inspector` preference。Cowork header 不提供独立 MCP Content 快捷按钮，内容浏览位于 `Project Settings → MCP → Browse Content`；header 只用系统 compact 圆形 glass/bordered icon control 切换 status rail。Goal/Tasks 继续来自 durable projections；Cowork 的 Git UI 已移除，但本地 Git controls 仍只通过 Agent Git tools + PermissionEngine 执行。
+- **UI 配色与跨平台设计语言**：macOS detail 由 `MopeliumSystemCanvas` 使用 SwiftUI `.windowBackground`（macOS 13 fallback 为 `NSVisualEffectView.Material.windowBackground`）提供动态系统 window surface，`NavigationSplitView` sidebar 不再被自定义底色覆盖。`MopeliumThreadStyle.mopeliumMac` / `.standard` 注入系统 `.primary` / `.secondary`、separator、accent 与错误语义；assistant/agent/system 对话正文（包括失败/中断回复）直接继承系统 canvas，不叠 Material 或描边；用户消息是唯一对话气泡，使用原生 `Glass.regular` 且不叠加自定义 accent stroke。正常 tool、权限、数据卡片和 artifact 等专用结构化内容层默认使用 `.regularMaterial`；Code/Cowork error 仅使用右栏统一错误卡。composer、模型菜单、主要操作及确实需要融合的紧凑 action group 在 macOS 26 / iOS 26 使用 `glassEffect`、`GlassEffectContainer` 与 `.glass` / `.glassProminent`，旧系统走 Material / bordered control fallback；用户消息气泡与用户明确指定的 Cowork 紧凑 trailing status rail 是仅有的内容层玻璃例外，后者的权限、Agents、Goal、Tasks 与条件式错误卡各自使用独立原生 `Glass.clear` backdrop，不绘制固定灰框或自制玻璃，也不由一个会重组 shape 的 container 包住。macOS 与 iOS Chat composer 现在都采用共享两排结构：首排为关闭态只显示模型名的 interactive glass `Menu` 与可用 usage，第二排为当前产品面已有 action、输入、紧邻主操作左侧的 voice 和唯一 Send/Stop；iOS 仍只提供 paperclip Chat 功能菜单，不能伪造通用附件。iOS 将该排 `GlassEffectContainer` 的 merge spacing 固定为 0，保留 8pt 布局间距但禁止输入胶囊、voice 与 Send/Stop 物理融合；四个 icon action 都从 composer 专用 modifier 获得同一 40×40 外框，iOS 使用 `.small` 原生 control size，避免 `.regular` glass chrome 超出 40pt 并抬高中心线，macOS 继续使用本来就与 40pt 合拍的 `.regular`。主排继续 bottom alignment，保证多行输入只向上增长。macOS sidebar `Recent` 旁 `+` 使用 30×30 原生小型圆形 glass control；iOS 左抽屉使用同一品牌/模式/history/Settings 层级，并支持从 24pt 屏幕左缘、具有水平优势的右滑打开，避免抢占 transcript/TextField 的纵向或编辑手势。`MopeliumTypography` 是两平台字体角色的单一实现：品牌、session 与页面级标题使用相同名义字号/字重的系统 serif，Chat 正文、输入和控件使用系统 sans，技术值使用系统 monospaced；iOS 只在这些共享名义值之上应用 Dynamic Type 缩放。Markdown/代码/公式继续保持 renderer 的语义字体。Glass 不铺页面或整段 transcript。iOS 根视图与约 82% 抽屉继续使用系统容器背景，不复制参考应用固定渐变或另建平台私有底色。当前规范见 `docs/CURRENT_UI_COLOR_SYSTEM.md`；上一版方案独立保存在 `docs/UI_COLOR_SYSTEM.md`。
+- **GUI token/turn stats**：ChatLoop 与 AgentLoop 每轮结束追加 `turn_stats`，包含 endpoint 返回的 prompt/completion/total token（若有）、可选 cached prompt tokens、可选 context window tokens、TTFT、总耗时和 model。OpenAI-compatible `prompt_tokens_details.cached_tokens` 会进入 `Usage.cachedPromptTokens`；未缓存 input 可由 prompt-cached 在 UI 层展示。ChatLoop、AgentLoop 与 ProviderHealthCheck 共用 `Usage` 规则：同一次响应内的 usage chunk 字段级合并，Agent 工具循环中多个模型请求再按请求累计。GUI 不解析消息文本计算 token，而是通过共享 `TurnStatsProjection` 折叠最近一轮统计；macOS Chat / Code / Cowork 与 iOS Chat 均复用 `MopeliumComposerUsageStrip` 在 composer 第一排右侧显示低噪音 usage，第一排左侧保留 model/profile。endpoint 不返回 cached/context usage 时，只显示可证明字段，不虚构数值。
+- **Chat/Code/Cowork session/history**：macOS `MopeliumMacRootView` 通过 root-owned view models 和 `SessionHistoryStore.recentSessions(kind:)` 将当前 mode 的最近 sessions 投影到同一 sidebar navigation/session center；Chat 启动时优先恢复最近 Chat session，无历史时才使用 `sess_default`，Code/Cowork 在首次进入时创建对应 session。iOS `IOSAppEnvironment` 仍只恢复 Chat session，无历史时才使用 `sess_ios`。新建会话生成新的 `SessionID.new()`，打开独立 `EventLog` 与 artifact store，停止旧 view model 并重建当前 view model。恢复历史会话只切换到对应 `events.jsonl`，不会把新消息继续追加到旧的固定默认日志。macOS session row 的原生右键菜单支持 Rename/Delete；Code 与 Cowork `@main` 另可通过 `rename_session` 改当前会话，model 不提供 SessionID/kind。两条 Rename 路径都先追加 EventLog settings rename 事件并刷新派生 `<session>/session.json`，再通过 exact-session、revision/seq 有序的低频 publisher 更新所有窗口；不改目录名、`SessionID` 或既有 envelope。Delete 在二次确认后删除目标 session 目录及其 session-owned bookmark/settings/projection，不触碰绑定工作区内容，当前运行中的 session 禁止删除。路径与元数据规则在 `MopeliumCore` 复用，平台层只传不同 application-support root。
 - **Code/Cowork 错误 presentation（2026-08-13 当前例外）**：上述通用 structured-content
-  描述中的 `error` 与 Code `recent failure` 不再进入 thread/独立 section。`IntatisMacApp` 将
+  描述中的 `error` 与 Code `recent failure` 不再进入 thread/独立 section。`MopeliumMacApp` 将
   Code voice/composer 及 Cowork voice/composer/inference/projection/session-storage 的全部非空错误
-  作为数组传入 SharedUI；`IntatisThreadErrorPresentation` 在 raw bounded page 上继续收集 `.error`、
+  作为数组传入 SharedUI；`MopeliumThreadErrorPresentation` 在 raw bounded page 上继续收集 `.error`、
   失败 execution row、`recoveryAdvice` 与失败 submission，按规范化文案去重，再为 transcript
   生成 presentation-only clean copy。Code inspector 与 Cowork rail 都只在错误非空时于最底部显示
   一张统一卡片；Cowork 只有当前thread最新的retryable submitted intent保留exact Retry，fresh
@@ -1521,7 +1535,7 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
   后续轮次即使先于后台 prepare 落盘，也不会进入旧 route 的标题上下文。冻结前缀从 session 起点
   投影最早三个
   可证明串行的 completed Chat segment；任何 orphan、交错、legacy 未终结或 agent/task 归因都
-  fail closed。标题 request 只含 Intatis 自有严格 System 指令，以及 user/assistant 正文字段合计最多
+  fail closed。标题 request 只含 Mopelium 自有严格 System 指令，以及 user/assistant 正文字段合计最多
   6,000 个 Swift `Character` 的 untrusted JSON 对话数据（JSON 结构和转义另有编码开销），使用同一
   provider/model、`tools: []` 语义、无 web search/citation/附件、
   不写消息 EventLog 或 turn stats。每进程、每 SessionID 最多三个逻辑 generation，single-flight；
@@ -1538,16 +1552,16 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
   exact-session revision/seq publisher 与 runtime delete/Quit drain；iOS 使用稳定 per-session watermark
   relay，因此 session A 的迟到 commit 只更新 A，不污染当前 B。所有标题失败静默，不改变主回合、
   `errorText`、Stop、输入能力或 UI 错误状态；iOS 被系统强杀不承诺异步 drain。
-- **GUI provider catalog**：macOS `AppConfig` 与 iOS `IOSConfig` 使用 UserDefaults 主键 `intatis.providerCatalog.v1` 保存两层 mutable 配置。第一层 provider 存 `id` / 展示名 / `baseURL` / `chatEndpoint` / secret ref 元数据；第二层 model 存模型 id / 展示名。macOS Chat/Code 模型菜单把配置中的 variants 作为同一 model 的独立选择项；切换后只把 provider/model/variant identity 写入 `intatis.providerSelection.v1` 并重建 `ProviderRegistry`，Chat/Code 下一条请求使用新选择的基础 options + variant 覆盖。Cowork composer 复用同一份配置所编译的 secret-free `AppInferenceProfileOption` 列表，以 provider 分组显示“下一次 `@main`”的 exact 暂存项；三个产品面的弹出菜单均保留 provider 分组与 variant detail，但关闭态 label 只读取选中项的 model title。新 options 先交给 Orchestrator 更新 host-approved catalog，再发布到菜单，避免可见项与 admission catalog 竞态。工作中仍可选择，选择本身不 rebind，只有随后按下 Send 才把当时值冻结进该 submission；FIFO 执行边界把仅 `@main` 的 durable rebind 与对应 root queue admission 原子提交。既有 worker、当前/已冻结 task、控制面 agent 与未来新 agent 默认值均不跟随。Project Settings 的独立 exact-profile picker 仍只更新**未来新 agent 默认值**，逐 agent Rebind 继续用于显式修改其他空闲 ordinary agent。iOS 保持 provider/model 两层 Chat 选择。设置页编辑 Base URL 时自动生成 Chat endpoint；编辑 Chat endpoint 时清洗 `/chat/completions` 后缀回填 Base URL。旧 `intatis.baseURL` / `intatis.model` 仍作为迁移来源与兼容镜像。
-- **iOS imported Chat config**：iOS 不扫描 `INTATIS_CONFIG`、macOS home 或 app-support 候选路径；用户只能从 Chat 左抽屉底部 Settings 进入设置页，再经系统 Files picker 显式选择 JSON/JSONC。共享 `ChatConfigurationImporter` 解析 OpenCode-compatible `provider` map 与 legacy direct `providers`，执行 1 MiB/数量/字符串/HTTP(S) URL 边界检查，并只投影 iOS Chat 所需 provider/model/endpoint/options/adapter/capabilities。成功后不保留 security-scoped 外部 URL，也不监视或重写原文件，而是在 app Application Support 的 `Intatis/imported-chat-configuration.json` 写 schema-v1、complete-file-protection app-owned snapshot。直接 `options.apiKey` 先迁入同样受保护的 `Intatis/auth.json`，snapshot 与 UserDefaults 只保留 secret reference；环境变量/文件引用保持引用但导入结果会提示在 iOS 重新验证或录入。variants 当前被忽略并明确告警；未知 adapter 保留 exact identity并让既有 adapter gate 在网络前 fail closed，绝不静默改成 compatible。iOS root 持有 thread-only Chat 的唯一 `NavigationStack`，顶部 sidebar/session/new、左抽屉、底部两排 composer 和 Settings sheet 属于同一导航层级；model label 在 composer 第一排有界，不能把第二排 controls 推出屏幕。该路径不会扩大 iOS 的 7-product Chat-only linkage。
+- **GUI provider catalog**：macOS `AppConfig` 与 iOS `IOSConfig` 使用 UserDefaults 主键 `mopelium.providerCatalog.v1` 保存两层 mutable 配置。第一层 provider 存 `id` / 展示名 / `baseURL` / `chatEndpoint` / secret ref 元数据；第二层 model 存模型 id / 展示名。macOS Chat/Code 模型菜单把配置中的 variants 作为同一 model 的独立选择项；切换后只把 provider/model/variant identity 写入 `mopelium.providerSelection.v1` 并重建 `ProviderRegistry`，Chat/Code 下一条请求使用新选择的基础 options + variant 覆盖。Cowork composer 复用同一份配置所编译的 secret-free `AppInferenceProfileOption` 列表，以 provider 分组显示“下一次 `@main`”的 exact 暂存项；三个产品面的弹出菜单均保留 provider 分组与 variant detail，但关闭态 label 只读取选中项的 model title。新 options 先交给 Orchestrator 更新 host-approved catalog，再发布到菜单，避免可见项与 admission catalog 竞态。工作中仍可选择，选择本身不 rebind，只有随后按下 Send 才把当时值冻结进该 submission；FIFO 执行边界把仅 `@main` 的 durable rebind 与对应 root queue admission 原子提交。既有 worker、当前/已冻结 task、控制面 agent 与未来新 agent 默认值均不跟随。Project Settings 的独立 exact-profile picker 仍只更新**未来新 agent 默认值**，逐 agent Rebind 继续用于显式修改其他空闲 ordinary agent。iOS 保持 provider/model 两层 Chat 选择。设置页编辑 Base URL 时自动生成 Chat endpoint；编辑 Chat endpoint 时清洗 `/chat/completions` 后缀回填 Base URL。旧 `mopelium.baseURL` / `mopelium.model` 仍作为迁移来源与兼容镜像。
+- **iOS imported Chat config**：iOS 不扫描 `MOPELIUM_CONFIG`、macOS home 或 app-support 候选路径；用户只能从 Chat 左抽屉底部 Settings 进入设置页，再经系统 Files picker 显式选择 JSON/JSONC。共享 `ChatConfigurationImporter` 解析 OpenCode-compatible `provider` map 与 legacy direct `providers`，执行 1 MiB/数量/字符串/HTTP(S) URL 边界检查，并只投影 iOS Chat 所需 provider/model/endpoint/options/adapter/capabilities。成功后不保留 security-scoped 外部 URL，也不监视或重写原文件，而是在 app Application Support 的 `Mopelium/imported-chat-configuration.json` 写 schema-v1、complete-file-protection app-owned snapshot。直接 `options.apiKey` 先迁入同样受保护的 `Mopelium/auth.json`，snapshot 与 UserDefaults 只保留 secret reference；环境变量/文件引用保持引用但导入结果会提示在 iOS 重新验证或录入。variants 当前被忽略并明确告警；未知 adapter 保留 exact identity并让既有 adapter gate 在网络前 fail closed，绝不静默改成 compatible。iOS root 持有 thread-only Chat 的唯一 `NavigationStack`，顶部 sidebar/session/new、左抽屉、底部两排 composer 和 Settings sheet 属于同一导航层级；model label 在 composer 第一排有界，不能把第二排 controls 推出屏幕。该路径不会扩大 iOS 的 7-product Chat-only linkage。
 - **Chat 搜索路由配置**：搜索运行时只有用户当前选择的 exact Chat route，不存在隐藏第二模型。`web_search_model` / `webSearchModel` 的后台路由语义已取消；兼容 decoder 可以接受并保留旧字段，但 runtime 忽略它，新生成配置不再主动写入，也不因字段存在显示警告或阻止普通 Chat。`responsesEndpoint`、URL、provider/model 名称同样不能证明兼容；能力来自受审声明和 exact adapter。设置表单、模型菜单和对话均不显示搜索状态或降级提示，durable stats/诊断关联当前实际执行的安全 provider/model identity。
 - **Cowork inference catalog 同步**：macOS `AppInferenceCatalog` 将当前 provider/model/variant 配置编译为 connection/profile drafts，并由 `InferenceCatalogStore` reconcile immutable revisions；connection/trust identity 与 durable variant ID 均使用不暴露 raw URL/config key 的 opaque hash，egress 标为 `user-configured-external`。配置刷新只改变 host-approved candidates/current refs；已有 agent 继续引用原 revision，且 catalog update 与 admission/rebind 通过同一 admission lock 串行化。Refresh 失败时，初始启动 fail closed，已有有效 snapshot 的进程保留上一份有效 snapshot并显示 resolution 错误。CLI 的 `CLIConfig` / `CLIModernProviderConfig` 读取所有启用的 OpenAI-compatible route、model、variant，`CLIInferenceProfiles` 将其全部编译为 immutable profiles；每个 connection revision 保留自己的 exact env/file/auth/config credential reference，`CLIExactSecretResolver` 不会用 selected route 的 credential 替代其他 route 或旧 revision。Modern CLI 的 unqualified model 仅在全 catalog 唯一匹配时切到其 route；显式 reasoning 只能命中 configured variant/base effort，否则 config fail closed。Non-empty recovery 缺失 `@main` 时要求显式 `/agent restore-main`。GUI 将 exact resolution/reviewer health 作为执行状态而非 composer/本地 Send gate；CLI 仍以它们控制显式 data-plane resume。普通 worker unresolved 仍显示在 roster，但不全局暂停 scheduler：其 queued invocation 在 provider dispatch 前 durable fail closed，清除 busy fence 后才可显式 rebind，其他 agents 可继续运行。两端的 list/roster 只投影 safe label/identity/trust classification/resolution，不投影 endpoint、credential 或 options。
-- **macOS advanced config**：macOS GUI 启动时先检查用户显式设置的 `INTATIS_CONFIG` 文件；未设置时按顺序只检查 Intatis-owned 路径：`~/.config/intatis/intatis.json` / `intatis.jsonc`、app support 的 `intatis.json` / `intatis.jsonc`，最后才兜底读取旧 Intatis `config.json` / `config.jsonc`。不会自动发现任何名为 `opencode.json` 的文件，也不读取 `~/.config/opencode/` 下的 OpenCode app 配置；OpenCode-compatible 只表示 JSON shape 兼容。找到可解码的 JSON/JSONC 后覆盖 UserDefaults provider catalog；聊天页当前选择覆盖层仍可覆盖 JSON 顶层 `model`，但不能覆盖已解析的 reviewer role。设置页的 Open Intatis Config 按钮会打开当前生效的 Intatis-owned 文件或 `INTATIS_CONFIG` 显式指定文件；若只发现旧 `config.json`，会从当前 catalog 生成新的 `~/.config/intatis/intatis.json` 模板并优先打开。保存设置时，用户本次主动输入的 API key 会写入同一个可编辑 provider JSON 的 `provider.<id>.options.apiKey`；写入用户 config 失败时回退到 app support `intatis.json`。创建的模板来自当前 provider catalog，输出 OpenCode-compatible `$schema` / `enabled_providers` / `model` / `provider.<id>.npm` / `name` / `options.baseURL` / `options.apiKey` / `models`，以及 Intatis 顶层 role 字段（包括 `permission_reviewer_model`）；`options.apiKey` 默认是 `{env:...}` 引用而非明文。支持兼容读取旧 direct `providers` 数组，也兼容读取 Intatis 扩展字段 `chatEndpoint` / `apiKeySource`；推荐新配置使用 `provider.<id>.options.baseURL`、`options.apiKey`（OpenCode-style 明文、`{env:NAME}` 或 `{file:path}` 均可由真实请求懒加载）、`models`，以及顶层 `model` 形如 `<provider>/<model-id>`。支持 OpenCode-compatible 的 `enabled_providers` / `disabled_providers` 过滤；`disabled_providers` 优先。省略 `options.apiKey` 时 provider 请求按 provider id 尝试 Intatis auth JSON 与当前 Intatis-owned OpenCode-compatible config，不再回落 OS Keychain。
+- **macOS advanced config**：macOS GUI 启动时先检查用户显式设置的 `MOPELIUM_CONFIG` 文件；未设置时按顺序只检查 Mopelium-owned 路径：`~/.config/mopelium/mopelium.json` / `mopelium.jsonc`、app support 的 `mopelium.json` / `mopelium.jsonc`，最后才兜底读取旧 Mopelium `config.json` / `config.jsonc`。不会自动发现任何名为 `opencode.json` 的文件，也不读取 `~/.config/opencode/` 下的 OpenCode app 配置；OpenCode-compatible 只表示 JSON shape 兼容。找到可解码的 JSON/JSONC 后覆盖 UserDefaults provider catalog；聊天页当前选择覆盖层仍可覆盖 JSON 顶层 `model`，但不能覆盖已解析的 reviewer role。设置页的 Open Mopelium Config 按钮会打开当前生效的 Mopelium-owned 文件或 `MOPELIUM_CONFIG` 显式指定文件；若只发现旧 `config.json`，会从当前 catalog 生成新的 `~/.config/mopelium/mopelium.json` 模板并优先打开。保存设置时，用户本次主动输入的 API key 会写入同一个可编辑 provider JSON 的 `provider.<id>.options.apiKey`；写入用户 config 失败时回退到 app support `mopelium.json`。创建的模板来自当前 provider catalog，输出 OpenCode-compatible `$schema` / `enabled_providers` / `model` / `provider.<id>.npm` / `name` / `options.baseURL` / `options.apiKey` / `models`，以及 Mopelium 顶层 role 字段（包括 `permission_reviewer_model`）；`options.apiKey` 默认是 `{env:...}` 引用而非明文。支持兼容读取旧 direct `providers` 数组，也兼容读取 Mopelium 扩展字段 `chatEndpoint` / `apiKeySource`；推荐新配置使用 `provider.<id>.options.baseURL`、`options.apiKey`（OpenCode-style 明文、`{env:NAME}` 或 `{file:path}` 均可由真实请求懒加载）、`models`，以及顶层 `model` 形如 `<provider>/<model-id>`。支持 OpenCode-compatible 的 `enabled_providers` / `disabled_providers` 过滤；`disabled_providers` 优先。省略 `options.apiKey` 时 provider 请求按 provider id 尝试 Mopelium auth JSON 与当前 Mopelium-owned OpenCode-compatible config，不再回落 OS Keychain。
 - **Permission reviewer model route**：macOS 与 modern CLI 只读取 canonical 顶层
   `permission_reviewer_model`，值必须是 enabled provider 的已配置 inference model，格式为
   `<provider>/<model-id>`，并编译为 `variantID=nil` 的 immutable exact binding；没有 camelCase alias 或
   设置 UI。字段缺失时仅在配置加载阶段一次性继承同一 JSON 文档已经解析出的顶层 `model`，不读取
-  `INTATIS_MODEL`、UserDefaults/UI selection、Cowork session default 或 live/historical `@main`；显式
+  `MOPELIUM_MODEL`、UserDefaults/UI selection、Cowork session default 或 live/historical `@main`；显式
   `null`、非字符串、空值、unknown/disabled provider、unknown model 或未解析 env/file reference 均
   fail closed。Mac fresh 在异步 runtime-creation 边界前捕获 exact binding；restore 与 CLI `/auto` 也只
   使用 runtime 冻结的配置 binding。配置 refresh 只能使该 exact revision unavailable，不能把它重定向。
@@ -1561,7 +1575,7 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
   OpenAI-compatible `POST <baseURL>/images/generations` 并请求 `response_format=b64_json`；edit
   wire 调用 multipart `POST <baseURL>/images/edits` 并发送单个 `image[]`。两者只接受
   `data[].b64_json`，不跟随输出 URL；mask 与多参考图尚未进入 tool schema。
-- **provider config reference confinement**：从 provider JSON 产生的直接 `options.apiKey` secret ref 会绑定当前配置文件；历史 UserDefaults 中的 `providerConfig` 路径只有匹配 Intatis 自有候选或当前显式 `INTATIS_CONFIG` 时才可读取，其他路径由 resolver fail closed。
+- **provider config reference confinement**：从 provider JSON 产生的直接 `options.apiKey` secret ref 会绑定当前配置文件；历史 UserDefaults 中的 `providerConfig` 路径只有匹配 Mopelium 自有候选或当前显式 `MOPELIUM_CONFIG` 时才可读取，其他路径由 resolver fail closed。
 - **Cowork automatic permission review**：brand-new GUI/CLI Cowork session 以一个本地 durable 七事件 bootstrap 同时记录 settings、fixed `@main` 与 `@permission-reviewer`；两者共享 canonical workspace，但 bootstrap API 要求 host 分别提供 main 与 reviewer exact binding，绝不在 Orchestrator 层从 main 派生 reviewer。初始化不产生模型审批或 provider 请求。恢复的非空 session 先恢复 durable settings/roster；若缺失 `@main`，GUI 从 canonical settings 走 host-authorized exact historical-main recovery，随后才用冻结的配置 binding replacement/retry reviewer，CLI 使用专用 `/agent restore-main`。审查者固定 read_only、无工具 lease、无通信/委派、`coordinationDepth=0`，不会启动嵌套 `AgentLoop`。live model-authored ask 通过 request-local `PermissionReviewInvocationInput` 交付完整 canonical safe business args、完整 same-generation string sidecar 与机械 host binding/gate/lease/action facts；不发送 TaskContract objective/role/deliverable、causal userGoal、用户/assistant transcript/history、PDF 或图片原文。审查者只返回短非空 reason，并在最后一个非空行输出 ASCII `ALLOW` 或 `DENY`；risk 始终由 host gate 决定。pre-submit caller cancel 返回 typed deny且不创建 review lifecycle；不可解析输出、空 reason、tool call、timeout、provider error、settled persistence failure 与已登记 review 在 terminal-claim 前被观察到的 cancel durable deny当前调用；claim 后 cancel 保留唯一 settlement 但 authorization delivery deny。provider factory 逐代 exact-resolve，provider/timeout race 与 terminal claim 校验 exact generation；retired producer 不持有 EventLog/actor/authorization，下一 request 不继承 process-lifetime quarantine。`ToolCallingProvider.stream` 必须立即返回 request-owned stream并传播 consumer termination。GUI 不做隐式人工 fallback；reviewer 未就绪不锁定 composer，普通请求继续，只有真正到达 ask 边界的工具 fail closed。CLI `/auto` 重新启用，只有用户明确 `/default` 才移除审查者并恢复终端人工确认。
 
 示例（不含明文 secret）：
@@ -1598,7 +1612,7 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
       "models": {}
     },
     "Knowledge": {
-      "npm": "intatis:siliconflow-v1",
+      "npm": "mopelium:siliconflow-v1",
       "name": "Knowledge",
       "options": {
         "baseURL": "https://your-knowledge-provider.example/v1",
@@ -1615,16 +1629,16 @@ schema v2只表示lineage已覆盖media-aware语义。EventLog checkpoint writer
 
 上例的 Knowledge URL 与模型 ID 是用户必须替换的值；它展示的是配置 shape，不代表内置账号或默认
 provider。两个 Knowledge 字段只接受 canonical snake_case 和完整 `<provider>/<model-id>`，任一缺失
-都使工具在 secret、network、bookmark 或 store 副作用前保持不可用。`intatis:siliconflow-v1` 明确选择
+都使工具在 secret、network、bookmark 或 store 副作用前保持不可用。`mopelium:siliconflow-v1` 明确选择
 OpenAI-compatible embeddings + SiliconFlow v1 rerank dialect；Cohere v2 reranker 必须使用独立
-`intatis:cohere-v2` provider，不从 URL 或模型名猜 dialect。role-only provider 的 `models` 可以为空；
+`mopelium:cohere-v2` provider，不从 URL 或模型名猜 dialect。role-only provider 的 `models` 可以为空；
 非内置维度的 embedding 模型必须通过对应 model `options.dimensions` 明确冻结输出维度。
 
 ## 安全机制
 
 ### 凭据存储
 - GUI 不再读写 OS Keychain。`KeychainRef` 是历史命名的 secret ref；其中 `.keychain` 仅作旧配置兼容值，app resolver 会把它映射到配置/auth 文件查找，不调用 Security Keychain API。
-- `ConfigSecretResolver` 可指向 `environment` / `file` / `authFile`。macOS `authFile` 默认先查 `~/.config/intatis/auth.json`，再兼容查 `~/.local/share/intatis/auth.json` 与 Intatis-owned OpenCode-compatible config 的 `provider.<id>.options.apiKey`；不默认读取 `~/.local/share/opencode/auth.json` 或 `~/.config/opencode/opencode.json`。也可用 `INTATIS_AUTH_FILE` 覆盖。iOS 默认落在 app container Application Support 的 `Intatis/auth.json`。UserDefaults catalog 只存 secret ref 元数据，不存 API key；macOS 设置页输入的 API key 写入当前可编辑 provider JSON，iOS 设置页输入的 API key 写入 auth JSON 并尝试设置 `0600`；真实 provider 请求懒加载 secret，并按 source/service/account 做进程内缓存。
+- `ConfigSecretResolver` 可指向 `environment` / `file` / `authFile`。macOS `authFile` 默认先查 `~/.config/mopelium/auth.json`，再兼容查 `~/.local/share/mopelium/auth.json` 与 Mopelium-owned OpenCode-compatible config 的 `provider.<id>.options.apiKey`；不默认读取 `~/.local/share/opencode/auth.json` 或 `~/.config/opencode/opencode.json`。也可用 `MOPELIUM_AUTH_FILE` 覆盖。iOS 默认落在 app container Application Support 的 `Mopelium/auth.json`。UserDefaults catalog 只存 secret ref 元数据，不存 API key；macOS 设置页输入的 API key 写入当前可编辑 provider JSON，iOS 设置页输入的 API key 写入 auth JSON 并尝试设置 `0600`；真实 provider 请求懒加载 secret，并按 source/service/account 做进程内缓存。
 
 ### 工作区边界
 - `PathConfinement.resolve`：拒 `..` 遍历与越界绝对路径。Tools 执行与权限门均使用。
@@ -1643,11 +1657,9 @@ Phase C 把 approval response 与 turn terminal 拆成两个层次。人工 `app
 - `Mediator`：agent 间转发时拦截秘密 + 超长原始转储（>4000 字符要求发摘要）。
 
 ### Sandbox / Entitlements
-- `IntatisMac.DeveloperID.entitlements`：默认 `IntatisMac` 使用；非 sandbox、Hardened Runtime，本地 Code/Cowork 的 shell/git/browser 能力仍必须经过 `PlatformProfile.macDeveloperID` 与权限门。composer voice 只增加最小 `com.apple.security.device.audio-input=true`，真实录音仍需 `NSMicrophoneUsageDescription` 与用户 TCC 授权；该 entitlement 不代表启用 App Sandbox。
+- `MopeliumMac.DeveloperID.entitlements`：默认 `MopeliumMac` 使用；非 sandbox、Hardened Runtime，本地 Code/Cowork 的 shell/git/browser 能力仍必须经过 `PlatformProfile.macDeveloperID` 与权限门。composer voice 只增加最小 `com.apple.security.device.audio-input=true`，真实录音仍需 `NSMicrophoneUsageDescription` 与用户 TCC 授权；该 entitlement 不代表启用 App Sandbox。
 - managed terminal 在 macOS 额外套 Seatbelt：只允许 WorkspaceLease 映射出的文件访问，默认拒绝网络；只允许同一 sandbox 中的 fork/exec、process info 与 signal，不开放全局 `process*`，也不开放所有 `/dev/ttys*`。PTY 仅使用已继承的 controlling terminal descriptor。Linux 要求 bwrap，缺失时 fail closed；Linux PTY 当前不支持。
-- `IntatisMac.AppStore.entitlements`：当前源码中的未使用 legacy artifact，不是
-  未来版本规划或 release input；除非用户明确要求清理，不自动删除，也不为它
-  新增功能或验证。
+- 工程中不存在 App Store entitlements 或第二 App target；`.macAppStore` 仅可作为旧数据兼容值。
 
 ## 模式开关 / 内核切换
 
@@ -1655,6 +1667,6 @@ Phase C 把 approval response 与 turn terminal 拆成两个层次。人工 `app
 
 ## 与文档/源码的关系
 
-- 仓内根 `ARCHITECTURE.md`（draft-0, 2026-06-11，中文）描述 Intatis 内核/Cowork 设计。本目录 `docs/ARCHITECTURE.md` 据实际源码重写并与之对照。
+- 仓内根 `ARCHITECTURE.md`（draft-0, 2026-06-11，中文）描述 Mopelium 内核/Cowork 设计。本目录 `docs/ARCHITECTURE.md` 据实际源码重写并与之对照。
 - Cowork 设计细节见 `docs/COWORK_AGENT_ARCHITECTURE.md` 等 7 个 COWORK_* 文档；原则提炼见 `docs/COWORK_PRINCIPLES.md`。
-- 开源源码、公开 prompt、依赖、bundled runtime 与上游升级的准入规则见 `docs/OPEN_SOURCE_REUSE.md`；实际已经采用的上游必须登记在 `NOTICE.md`。截至 2026-07-12，OpenCode 仍为 research-only，尚未把其源码、公开 prompt、UI 资产或 runtime 加入 Intatis。
+- 开源源码、公开 prompt、依赖、bundled runtime 与上游升级的准入规则见 `docs/OPEN_SOURCE_REUSE.md`；实际已经采用的上游必须登记在 `NOTICE.md`。截至 2026-07-12，OpenCode 仍为 research-only，尚未把其源码、公开 prompt、UI 资产或 runtime 加入 Mopelium。

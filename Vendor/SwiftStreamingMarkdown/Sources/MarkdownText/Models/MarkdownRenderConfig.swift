@@ -338,7 +338,7 @@ public struct MarkdownRenderConfig: Hashable {
     return TextContextMenu(menuGroups: [selectMoreGroup] + (textContextMenu?.menuGroups ?? []))
   }
 
-  /// Returns the restricted parse profile used by the first Intatis release.
+  /// Returns the restricted parse profile used by the first Mopelium release.
   /// Styling is preserved, while citations and images are forced off.
   func firstReleaseParseConfiguration() -> MarkdownRenderConfig {
     MarkdownRenderConfig(

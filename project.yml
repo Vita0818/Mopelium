@@ -1,26 +1,24 @@
 # XcodeGen spec — generates the Xcode project that builds the real .app bundles.
 #
 #   brew install xcodegen      # one-time
-#   xcodegen generate          # creates Intatis.xcodeproj
-#   open Intatis.xcodeproj     # pick the IntatisMac or IntatisiOS scheme, then Run
+#   xcodegen generate          # creates Mopelium.xcodeproj
+#   open Mopelium.xcodeproj     # pick the MopeliumMac scheme, then Run
 #
-# The App targets link the Swift Package products in this repo. The iOS app links
-# ONLY the chat subset (no Tools / Permission / AgentKernel / Cowork).
+# The sole App target links the Swift Package products in this repo.
 
-name: Intatis
+name: Mopelium
 
 options:
   bundleIdPrefix: com.Vita0818
   developmentLanguage: en
   deploymentTarget:
     macOS: "26.0"
-    iOS: "26.0"
   createIntermediateGroups: true
   localPackagesGroup: "Internal Modules"
   postGenCommand: "sh scripts/hide-xcode-package-schemes.sh"
 
 packages:
-  Intatis:
+  Mopelium:
     path: .
 
 settings:
@@ -36,13 +34,13 @@ settings:
 targets:
 
   # ---- macOS DeveloperID app: Chat / Code / Cowork + stdio/HTTP MCP client ----
-  IntatisMac:
+  MopeliumMac:
     type: application
     platform: macOS
     sources:
-      - Apps/IntatisMac/Sources
-      - Apps/IntatisMac/Resources
-      - path: Intatis.icon
+      - Apps/MopeliumMac/Sources
+      - Apps/MopeliumMac/Resources
+      - path: Mopelium.icon
         buildPhase: resources
       - path: Apps/SharedResources
         buildPhase: resources
@@ -53,175 +51,57 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.Vita0818.IntatisMac
+        PRODUCT_BUNDLE_IDENTIFIER: com.Vita0818.Mopelium
         # Let Xcode synthesize Info.plist (injects CFBundleExecutable etc.).
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_CFBundleDisplayName: Mopelium
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Intatis contributors. See NOTICE.md."
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Mopelium contributors. See NOTICE.md."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Mopelium uses the microphone to turn voice into editable message drafts."
-        ASSETCATALOG_COMPILER_APPICON_NAME: Intatis
-        CODE_SIGN_ENTITLEMENTS: Apps/IntatisMac/IntatisMac.DeveloperID.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: Mopelium
+        CODE_SIGN_ENTITLEMENTS: Apps/MopeliumMac/MopeliumMac.DeveloperID.entitlements
         ENABLE_HARDENED_RUNTIME: "YES"
         ENABLE_RESOURCE_ACCESS_AUDIO_INPUT: "YES"
-        # The separately declared IntatisMacAppStore target is the only
-        # App-Store profile; do not turn this stdio-capable target into one by
-        # swapping entitlements.
     dependencies:
-      - package: Intatis
-        product: IntatisCore
-      - package: Intatis
-        product: IntatisProtocol
-      - package: Intatis
-        product: IntatisProviders
-      - package: Intatis
-        product: IntatisConversation
-      - package: Intatis
-        product: IntatisArtifacts
-      - package: Intatis
-        product: IntatisMultimodal
-      - package: Intatis
-        product: IntatisSharedUI
-      - package: Intatis
-        product: IntatisTools
-      - package: Intatis
-        product: IntatisKnowledge
-      - package: Intatis
-        product: IntatisPermission
-      - package: Intatis
-        product: IntatisAgentKernel
-      - package: Intatis
-        product: IntatisSkills
-      - package: Intatis
-        product: IntatisCowork
-      - package: Intatis
-        product: IntatisMCP
-      - package: Intatis
-        product: IntatisMCPStdio
-
-  # ---- macOS App Store: full UI, remote MCP HTTP only, no stdio linkage ----
-  IntatisMacAppStore:
-    type: application
-    platform: macOS
-    sources:
-      - Apps/IntatisMac/Sources
-      - path: Apps/SharedResources
-        buildPhase: resources
-      - path: NOTICE.md
-        buildPhase: resources
-      - path: ThirdPartyNotices
-        type: folder
-        buildPhase: resources
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.Vita0818.IntatisMac
-        PRODUCT_NAME: Intatis
-        GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_KEY_CFBundleDisplayName: Mopelium
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Intatis contributors. See NOTICE.md."
-        CODE_SIGN_ENTITLEMENTS: Apps/IntatisMac/IntatisMac.AppStore.entitlements
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) INTATIS_MAC_APP_STORE"
-    dependencies:
-      - package: Intatis
-        product: IntatisCore
-      - package: Intatis
-        product: IntatisProtocol
-      - package: Intatis
-        product: IntatisProviders
-      - package: Intatis
-        product: IntatisConversation
-      - package: Intatis
-        product: IntatisArtifacts
-      - package: Intatis
-        product: IntatisMultimodal
-      - package: Intatis
-        product: IntatisSharedUI
-      - package: Intatis
-        product: IntatisTools
-      - package: Intatis
-        product: IntatisPermission
-      - package: Intatis
-        product: IntatisAgentKernel
-      - package: Intatis
-        product: IntatisSkills
-      - package: Intatis
-        product: IntatisCowork
-      - package: Intatis
-        product: IntatisMCP
-
-  # ---- iOS app: chat-only SUBSET (deliberately no workspace stack) ----
-  IntatisiOS:
-    type: application
-    platform: iOS
-    sources:
-      - Apps/IntatisiOS/Sources
-      - Apps/IntatisiOS/Resources
-      - path: Intatis.icon
-        buildPhase: resources
-      - path: Apps/SharedResources
-        buildPhase: resources
-      - path: NOTICE.md
-        buildPhase: resources
-      - path: ThirdPartyNotices
-        type: folder
-        buildPhase: resources
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.Vita0818.Intatis
-        TARGETED_DEVICE_FAMILY: "1,2"
-        # Let Xcode synthesize Info.plist (injects CFBundleExecutable etc.).
-        GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_KEY_CFBundleDisplayName: Mopelium
-        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Mopelium uses the microphone for voice input transcription."
-        ASSETCATALOG_COMPILER_APPICON_NAME: Intatis
-    dependencies:
-      - package: Intatis
-        product: IntatisCore
-      - package: Intatis
-        product: IntatisProtocol
-      - package: Intatis
-        product: IntatisProviders
-      - package: Intatis
-        product: IntatisConversation
-      - package: Intatis
-        product: IntatisArtifacts
-      - package: Intatis
-        product: IntatisMultimodal
-      - package: Intatis
-        product: IntatisSharedUI
+      - package: Mopelium
+        product: MopeliumCore
+      - package: Mopelium
+        product: MopeliumProtocol
+      - package: Mopelium
+        product: MopeliumProviders
+      - package: Mopelium
+        product: MopeliumConversation
+      - package: Mopelium
+        product: MopeliumArtifacts
+      - package: Mopelium
+        product: MopeliumMultimodal
+      - package: Mopelium
+        product: MopeliumSharedUI
+      - package: Mopelium
+        product: MopeliumTools
+      - package: Mopelium
+        product: MopeliumKnowledge
+      - package: Mopelium
+        product: MopeliumPermission
+      - package: Mopelium
+        product: MopeliumAgentKernel
+      - package: Mopelium
+        product: MopeliumSkills
+      - package: Mopelium
+        product: MopeliumCowork
+      - package: Mopelium
+        product: MopeliumMCP
+      - package: Mopelium
+        product: MopeliumMCPStdio
 
 schemes:
-  IntatisMac:
+  MopeliumMac:
     build:
       targets:
-        IntatisMac: all
+        MopeliumMac: all
     run:
       config: Debug
     management:
       shared: true
       orderHint: 0
-      isShown: true
-
-  IntatisMacAppStore:
-    build:
-      targets:
-        IntatisMacAppStore: all
-    run:
-      config: Debug
-    management:
-      shared: true
-      orderHint: 1
-      isShown: true
-
-  IntatisiOS:
-    build:
-      targets:
-        IntatisiOS: all
-    run:
-      config: Debug
-    management:
-      shared: true
-      orderHint: 2
       isShown: true

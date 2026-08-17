@@ -2,7 +2,7 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Intatis derivative modification: request-local math catalog.
+//  Mopelium derivative modification: request-local math catalog.
 //
 
 import Foundation
@@ -35,7 +35,7 @@ struct InlineMathCatalog: Hashable {
 
   func token(at index: Int) -> String {
     precondition(entries.indices.contains(index))
-    return "\(Self.tokenStart)INTATISMATH\(namespace)\(index)\(Self.tokenEnd)"
+    return "\(Self.tokenStart)MOPELIUMMATH\(namespace)\(index)\(Self.tokenEnd)"
   }
 
   /// Replaces exact current-request tokens found in a Markdown text leaf.

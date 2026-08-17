@@ -1,11 +1,11 @@
-// Validation-only macOS process watchdog for the Intatis renderer fixture.
+// Validation-only macOS process watchdog for the Mopelium renderer fixture.
 //
 // Build (does not launch any app):
-//   xcrun swiftc -O -module-cache-path /private/tmp/intatis-renderer-watchdog-module-cache \
+//   xcrun swiftc -O -module-cache-path /private/tmp/mopelium-renderer-watchdog-module-cache \
 //     scripts/RendererValidationWatchdog.swift \
-//     -o /private/tmp/intatis-renderer-validation-watchdog
+//     -o /private/tmp/mopelium-renderer-validation-watchdog
 //
-// The `run` command intentionally accepts an Intatis validation app plus a
+// The `run` command intentionally accepts an Mopelium validation app plus a
 // closed set of fixture options. It is not a general-purpose process runner.
 
 #if os(macOS)
@@ -14,10 +14,10 @@ import Darwin
 import Foundation
 
 private let mib: UInt64 = 1_048_576
-private let watchdogLockPath = "/private/tmp/com.Vita0818.Intatis.renderer-validation-watchdog.lock"
-private let expectedBundleIdentifier = "com.Vita0818.IntatisMac"
+private let watchdogLockPath = "/private/tmp/com.Vita0818.Mopelium.renderer-validation-watchdog.lock"
+private let expectedBundleIdentifier = "com.Vita0818.Mopelium"
 private let expectedFixtureSHA256 = "fb548849d0b708d31e8c6d055805f29f5c09ee4c8306bf9adc537a48e95707f1"
-private let validationExecutableMarker = Data("Intatis renderer fixture".utf8)
+private let validationExecutableMarker = Data("Mopelium renderer fixture".utf8)
 
 private let machTimebase: mach_timebase_info_data_t = {
     var info = mach_timebase_info_data_t()
@@ -241,8 +241,8 @@ private enum RendererMode: String, Encodable {
 
     var launchArgument: String {
         switch self {
-        case .microsoft: "-IntatisMicrosoftMarkdownMessages"
-        case .plainSafe: "-IntatisPlainSafeMessages"
+        case .microsoft: "-MopeliumMicrosoftMarkdownMessages"
+        case .plainSafe: "-MopeliumPlainSafeMessages"
         }
     }
 }
@@ -253,7 +253,7 @@ private enum MathMode: String, Encodable {
 
     var launchArgument: String? {
         switch self {
-        case .disabled: "-IntatisDisableSingleDollarMath"
+        case .disabled: "-MopeliumDisableSingleDollarMath"
         case .singleDollar: nil
         }
     }
@@ -265,8 +265,8 @@ private enum Appearance: String, Encodable {
 
     var launchArgument: String {
         switch self {
-        case .light: "-IntatisAppearanceLight"
-        case .dark: "-IntatisAppearanceDark"
+        case .light: "-MopeliumAppearanceLight"
+        case .dark: "-MopeliumAppearanceDark"
         }
     }
 }
@@ -299,7 +299,7 @@ private struct GroupMetrics {
 }
 
 private struct SampleRecord: Encodable {
-    let schema = "intatis.renderer-watchdog.sample.v1"
+    let schema = "mopelium.renderer-watchdog.sample.v1"
     let sequence: Int
     let elapsedSeconds: Double
     let processGroupID: Int32
@@ -311,7 +311,7 @@ private struct SampleRecord: Encodable {
 }
 
 private struct EventRecord: Encodable {
-    let schema = "intatis.renderer-watchdog.event.v1"
+    let schema = "mopelium.renderer-watchdog.event.v1"
     let sequence: Int
     let elapsedSeconds: Double
     let kind: String
@@ -319,7 +319,7 @@ private struct EventRecord: Encodable {
 }
 
 private struct Manifest: Encodable {
-    let schema = "intatis.renderer-watchdog.manifest.v4"
+    let schema = "mopelium.renderer-watchdog.manifest.v4"
     let createdAt: String
     let operatingSystem: String
     let physicalMemoryBytes: UInt64
@@ -343,7 +343,7 @@ private struct Manifest: Encodable {
 }
 
 private struct ResultRecord: Encodable {
-    let schema = "intatis.renderer-watchdog.result.v1"
+    let schema = "mopelium.renderer-watchdog.result.v1"
     var outcome: Outcome
     var detail: String
     let elapsedSeconds: Double
@@ -367,7 +367,7 @@ private struct ResultRecord: Encodable {
 }
 
 private struct RuntimeLogAuditRecord: Encodable {
-    let schema = "intatis.renderer-watchdog.runtime-log-audit.v1"
+    let schema = "mopelium.renderer-watchdog.runtime-log-audit.v1"
     let startedAt: String
     let endedAt: String
     let swiftUIMultipleUpdatesPerFrameCount: Int
@@ -377,7 +377,7 @@ private struct RuntimeLogAuditRecord: Encodable {
 
 private struct FixtureMachineResult: Codable {
     static let currentSchema =
-        "intatis.renderer-fixture.result.v1"
+        "mopelium.renderer-fixture.result.v1"
 
     let schema: String
     let stage: String
@@ -667,8 +667,8 @@ private func isFamilyMember(_ identity: ProcessIdentity, familyNames: Set<String
     let candidates = [identity.name, pathName].compactMap { $0 }
     return candidates.contains { candidate in
         familyNames.contains(candidate)
-            || candidate.hasPrefix("IntatisRendererValidation")
-            || candidate.hasPrefix("IntatisRenderer")
+            || candidate.hasPrefix("MopeliumRendererValidation")
+            || candidate.hasPrefix("MopeliumRenderer")
     }
 }
 
@@ -1332,7 +1332,7 @@ private func validationEnvironment() -> [String: String] {
     }
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     environment["NSUnbufferedIO"] = "YES"
-    environment["INTATIS_RENDERER_WATCHDOG"] = "1"
+    environment["MOPELIUM_RENDERER_WATCHDOG"] = "1"
     return environment
 }
 
@@ -1589,7 +1589,7 @@ private func validateApp(_ configuration: RunConfiguration) throws -> (String, M
             "unexpected bundle identifier: \(bundle.bundleIdentifier ?? "missing")")
     }
     let executablePath = canonicalPath(executableURL.path)
-    guard URL(fileURLWithPath: executablePath).lastPathComponent == "IntatisMac" else {
+    guard URL(fileURLWithPath: executablePath).lastPathComponent == "MopeliumMac" else {
         throw WatchdogFailure.preflight("unexpected validation executable name")
     }
     let executableHash = try sha256(path: executablePath)
@@ -1601,7 +1601,7 @@ private func validateApp(_ configuration: RunConfiguration) throws -> (String, M
         options: [.mappedIfSafe])
     guard executableData.range(of: validationExecutableMarker) != nil else {
         throw WatchdogFailure.preflight(
-            "validation fixture marker is absent; refusing to launch a normal Intatis build")
+            "validation fixture marker is absent; refusing to launch a normal Mopelium build")
     }
     let fixtureHash = try sha256(path: fixturePath)
     guard fixtureHash == expectedFixtureSHA256 else {
@@ -1722,16 +1722,16 @@ private func runValidation(_ arguments: [String]) throws -> Int32 {
             "fixture result path unexpectedly exists before launch")
     }
     var launchArguments = [
-        "-IntatisRendererFixture",
+        "-MopeliumRendererFixture",
         configuration.renderer.launchArgument,
         configuration.appearance.launchArgument,
-        "-IntatisRendererFixtureStage",
+        "-MopeliumRendererFixtureStage",
         configuration.stage.rawValue,
-        "-IntatisRendererIncidentFixture",
+        "-MopeliumRendererIncidentFixture",
         canonicalPath(configuration.fixturePath),
-        "-IntatisRendererFixtureAutoExitSeconds",
+        "-MopeliumRendererFixtureAutoExitSeconds",
         String(format: "%.3f", limits.observationSeconds),
-        "-IntatisRendererFixtureResultPath",
+        "-MopeliumRendererFixtureResultPath",
         fixtureResultURL.path,
     ]
     if let mathLaunchArgument = configuration.mathMode.launchArgument {
@@ -1743,7 +1743,7 @@ private func runValidation(_ arguments: [String]) throws -> Int32 {
             executablePath: validated.0,
             arguments: launchArguments,
             environment: validationEnvironment(),
-            familyNames: ["IntatisMac", "IntatisRendererValidation"],
+            familyNames: ["MopeliumMac", "MopeliumRendererValidation"],
             excludedPIDs: [getpid()],
             limits: limits,
             maximumFamilyInstances: 1,
@@ -1852,7 +1852,7 @@ private struct SelfTestCaseResult: Encodable {
 }
 
 private struct SelfTestSummary: Encodable {
-    let schema = "intatis.renderer-watchdog.self-test.v1"
+    let schema = "mopelium.renderer-watchdog.self-test.v1"
     let cases: [SelfTestCaseResult]
     let allPassed: Bool
 }
@@ -1915,7 +1915,7 @@ private func validateClosedSetSelfTestContracts() throws {
           FixtureStage.heartbeatStall.accepts(.isolation),
           FixtureStage.mathStructure.rawValue == "math-structure",
           FixtureStage.mathHistory.rawValue == "math-history",
-          MathMode.disabled.launchArgument == "-IntatisDisableSingleDollarMath",
+          MathMode.disabled.launchArgument == "-MopeliumDisableSingleDollarMath",
           MathMode.singleDollar.launchArgument == nil
     else {
         throw WatchdogFailure.preflight(
@@ -2449,7 +2449,7 @@ private func printUsage() {
         --math disabled|single-dollar --appearance light|dark \\
         --profile minimal|isolation|computer-use|replay-smoke|soak
 
-    The run command only accepts a hash-pinned Intatis validation build.
+    The run command only accepts a hash-pinned Mopelium validation build.
     A soak run enforces its own 180-second memory-plateau gate, but one run does
     not replace the repeated, Instruments-backed release validation matrix.
     """

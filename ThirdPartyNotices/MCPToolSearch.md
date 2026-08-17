@@ -2,7 +2,7 @@
 
 This notice covers the external-MCP-client `tool_search` parity implementation
 and its source-only differential oracle. It does not add an MCP server, a Rust
-runtime, or a Rust dependency to any Intatis product target.
+runtime, or a Rust dependency to any Mopelium product target.
 
 ## OpenAI Codex
 
@@ -23,14 +23,14 @@ runtime, or a Rust dependency to any Intatis product target.
   - `codex-rs/core/src/context_manager/normalize.rs`
   - the corresponding response-item and cache tests
 - Local implementation:
-  - `Packages/IntatisMCP/Sources/MCPToolSearch.swift`
-  - `Packages/IntatisMCP/Sources/MCPStdioToolCatalogCache.swift`
-  - `Packages/IntatisProtocol/Sources/ModelHistory.swift`
-  - `Packages/IntatisProviders/Sources/OpenAIToolCalling.swift`
-  - `Packages/IntatisProviders/Sources/Capability.swift`
-  - `Packages/IntatisAgentKernel/Sources/AgentLoop.swift`
+  - `Packages/MopeliumMCP/Sources/MCPToolSearch.swift`
+  - `Packages/MopeliumMCP/Sources/MCPStdioToolCatalogCache.swift`
+  - `Packages/MopeliumProtocol/Sources/ModelHistory.swift`
+  - `Packages/MopeliumProviders/Sources/OpenAIToolCalling.swift`
+  - `Packages/MopeliumProviders/Sources/Capability.swift`
+  - `Packages/MopeliumAgentKernel/Sources/AgentLoop.swift`
 
-Intatis translates the public behavior into its own Swift types and retains
+Mopelium translates the public behavior into its own Swift types and retains
 its own catalog revision, grant, capability lease, permission, durable tool
 ticket, EventLog, and platform boundaries. It does not copy Codex branding,
 UI assets, private prompts, or MCP Server code.
@@ -48,14 +48,14 @@ Copyright 2025 OpenAI
 ```
 
 The upstream NOTICE also attributes Codex TUI code derived from Ratatui.
-Intatis does not use or derive the Ratatui/TUI files, so that unrelated
+Mopelium does not use or derive the Ratatui/TUI files, so that unrelated
 attribution does not pertain to this derivative.
 
 ## bm25 2.3.2 and exact tokenizer closure
 
 Codex selects
 `SearchEngineBuilder::<usize>::with_documents(Language::English, ...)` from
-the public `bm25` crate. Intatis has no Rust product dependency; it translates
+the public `bm25` crate. Mopelium has no Rust product dependency; it translates
 the selected scoring/tokenization closure into Swift and keeps a source-only
 Rust oracle under `Tests/MCPBM25ParityOracle`.
 
@@ -86,7 +86,7 @@ Local modifications and boundaries:
 - `MCPEnglishSnowballStemmer.swift` is a direct Swift translation over ASCII
   bytes after transliteration. No Rust runtime or FFI is shipped.
 - Upstream `rust-stemmers/test_data` was used only in a temporary local
-  validation run and is not copied, generated, or distributed by Intatis.
+  validation run and is not copied, generated, or distributed by Mopelium.
   The checked-in oracle generates its own bounded corpora.
 
 ## MIT notices

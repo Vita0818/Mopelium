@@ -1,38 +1,36 @@
 // swift-tools-version:5.9
 import PackageDescription
 
-// Intatis root SwiftPM manifest. Product versioning is owned by project.yml;
+// Mopelium root SwiftPM manifest. Product versioning is owned by project.yml;
 // package comments below that mention early v0.x milestones describe when a
 // subsystem was introduced, not the current product version. See
 // docs/VERSIONING.md.
 
 let package = Package(
-    name: "Intatis",
+    name: "Mopelium",
     platforms: [
         .macOS("26.0"),
-        .iOS("26.0"),
     ],
     products: [
-        .library(name: "IntatisCore", targets: ["IntatisCore"]),
-        .library(name: "IntatisProtocol", targets: ["IntatisProtocol"]),
-        .library(name: "IntatisProviders", targets: ["IntatisProviders"]),
-        .library(name: "IntatisArtifacts", targets: ["IntatisArtifacts"]),
-        .library(name: "IntatisConversation", targets: ["IntatisConversation"]),
-        .library(name: "IntatisTools", targets: ["IntatisTools"]),
-        .library(name: "IntatisKnowledge", targets: ["IntatisKnowledge"]),
-        .library(name: "IntatisSkills", targets: ["IntatisSkills"]),
-        .library(name: "IntatisPermission", targets: ["IntatisPermission"]),
-        .library(name: "IntatisMCP", targets: ["IntatisMCP"]),
-        .library(name: "IntatisMCPStdio", targets: ["IntatisMCPStdio"]),
-        .library(name: "IntatisAgentKernel", targets: ["IntatisAgentKernel"]),
-        .library(name: "IntatisCowork", targets: ["IntatisCowork"]),
-        .library(name: "IntatisMultimodal", targets: ["IntatisMultimodal"]),
-        .library(name: "IntatisSharedUI", targets: ["IntatisSharedUI"]),
-        // The CLI IS a SwiftPM executable (no Xcode needed): `swift run intatis chat`.
-        .executable(name: "intatis", targets: ["IntatisCLI"]),
-        // The GUI apps (IntatisMac, IntatisiOS) are Xcode App targets, not SPM
-        // products — SwiftPM cannot build a .app bundle, and iOS apps cannot be
-        // built from SPM at all. See project.yml (XcodeGen) + README.
+        .library(name: "MopeliumCore", targets: ["MopeliumCore"]),
+        .library(name: "MopeliumProtocol", targets: ["MopeliumProtocol"]),
+        .library(name: "MopeliumProviders", targets: ["MopeliumProviders"]),
+        .library(name: "MopeliumArtifacts", targets: ["MopeliumArtifacts"]),
+        .library(name: "MopeliumConversation", targets: ["MopeliumConversation"]),
+        .library(name: "MopeliumTools", targets: ["MopeliumTools"]),
+        .library(name: "MopeliumKnowledge", targets: ["MopeliumKnowledge"]),
+        .library(name: "MopeliumSkills", targets: ["MopeliumSkills"]),
+        .library(name: "MopeliumPermission", targets: ["MopeliumPermission"]),
+        .library(name: "MopeliumMCP", targets: ["MopeliumMCP"]),
+        .library(name: "MopeliumMCPStdio", targets: ["MopeliumMCPStdio"]),
+        .library(name: "MopeliumAgentKernel", targets: ["MopeliumAgentKernel"]),
+        .library(name: "MopeliumCowork", targets: ["MopeliumCowork"]),
+        .library(name: "MopeliumMultimodal", targets: ["MopeliumMultimodal"]),
+        .library(name: "MopeliumSharedUI", targets: ["MopeliumSharedUI"]),
+        // The CLI IS a SwiftPM executable (no Xcode needed): `swift run mopelium chat`.
+        .executable(name: "mopelium", targets: ["MopeliumCLI"]),
+        // The MopeliumMac GUI app is an Xcode App target, not an SPM product.
+        // SwiftPM cannot build the .app bundle. See project.yml + README.
     ],
     dependencies: [
         // Audited in-tree thin derivative of Microsoft SwiftStreamingMarkdown
@@ -49,8 +47,8 @@ let package = Package(
             url: "https://github.com/apple/swift-crypto.git",
             exact: "4.5.1"
         ),
-        // Safe YAML parser for bounded OKF frontmatter in the non-iOS
-        // knowledge target. Exact commit/license provenance is recorded in
+        // Safe YAML parser for bounded OKF frontmatter in the knowledge target.
+        // Exact commit/license provenance is recorded in
         // ThirdPartyNotices/KnowledgeRetrieval.md.
         .package(
             url: "https://github.com/jpsim/Yams.git",
@@ -60,64 +58,63 @@ let package = Package(
     targets: [
         // MARK: Library targets (module == target)
         .target(
-            name: "IntatisCore",
-            path: "Packages/IntatisCore/Sources"
+            name: "MopeliumCore",
+            path: "Packages/MopeliumCore/Sources"
         ),
         .target(
-            name: "IntatisProtocol",
-            dependencies: ["IntatisCore"],
-            path: "Packages/IntatisProtocol/Sources"
+            name: "MopeliumProtocol",
+            dependencies: ["MopeliumCore"],
+            path: "Packages/MopeliumProtocol/Sources"
         ),
         .target(
-            name: "IntatisProviders",
+            name: "MopeliumProviders",
             dependencies: [
-                "IntatisCore", "IntatisProtocol",
+                "MopeliumCore", "MopeliumProtocol",
                 .product(
                     name: "Crypto",
                     package: "swift-crypto",
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisProviders/Sources"
+            path: "Packages/MopeliumProviders/Sources"
         ),
         .target(
-            name: "IntatisArtifacts",
-            dependencies: ["IntatisCore", "IntatisProtocol"],
-            path: "Packages/IntatisArtifacts/Sources"
+            name: "MopeliumArtifacts",
+            dependencies: ["MopeliumCore", "MopeliumProtocol"],
+            path: "Packages/MopeliumArtifacts/Sources"
         ),
         .target(
-            name: "IntatisConversation",
+            name: "MopeliumConversation",
             // ChatLoop drives a ChatProvider, so Conversation depends on Providers
-            // (still tool-free — see ARCHITECTURE.md §3.4 / §4: iOS links this, not the kernel).
-            dependencies: ["IntatisCore", "IntatisProtocol", "IntatisProviders", "IntatisArtifacts"],
-            path: "Packages/IntatisConversation/Sources"
+            // (still tool-free — see ARCHITECTURE.md §3.4 / §4).
+            dependencies: ["MopeliumCore", "MopeliumProtocol", "MopeliumProviders", "MopeliumArtifacts"],
+            path: "Packages/MopeliumConversation/Sources"
         ),
         // v0.2 — Code: tools, deterministic permission gate, single-agent kernel.
         .target(
-            name: "IntatisPTYLauncher",
-            path: "Packages/IntatisPTYLauncher",
+            name: "MopeliumPTYLauncher",
+            path: "Packages/MopeliumPTYLauncher",
             publicHeadersPath: "include"
         ),
         .target(
-            name: "IntatisTools",
+            name: "MopeliumTools",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisPTYLauncher",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumPTYLauncher",
                 .product(
                     name: "Crypto",
                     package: "swift-crypto",
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisTools/Sources"
+            path: "Packages/MopeliumTools/Sources"
         ),
         // OKF/Profile snapshots, deterministic validation, local embedding,
         // derived indexes, and the snapshot-bound search_knowledge tool.
-        // No iOS app target links this product.
         .target(
-            name: "IntatisKnowledge",
+            name: "MopeliumKnowledge",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisTools",
-                "IntatisProviders", "IntatisPermission",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumTools",
+                "MopeliumProviders", "MopeliumPermission",
                 .product(name: "Yams", package: "Yams"),
                 .product(
                     name: "Crypto",
@@ -125,7 +122,7 @@ let package = Package(
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisKnowledge",
+            path: "Packages/MopeliumKnowledge",
             exclude: ["Tests"],
             sources: ["Sources"],
             resources: [
@@ -133,12 +130,12 @@ let package = Package(
             ]
         ),
         .target(
-            name: "IntatisSkills",
+            name: "MopeliumSkills",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisTools",
-                "IntatisPermission",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumTools",
+                "MopeliumPermission",
             ],
-            path: "Packages/IntatisSkills",
+            path: "Packages/MopeliumSkills",
             exclude: ["Tests"],
             sources: ["Sources"],
             resources: [
@@ -146,17 +143,16 @@ let package = Package(
             ]
         ),
         .target(
-            name: "IntatisPermission",
+            name: "MopeliumPermission",
             // Providers added in v0.3 for the model-backed reviewer (layer B).
-            dependencies: ["IntatisCore", "IntatisProtocol", "IntatisProviders"],
-            path: "Packages/IntatisPermission/Sources"
+            dependencies: ["MopeliumCore", "MopeliumProtocol", "MopeliumProviders"],
+            path: "Packages/MopeliumPermission/Sources"
         ),
         // Production remote MCP HTTP/OAuth requests use libcurl's
-        // CURLOPT_RESOLVE socket binding on macOS and Linux. The iOS product
-        // does not link IntatisMCP.
+        // CURLOPT_RESOLVE socket binding on macOS and Linux.
         .target(
-            name: "IntatisCurlTransport",
-            path: "Packages/IntatisCurlTransport",
+            name: "MopeliumCurlTransport",
+            path: "Packages/MopeliumCurlTransport",
             publicHeadersPath: "include",
             linkerSettings: [
                 .linkedLibrary("curl"),
@@ -169,11 +165,11 @@ let package = Package(
         // app target; those layers inject event/artifact/inference services
         // through narrow interfaces.
         .target(
-            name: "IntatisMCP",
+            name: "MopeliumMCP",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisTools",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumTools",
                 .target(
-                    name: "IntatisCurlTransport",
+                    name: "MopeliumCurlTransport",
                     condition: .when(platforms: [.macOS, .linux])
                 ),
                 .product(name: "MCP", package: "MCPClientSDK"),
@@ -183,23 +179,23 @@ let package = Package(
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisMCP/Sources"
+            path: "Packages/MopeliumMCP/Sources"
         ),
         // Linux-only kernel execution guard support for local MCP stdio.
         // The C shim is inert on Apple platforms; keeping it separate avoids
         // placing fork/ptrace/seccomp code in the portable client core.
         .target(
-            name: "IntatisMCPStdioGuard",
-            path: "Packages/IntatisMCPStdio/ExecutionGuard",
+            name: "MopeliumMCPStdioGuard",
+            path: "Packages/MopeliumMCPStdio/ExecutionGuard",
             publicHeadersPath: "include"
         ),
         // Local stdio process ownership is a separate linkage boundary so the
-        // App Store target can remain remote-HTTP-only.
+        // portable MCP client core never owns local processes implicitly.
         .target(
-            name: "IntatisMCPStdio",
+            name: "MopeliumMCPStdio",
             dependencies: [
-                "IntatisMCP", "IntatisMCPStdioGuard",
-                "IntatisCore", "IntatisProtocol", "IntatisTools",
+                "MopeliumMCP", "MopeliumMCPStdioGuard",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumTools",
                 .product(name: "MCP", package: "MCPClientSDK"),
                 .product(
                     name: "Crypto",
@@ -207,145 +203,144 @@ let package = Package(
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisMCPStdio/Sources"
+            path: "Packages/MopeliumMCPStdio/Sources"
         ),
         .target(
-            name: "IntatisAgentKernel",
+            name: "MopeliumAgentKernel",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisProviders",
-                "IntatisTools", "IntatisPermission", "IntatisConversation",
-                "IntatisArtifacts", "IntatisMCP", "IntatisSkills",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumProviders",
+                "MopeliumTools", "MopeliumPermission", "MopeliumConversation",
+                "MopeliumArtifacts", "MopeliumMCP", "MopeliumSkills",
                 .product(
                     name: "Crypto",
                     package: "swift-crypto",
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisAgentKernel/Sources"
+            path: "Packages/MopeliumAgentKernel/Sources"
         ),
         // v0.3 — Cowork: multi-agent orchestration over a mediated message bus.
         .target(
-            name: "IntatisCowork",
+            name: "MopeliumCowork",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisProviders", "IntatisTools",
-                "IntatisPermission", "IntatisConversation", "IntatisAgentKernel",
-                "IntatisSkills",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumProviders", "MopeliumTools",
+                "MopeliumPermission", "MopeliumConversation", "MopeliumAgentKernel",
+                "MopeliumSkills",
             ],
-            path: "Packages/IntatisCowork/Sources"
+            path: "Packages/MopeliumCowork/Sources"
         ),
         // v0.4 — Multimodal: image/video generation + transcription → artifacts.
         .target(
-            name: "IntatisMultimodal",
+            name: "MopeliumMultimodal",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisProviders",
-                "IntatisArtifacts", "IntatisConversation",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumProviders",
+                "MopeliumArtifacts", "MopeliumConversation",
             ],
-            path: "Packages/IntatisMultimodal/Sources"
+            path: "Packages/MopeliumMultimodal/Sources"
         ),
         .target(
-            name: "IntatisSharedUI",
+            name: "MopeliumSharedUI",
             // Providers is needed because ChatViewModel drives ProviderRegistry.
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisProviders",
-                "IntatisConversation", "IntatisArtifacts",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumProviders",
+                "MopeliumConversation", "MopeliumArtifacts",
                 .product(
                     name: "SwiftStreamingMarkdown",
                     package: "SwiftStreamingMarkdown",
-                    condition: .when(platforms: [.macOS, .iOS])
+                    condition: .when(platforms: [.macOS])
                 ),
             ],
-            path: "Packages/IntatisSharedUI/Sources"
+            path: "Packages/MopeliumSharedUI/Sources"
         ),
-        // v0.6 — CLI: Swift-native `intatis` command (chat + code agent), talks to
+        // v0.6 — CLI: Swift-native `mopelium` command (chat + code agent), talks to
         // any OpenAI-compatible endpoint via env vars.
         .executableTarget(
-            name: "IntatisCLI",
+            name: "MopeliumCLI",
             dependencies: [
-                "IntatisCore", "IntatisProtocol", "IntatisProviders", "IntatisConversation",
-                "IntatisArtifacts", "IntatisTools", "IntatisPermission", "IntatisAgentKernel", "IntatisCowork",
-                "IntatisMCP", "IntatisMCPStdio", "IntatisSkills", "IntatisKnowledge",
+                "MopeliumCore", "MopeliumProtocol", "MopeliumProviders", "MopeliumConversation",
+                "MopeliumArtifacts", "MopeliumTools", "MopeliumPermission", "MopeliumAgentKernel", "MopeliumCowork",
+                "MopeliumMCP", "MopeliumMCPStdio", "MopeliumSkills", "MopeliumKnowledge",
                 .product(
                     name: "Crypto",
                     package: "swift-crypto",
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Apps/intatis-cli/Sources"
+            path: "Apps/mopelium-cli/Sources"
         ),
         // Development-only executable exercised by the pinned official MCP
         // client conformance runner. It is not a shipped product and contains
         // no MCP server implementation or server-facing API.
         .executableTarget(
-            name: "IntatisMCPConformanceClient",
+            name: "MopeliumMCPConformanceClient",
             dependencies: [
-                "IntatisMCP", "IntatisCore", "IntatisProtocol",
+                "MopeliumMCP", "MopeliumCore", "MopeliumProtocol",
                 .product(name: "MCP", package: "MCPClientSDK"),
             ],
-            path: "Packages/IntatisMCPConformanceClient/Sources"
+            path: "Packages/MopeliumMCPConformanceClient/Sources"
         ),
-        // GUI app targets (IntatisMac macOS app, IntatisiOS iOS app) are defined in
-        // the Xcode project generated from project.yml — they link these library
-        // products. The iOS app intentionally links only the subset.
+        // The MopeliumMac GUI app target is defined in the Xcode project generated
+        // from project.yml and links these library products.
 
         // MARK: Test targets (none depend on app targets; SharedUI tests run headlessly on macOS)
         .testTarget(
-            name: "IntatisCoreTests",
-            dependencies: ["IntatisCore"],
-            path: "Packages/IntatisCore/Tests"
+            name: "MopeliumCoreTests",
+            dependencies: ["MopeliumCore"],
+            path: "Packages/MopeliumCore/Tests"
         ),
         .testTarget(
-            name: "IntatisProtocolTests",
-            dependencies: ["IntatisProtocol", "IntatisCore"],
-            path: "Packages/IntatisProtocol/Tests"
+            name: "MopeliumProtocolTests",
+            dependencies: ["MopeliumProtocol", "MopeliumCore"],
+            path: "Packages/MopeliumProtocol/Tests"
         ),
         .testTarget(
-            name: "IntatisProvidersTests",
-            dependencies: ["IntatisProviders", "IntatisCore", "IntatisProtocol"],
-            path: "Packages/IntatisProviders/Tests"
+            name: "MopeliumProvidersTests",
+            dependencies: ["MopeliumProviders", "MopeliumCore", "MopeliumProtocol"],
+            path: "Packages/MopeliumProviders/Tests"
         ),
         .testTarget(
-            name: "IntatisArtifactsTests",
-            dependencies: ["IntatisArtifacts", "IntatisCore"],
-            path: "Packages/IntatisArtifacts/Tests"
+            name: "MopeliumArtifactsTests",
+            dependencies: ["MopeliumArtifacts", "MopeliumCore"],
+            path: "Packages/MopeliumArtifacts/Tests"
         ),
         .testTarget(
-            name: "IntatisConversationTests",
-            dependencies: ["IntatisConversation", "IntatisCore", "IntatisProtocol", "IntatisProviders"],
-            path: "Packages/IntatisConversation/Tests"
+            name: "MopeliumConversationTests",
+            dependencies: ["MopeliumConversation", "MopeliumCore", "MopeliumProtocol", "MopeliumProviders"],
+            path: "Packages/MopeliumConversation/Tests"
         ),
         .testTarget(
-            name: "IntatisToolsTests",
-            dependencies: ["IntatisTools", "IntatisCore"],
-            path: "Packages/IntatisTools/Tests"
+            name: "MopeliumToolsTests",
+            dependencies: ["MopeliumTools", "MopeliumCore"],
+            path: "Packages/MopeliumTools/Tests"
         ),
         .testTarget(
-            name: "IntatisKnowledgeTests",
+            name: "MopeliumKnowledgeTests",
             dependencies: [
-                "IntatisKnowledge", "IntatisCore", "IntatisProtocol",
-                "IntatisTools",
+                "MopeliumKnowledge", "MopeliumCore", "MopeliumProtocol",
+                "MopeliumTools",
             ],
-            path: "Packages/IntatisKnowledge/Tests",
+            path: "Packages/MopeliumKnowledge/Tests",
             resources: [
                 .copy("Fixtures"),
             ]
         ),
         .testTarget(
-            name: "IntatisSkillsTests",
+            name: "MopeliumSkillsTests",
             dependencies: [
-                "IntatisSkills", "IntatisCore", "IntatisProtocol", "IntatisTools",
+                "MopeliumSkills", "MopeliumCore", "MopeliumProtocol", "MopeliumTools",
             ],
-            path: "Packages/IntatisSkills/Tests"
+            path: "Packages/MopeliumSkills/Tests"
         ),
         .testTarget(
-            name: "IntatisPermissionTests",
-            dependencies: ["IntatisPermission", "IntatisCore", "IntatisProtocol", "IntatisProviders"],
-            path: "Packages/IntatisPermission/Tests"
+            name: "MopeliumPermissionTests",
+            dependencies: ["MopeliumPermission", "MopeliumCore", "MopeliumProtocol", "MopeliumProviders"],
+            path: "Packages/MopeliumPermission/Tests"
         ),
         .testTarget(
-            name: "IntatisMCPTests",
+            name: "MopeliumMCPTests",
             dependencies: [
-                "IntatisMCP", "IntatisMCPStdio", "IntatisCore",
-                "IntatisProtocol", "IntatisTools",
+                "MopeliumMCP", "MopeliumMCPStdio", "MopeliumCore",
+                "MopeliumProtocol", "MopeliumTools",
                 .product(name: "MCP", package: "MCPClientSDK"),
                 .product(
                     name: "Crypto",
@@ -353,55 +348,55 @@ let package = Package(
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisMCP/Tests"
+            path: "Packages/MopeliumMCP/Tests"
         ),
         .testTarget(
-            name: "IntatisCLITests",
+            name: "MopeliumCLITests",
             dependencies: [
-                "IntatisCLI", "IntatisAgentKernel",
-                "IntatisConversation", "IntatisCore",
-                "IntatisMCP", "IntatisProtocol",
+                "MopeliumCLI", "MopeliumAgentKernel",
+                "MopeliumConversation", "MopeliumCore",
+                "MopeliumMCP", "MopeliumProtocol",
             ],
-            path: "Apps/intatis-cli/Tests",
+            path: "Apps/mopelium-cli/Tests",
             resources: [
                 .copy("Fixtures"),
             ]
         ),
         .testTarget(
-            name: "IntatisAgentKernelTests",
+            name: "MopeliumAgentKernelTests",
             dependencies: [
-                "IntatisAgentKernel", "IntatisCore", "IntatisProtocol", "IntatisProviders",
-                "IntatisTools", "IntatisPermission", "IntatisConversation",
-                "IntatisArtifacts", "IntatisMCP", "IntatisSkills", "IntatisKnowledge",
+                "MopeliumAgentKernel", "MopeliumCore", "MopeliumProtocol", "MopeliumProviders",
+                "MopeliumTools", "MopeliumPermission", "MopeliumConversation",
+                "MopeliumArtifacts", "MopeliumMCP", "MopeliumSkills", "MopeliumKnowledge",
                 .product(
                     name: "Crypto",
                     package: "swift-crypto",
                     condition: .when(platforms: [.linux])
                 ),
             ],
-            path: "Packages/IntatisAgentKernel/Tests"
+            path: "Packages/MopeliumAgentKernel/Tests"
         ),
         .testTarget(
-            name: "IntatisCoworkTests",
+            name: "MopeliumCoworkTests",
             dependencies: [
-                "IntatisCowork", "IntatisCore", "IntatisProtocol", "IntatisProviders",
-                "IntatisTools", "IntatisPermission", "IntatisConversation", "IntatisAgentKernel",
-                "IntatisSkills",
+                "MopeliumCowork", "MopeliumCore", "MopeliumProtocol", "MopeliumProviders",
+                "MopeliumTools", "MopeliumPermission", "MopeliumConversation", "MopeliumAgentKernel",
+                "MopeliumSkills",
             ],
-            path: "Packages/IntatisCowork/Tests"
+            path: "Packages/MopeliumCowork/Tests"
         ),
         .testTarget(
-            name: "IntatisMultimodalTests",
+            name: "MopeliumMultimodalTests",
             dependencies: [
-                "IntatisMultimodal", "IntatisCore", "IntatisProtocol", "IntatisProviders",
-                "IntatisArtifacts", "IntatisConversation",
+                "MopeliumMultimodal", "MopeliumCore", "MopeliumProtocol", "MopeliumProviders",
+                "MopeliumArtifacts", "MopeliumConversation",
             ],
-            path: "Packages/IntatisMultimodal/Tests"
+            path: "Packages/MopeliumMultimodal/Tests"
         ),
         .testTarget(
-            name: "IntatisSharedUITests",
-            dependencies: ["IntatisSharedUI"],
-            path: "Packages/IntatisSharedUI/Tests",
+            name: "MopeliumSharedUITests",
+            dependencies: ["MopeliumSharedUI"],
+            path: "Packages/MopeliumSharedUI/Tests",
             resources: [
                 .copy("Fixtures"),
             ]

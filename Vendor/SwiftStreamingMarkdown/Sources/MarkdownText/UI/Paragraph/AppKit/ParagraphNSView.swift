@@ -2,7 +2,7 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Intatis derivative modification: TextKit 2 inline-math hosting.
+//  Mopelium derivative modification: TextKit 2 inline-math hosting.
 //
 
 #if canImport(AppKit)

@@ -1,5 +1,5 @@
 [package]
-name = "intatis-mcp-bm25-parity-oracle"
+name = "mopelium-mcp-bm25-parity-oracle"
 version = "0.1.0"
 edition = "2021"
 publish = false

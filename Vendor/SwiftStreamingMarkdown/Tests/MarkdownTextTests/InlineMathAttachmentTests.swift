@@ -2,7 +2,7 @@
 //  Copyright (c) Microsoft Corporation. All rights reserved.
 //  Licensed under the MIT License. See LICENSE in the project root for license information.
 //
-//  Intatis derivative modification: inline-math attachment safety coverage.
+//  Mopelium derivative modification: inline-math attachment safety coverage.
 //
 
 #if canImport(AppKit)

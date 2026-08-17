@@ -35,8 +35,8 @@ Date: 2026-08-01
 | Manual permission semantics remain clear | Passed | Approve Call, Decline Call and Cancel Turn remain separate accessible buttons; the approved state becomes a compact notice. |
 | Automatic review is non-actionable | Passed | Automatic mode shows progress and no manual approve/decline/cancel controls. |
 | Light and Dark use native hierarchy | Passed | The same system Material, semantic text, accent and status colors remain legible in both fixture appearances. |
-| User bubbles omit `You` | Passed | The real-history Chat capture shows a trailing user bubble whose first visible content is the message; the adjacent assistant keeps `Intatis` and timestamp. |
-| Sidebar subtitle is removed | Passed | The current app capture shows only `Intatis` above the mode rows, with history and Settings unchanged. |
+| User bubbles omit `You` | Passed | The real-history Chat capture shows a trailing user bubble whose first visible content is the message; the adjacent assistant keeps `Mopelium` and timestamp. |
+| Sidebar subtitle is removed | Passed | The current app capture shows only `Mopelium` above the mode rows, with history and Settings unchanged. |
 | Active session headers are title-only | Passed | The real-history Chat capture exposes only `sess_muftosxo`; the former `Kimi K3 · Moonshot CN · api.moonshot.cn` line is absent. Code and Cowork pass the same nil-subtitle contract to the shared production header. |
 | Recent session rows are title-only | Passed | Chat and Cowork runtime captures show one line per session; event count, timestamp, workspace path and runtime-state metadata are absent while selection, icons, New, Rename/Delete affordances and Settings remain unchanged. |
 
@@ -123,7 +123,7 @@ Date: 2026-08-02
    scroll-content margin, and added an edge pass-through for the primary scroller.
 3. Routed Agent communication rows through the normal agent answer surface and normalized four
    communication event kinds to directional identity.
-4. Built and launched a uniquely identified ad-hoc QA copy of the latest IntatisMac Debug app,
+4. Built and launched a uniquely identified ad-hoc QA copy of the latest MopeliumMac Debug app,
    opened the existing `Test` Cowork session, widened the window and inspected the real rail,
    transcript, primary scroll area and Agent event accessibility tree without sending a message.
 5. Compared the reference, latest rail capture and Agent-row capture together. No tested-surface
@@ -132,8 +132,8 @@ Date: 2026-08-02
 ## Build and test evidence
 
 - Targeted SwiftPM regression: 32 tests / 0 failures across
-  `ExecutionTracePresentationTests`, `IntatisConversationCodeTests` and `ThreadLayoutTests`.
-- Latest `IntatisMac` macOS Debug Xcode build: `BUILD SUCCEEDED` with local ad-hoc signing.
+  `ExecutionTracePresentationTests`, `MopeliumConversationCodeTests` and `ThreadLayoutTests`.
+- Latest `MopeliumMac` macOS Debug Xcode build: `BUILD SUCCEEDED` with local ad-hoc signing.
 - Native read-only QA confirmed `doc-reader->main`, ordinary answer rendering, no divider/backing
   rail, permission-first glass cards and no Git surface.
 - No provider request, permission decision, message send or durable Cowork state mutation was
@@ -219,9 +219,9 @@ Date: 2026-08-02
 
 - `ThreadLayoutTests` 10/10, `PermissionProjectionTests` 16/16 and
   `PermissionReviewControlPlaneTests` 35/35 passed.
-- `IntatisSharedUI`, `IntatisMac` Release/Debug and generic Simulator `IntatisiOS` Debug builds
+- `MopeliumSharedUI`, `MopeliumMac` Release/Debug and generic Simulator `MopeliumiOS` Debug builds
   succeeded.
-- `/Applications/Intatis.app` contains the latest Release build. The host has no valid Developer ID
+- `/Applications/Mopelium.app` contains the latest Release build. The host has no valid Developer ID
   identity, so this local installation is ad-hoc Hardened Runtime signed and is not a notarized
   distributable artifact.
 - No provider request, permission action, message send or durable Cowork state mutation was used
@@ -237,21 +237,21 @@ Date: 2026-08-02
 
 - Apply the user's final correction: the app-owned iOS chrome uses the Apple system serif
   design, not merely reference-matched sizes and weights.
-- Keep the accepted top model picker, Intatis drawer, Recents hierarchy, composer and Settings
+- Keep the accepted top model picker, Mopelium drawer, Recents hierarchy, composer and Settings
   native to SwiftUI and Dynamic Type; do not add a font asset.
 - Preserve the macOS font environment and composer contract.
 
 ## Comparison inputs
 
 - Source truth: user-supplied `IMG_4904.HEIC`, `IMG_4905.HEIC` and `IMG_4906.HEIC`.
-- Read-only PNG conversions: `/private/tmp/intatis-font-reference/IMG_4904.png`,
-  `/private/tmp/intatis-font-reference/IMG_4905.png` and
-  `/private/tmp/intatis-font-reference/IMG_4906.png`.
-- Final implementation captures: `/private/tmp/intatis-ios-serif-home.png`,
-  `/private/tmp/intatis-ios-serif-sidebar.png` and
-  `/private/tmp/intatis-ios-serif-settings.png`.
-- Paired full-screen comparisons: `/private/tmp/intatis-serif-home-comparison.png` and
-  `/private/tmp/intatis-serif-sidebar-comparison.png`.
+- Read-only PNG conversions: `/private/tmp/mopelium-font-reference/IMG_4904.png`,
+  `/private/tmp/mopelium-font-reference/IMG_4905.png` and
+  `/private/tmp/mopelium-font-reference/IMG_4906.png`.
+- Final implementation captures: `/private/tmp/mopelium-ios-serif-home.png`,
+  `/private/tmp/mopelium-ios-serif-sidebar.png` and
+  `/private/tmp/mopelium-ios-serif-settings.png`.
+- Paired full-screen comparisons: `/private/tmp/mopelium-serif-home-comparison.png` and
+  `/private/tmp/mopelium-serif-sidebar-comparison.png`.
 - Each source is 1206×2622 pixels, or 402×874 points at @3x. The implementation is
   1170×2532 pixels, or 390×844 points at @3x. The viewport differs by 12×30 points, so the
   review uses same-density overlapping typography regions rather than claiming whole-screen
@@ -266,7 +266,7 @@ Date: 2026-08-02
 |---|---|---|
 | App chrome family is serif | Passed | The iOS app root applies `.fontDesign(.serif)`. Home, drawer, composer and Settings visibly inherit the Apple system serif design. |
 | Top model hierarchy remains correct | Passed | The closed model label is headline semibold and primary; the Menu label no longer uses accent blue. |
-| Drawer hierarchy remains correct | Passed | `Intatis` is title2 semibold, `Recents` is headline semibold, and the empty state is subordinate body copy, all in serif. |
+| Drawer hierarchy remains correct | Passed | `Mopelium` is title2 semibold, `Recents` is headline semibold, and the empty state is subordinate body copy, all in serif. |
 | Composer uses serif body copy | Passed | The iOS placeholder is system body in serif; the macOS branch remains its existing fixed 15pt contract. |
 | Settings is covered by the global rule | Passed | Sheet title, Cancel/Save, section labels, explanatory copy, buttons and field values are visibly serif in the final capture. |
 | Content rendering stays aligned with macOS | Passed with runtime caveat | Markdown, plain fallback, code, math and notices keep the shared macOS font implementation; no iOS-only serif descriptor rewrite remains. A real long rich reply was not created during this no-network QA pass. |
@@ -284,7 +284,7 @@ Date: 2026-08-02
   primary/secondary and continues to follow appearance.
 - Image and asset fidelity: no logo, icon, image or font asset was copied or introduced. Existing
   SF Symbols and native controls remain in use.
-- Copy and content: `Intatis`, the configured model name, empty-state text and composer prompt are
+- Copy and content: `Mopelium`, the configured model name, empty-state text and composer prompt are
   product/runtime copy and intentionally differ from the reference.
 
 ## Severity review
@@ -311,7 +311,7 @@ Date: 2026-08-02
 
 ## Build and interaction evidence
 
-- `IntatisiOS` generic iOS Simulator Debug unsigned build completed successfully after the final
+- `MopeliumiOS` generic iOS Simulator Debug unsigned build completed successfully after the final
   source patch.
 - `swift test --filter MessageRenderingTests` passed 41/41; the existing unrelated macOS
   `onChange` deprecation warning remains.
@@ -333,7 +333,7 @@ Date: 2026-08-02
   navigation hierarchy, session title, native Liquid Glass controls and two-row composer.
 - Keep the platform adaptation native to iOS rather than copying desktop geometry or adding
   Code/Cowork/workspace capabilities.
-- Compile the latest root `Intatis.icon` into the iOS app and verify its installed appearance.
+- Compile the latest root `Mopelium.icon` into the iOS app and verify its installed appearance.
 
 This section supersedes the preceding same-day global-serif iOS pass. The macOS source of truth
 uses serif for brand/page/session titles and system sans for body copy, controls, menus, forms and
@@ -344,17 +344,17 @@ input; the iOS implementation now follows that same role split.
 - macOS source truth:
   `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/cowork-integrated-agent-communication-final.jpeg`.
 - iOS final default states:
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/intatis-ios-dark-home.png`
+  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/mopelium-ios-dark-home.png`
   and
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/intatis-ios-final-light-home.png`.
+  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/mopelium-ios-final-light-home.png`.
 - iOS component states:
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/intatis-ios-light-sidebar.png`
+  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/mopelium-ios-light-sidebar.png`
   and
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/intatis-ios-light-settings.png`.
+  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/mopelium-ios-light-settings.png`.
 - Installed icon:
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/intatis-ios-home-icon.png`.
+  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/mopelium-ios-home-icon.png`.
 - Required combined reference/implementation input:
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/intatis-macos-ios-design-comparison.png`.
+  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/mopelium-macos-ios-design-comparison.png`.
 
 The desktop and phone viewports intentionally differ. The comparison judges the design-token and
 hierarchy mapping—title family, control family, materials, information order and composer roles—
@@ -364,13 +364,13 @@ rather than claiming cross-platform pixel identity.
 
 | Requirement | Result | Evidence |
 |---|---|---|
-| Typography matches macOS roles | Passed | `Intatis`, session and Settings titles use system serif; body, model label, buttons, menus, forms and input use system sans. The former root `.fontDesign(.serif)` is removed. |
+| Typography matches macOS roles | Passed | `Mopelium`, session and Settings titles use system serif; body, model label, buttons, menus, forms and input use system sans. The former root `.fontDesign(.serif)` is removed. |
 | Top header matches the product hierarchy | Passed | The center slot is the current serif session title; model selection no longer competes with navigation and New in the header. |
-| Drawer uses the same information architecture | Passed | Serif `Intatis`, selected Chat glass row, `Recent` + circular New, session list and bottom Settings replace the prior gear/search/large-Chat arrangement. |
+| Drawer uses the same information architecture | Passed | Serif `Mopelium`, selected Chat glass row, `Recent` + circular New, session list and bottom Settings replace the prior gear/search/large-Chat arrangement. |
 | Composer matches the macOS control cluster | Passed | Row one contains the model glass capsule and optional usage; row two contains the existing Chat paperclip menu, multiline input and the single Send/Stop slot. |
 | Native appearance works in Light and Dark | Passed | Semantic surfaces, text and glass controls remain legible in both captured appearances without fixed RGB/black/white or simulated glass. |
 | Settings keeps the same title/body split | Passed | Settings has a serif page title while native toolbar buttons, sections, descriptions and fields stay system sans. |
-| Latest app icon is installed | Passed | Built Info.plist declares `CFBundleIconName=Intatis`; iPhone/iPad icon files are present and the simulator home screen shows the new pointer icon. |
+| Latest app icon is installed | Passed | Built Info.plist declares `CFBundleIconName=Mopelium`; iPhone/iPad icon files are present and the simulator home screen shows the new pointer icon. |
 | iOS product boundary is preserved | Passed | No Tools, Permission, AgentKernel, Cowork, workspace, shell or generic attachment dependency was added. |
 
 ## Required fidelity surfaces
@@ -402,7 +402,7 @@ rather than claiming cross-platform pixel identity.
 2. Removed the iOS global-serif override, moved model selection into a parameterized shared
    composer first row, moved session title into the header and rebuilt the drawer from shared
    session-history/native glass surfaces.
-3. Added the root `Intatis.icon` to the iOS resource graph, regenerated the Xcode project and
+3. Added the root `Mopelium.icon` to the iOS resource graph, regenerated the Xcode project and
    confirmed the compiled Info.plist/icon inventory.
 4. Installed on an iOS 27.0 iPhone 17e simulator and captured final Light/Dark home pixels. Two
    QA-only incremental builds changed only the initial presentation state to expose drawer and
@@ -415,7 +415,7 @@ rather than claiming cross-platform pixel identity.
 
 - Swift parse passed for the three touched Swift files.
 - `MessageRenderingTests|ThreadLayoutTests` passed 51/51.
-- XcodeGen and generic `IntatisiOS` Simulator Debug unsigned build succeeded.
+- XcodeGen and generic `MopeliumiOS` Simulator Debug unsigned build succeeded.
 - CoreSimulator supplied native installed pixels. This host has CoreSimulator runtimes but no
   launchable `Simulator.app`, so Computer Use could not target the headless iOS process; drawer and
   Settings interaction automation is not claimed.
@@ -592,7 +592,7 @@ Date: 2026-08-04
 
 This pass supersedes the earlier window-position conclusion after the user reproduced the same jump.
 The production Test session then exposed the actual feedback loop: the old
-`IntatisThreadViewportFramesPreferenceKey` updated more than once in a frame during window changes.
+`MopeliumThreadViewportFramesPreferenceKey` updated more than once in a frame during window changes.
 The final build removes that preference path instead of compensating its output.
 
 - User reference: `/var/folders/8p/t9gqz5213cqdslvht9fmd0zm0000gn/T/TemporaryItems/NSIRD_screencaptureui_WIaMnh/Screenshot 2026-08-04 at 15.07.05.png`
@@ -614,7 +614,7 @@ position and focus-lighting comparison.
 | Focus lighting does not become a position jump | Passed | The app was raised behind Xcode and returned. Native glass lighting changed as expected, while the structural outlines and card geometry stayed fixed; the returned accessibility tree reported no rail structure change. |
 | Transcript updates cannot remount the glass rail | Passed | The rail is behind an Equatable boundary whose snapshot excludes empty/loading/page/rich transcript state. AX diffs across real switches removed and added transcript nodes but retained the rail. |
 | Card content cannot remount the optical surface | Passed | Each `Glass.clear` now lives on a dedicated backdrop behind its dynamic content. Independent status cards are no longer grouped by a morphing `GlassEffectContainer`. |
-| Window position cannot feed back into thread layout | Passed | GeometryReader frame probes and `IntatisThreadViewportFramesPreferenceKey` were removed; bottom restoration uses `onScrollVisibilityChange`. The old preference warning count was zero after real full-screen, repeated agent switching and focus return. |
+| Window position cannot feed back into thread layout | Passed | GeometryReader frame probes and `MopeliumThreadViewportFramesPreferenceKey` were removed; bottom restoration uses `onScrollVisibilityChange`. The old preference warning count was zero after real full-screen, repeated agent switching and focus return. |
 | Heavy layout churn remains bounded | Passed | 85 focused rendering/layout/scroll tests passed, including a production-shaped AppKit host with 360 interleaved agent-selection, mode, inspector and window-size changes. |
 
 ## Severity review

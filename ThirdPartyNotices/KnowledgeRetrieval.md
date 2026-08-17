@@ -1,6 +1,6 @@
 # Yams 6.2.2 and bundled libYAML
 
-Intatis uses Yams only inside the non-iOS `IntatisKnowledge` target to parse
+Mopelium uses Yams only inside the `MopeliumKnowledge` target to parse
 bounded OKF YAML frontmatter. The dependency is resolved exactly at release
 6.2.2.
 
@@ -13,10 +13,10 @@ bounded OKF YAML frontmatter. The dependency is resolved exactly at release
 - External SwiftPM dependencies: none
 
 The upstream README states that both Yams and the bundled libYAML sources are
-MIT licensed. Intatis does not copy Yams source into this repository; SwiftPM
+MIT licensed. Mopelium does not copy Yams source into this repository; SwiftPM
 resolves the exact release. The complete upstream MIT license is preserved at
 `ThirdPartyNotices/Licenses/Yams-6.2.2-MIT.txt`.
 
-Intatis applies its own pre-parse byte limits, rejects aliases and custom tags,
+Mopelium applies its own pre-parse byte limits, rejects aliases and custom tags,
 walks the parsed node tree with depth/node/scalar bounds, and never uses YAML
 input to select or execute a type, command, Skill, URL, or runtime.

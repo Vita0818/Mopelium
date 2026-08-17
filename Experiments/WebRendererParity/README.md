@@ -13,7 +13,7 @@ The directory is intentionally independent:
 - it has its own exact npm dependency graph and lockfile;
 - generated files stay inside this directory and are ignored;
 - the local server binds only to `127.0.0.1`;
-- it has no bridge to Intatis sessions, EventLog, credentials, tools, leases,
+- it has no bridge to Mopelium sessions, EventLog, credentials, tools, leases,
   or permissions.
 
 The implementation-to-production comparison and recommended native integration
@@ -94,7 +94,7 @@ execution surface.
 ## Run
 
 ```sh
-cd /Users/vita/Vitemis/Intatis/Experiments/WebRendererParity
+cd /Users/vita/Vitemis/Mopelium/Experiments/WebRendererParity
 npm ci
 npm test
 npm run licenses
@@ -140,7 +140,7 @@ window.rendererHarness.snapshot()
 The snapshot contains public experiment state only: active sanitized session
 ID, route generation, switch count, warm residency metadata, DOM/message/math
 counts, and per-code-block language/highlight progress. It never returns
-message contents, parser instances, browser state, credentials, or Intatis
+message contents, parser instances, browser state, credentials, or Mopelium
 data.
 
 ## Verification boundary

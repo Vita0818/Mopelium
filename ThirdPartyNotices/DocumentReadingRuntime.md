@@ -3,8 +3,8 @@
 ## Adoption status and boundary
 
 - Reuse class: pinned external runtime dependencies; no upstream parser source
-  is copied into Intatis Swift sources.
-- Product scope: macOS and non-iOS headless document tools only.
+  is copied into Mopelium Swift sources.
+- Product scope: macOS App and macOS/Linux headless document tools only.
 - Ordinary read formats: DOCX, PPTX, XLSX, HTML, and EPUB.
 - Explicit OCR format: PDF only.
 - Distribution status: the source integration, release manifest, integrity
@@ -14,7 +14,7 @@
 
 Ordinary readers call the public Docling `DocumentConverter`,
 `DoclingDocument.iterate_items`, ranged `export_to_markdown`, and
-`HierarchicalChunker` APIs. Intatis owns only the fixed tool schemas, source
+`HierarchicalChunker` APIs. Mopelium owns only the fixed tool schemas, source
 identity checks, bounded result windows, opaque continuation cursors,
 permission/lease enforcement, sandbox invocation, and result-envelope
 validation. It does not implement an OOXML, HTML, EPUB, PDF, or OCR semantic
@@ -24,7 +24,7 @@ limits, not a content-reading fallback.
 ## Exact direct runtime contract
 
 The canonical machine-readable pins are in
-`Packages/IntatisTools/Runtime/document-runtime/release-spec.json`.
+`Packages/MopeliumTools/Runtime/document-runtime/release-spec.json`.
 
 | Component | Fixed identity | Upstream/license metadata |
 |---|---|---|
@@ -109,7 +109,7 @@ an outer App whose strict resource seal and exact Developer ID identity have
 been verified, and use validation-owned temporary `HOME`/`TMPDIR` directories.
 `scripts/package-macos-release.sh` requires independent `arm64` and `x86_64`
 roots, validates them before and after copying them into
-`Intatis.app/Contents/Resources/DocumentRuntime`, and refuses to continue if
+`Mopelium.app/Contents/Resources/DocumentRuntime`, and refuses to continue if
 the closure is missing or inconsistent. The outer App remains subject to its
 existing Developer ID, Hardened Runtime, notarization, staple, and Gatekeeper
 gates.

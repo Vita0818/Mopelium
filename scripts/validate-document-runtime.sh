@@ -4,7 +4,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 project_root="$(cd "$script_dir/.." && pwd -P)"
-spec="$project_root/Packages/IntatisTools/Runtime/document-runtime/release-spec.json"
+spec="$project_root/Packages/MopeliumTools/Runtime/document-runtime/release-spec.json"
 runtime_root="${1:-}"
 expected_architecture="${2:-}"
 expected_signing_identity="${3:-}"
@@ -71,8 +71,8 @@ required_files=(
     bin/python3
     bin/tesseract
     bin/pdfcpu
-    bin/intatis-rbook-helper
-    bin/intatis-epubcheck
+    bin/mopelium-rbook-helper
+    bin/mopelium-epubcheck
     lib/epubcheck-5.3.0/epubcheck.jar
     jre/temurin-21.0.11+10/Contents/Home/bin/java
     models/docling/docling-project--docling-layout-heron/config.json
@@ -110,8 +110,8 @@ for executable in \
     bin/python3 \
     bin/tesseract \
     bin/pdfcpu \
-    bin/intatis-rbook-helper \
-    bin/intatis-epubcheck \
+    bin/mopelium-rbook-helper \
+    bin/mopelium-epubcheck \
     jre/temurin-21.0.11+10/Contents/Home/bin/java; do
     [[ -x "$runtime_root/$executable" ]] || fail "runtime executable is not executable: $executable"
 done
@@ -144,7 +144,7 @@ while IFS= read -r link; do
     esac
 done < <(/usr/bin/find "$runtime_root" -type l -print)
 
-temporary_root="$(/usr/bin/mktemp -d /private/tmp/intatis-runtime-validation.XXXXXX)"
+temporary_root="$(/usr/bin/mktemp -d /private/tmp/mopelium-runtime-validation.XXXXXX)"
 /bin/chmod 0700 "$temporary_root"
 actual_paths="$temporary_root/actual-paths.txt"
 inventory_paths="$temporary_root/inventory-paths.txt"
@@ -192,7 +192,7 @@ actual_tessdata_paths="$(
 [[ -z "$(/usr/bin/find "$runtime_root/share/tessdata" -type l -print -quit)" ]] \
     || fail "Tesseract data directory must not contain symlinks"
 
-repository_epubcheck_wrapper="$project_root/Packages/IntatisTools/Runtime/epubcheck-wrapper/intatis-epubcheck"
+repository_epubcheck_wrapper="$project_root/Packages/MopeliumTools/Runtime/epubcheck-wrapper/mopelium-epubcheck"
 [[ -f "$repository_epubcheck_wrapper" && ! -L "$repository_epubcheck_wrapper" ]] \
     || fail "repository EPUBCheck wrapper is missing or unsafe"
 repository_wrapper_digest="$(
@@ -202,7 +202,7 @@ repository_wrapper_digest="$(
     || fail "repository EPUBCheck wrapper does not match the release spec"
 
 artifact_checks=(
-    'artifact_sha256.epubcheck_wrapper|bin/intatis-epubcheck'
+    'artifact_sha256.epubcheck_wrapper|bin/mopelium-epubcheck'
     'artifact_sha256.docling_layout_model.config_json|models/docling/docling-project--docling-layout-heron/config.json'
     'artifact_sha256.docling_layout_model.model_safetensors|models/docling/docling-project--docling-layout-heron/model.safetensors'
     'artifact_sha256.docling_layout_model.preprocessor_config_json|models/docling/docling-project--docling-layout-heron/preprocessor_config.json'
@@ -325,7 +325,7 @@ if [[ "$validation_mode" == "execute" ]]; then
         || fail "runtime Temurin JRE version does not match the release spec"
 
     epubcheck_version="$(
-        run_for_architecture "$runtime_root/bin/intatis-epubcheck" --version 2>&1
+        run_for_architecture "$runtime_root/bin/mopelium-epubcheck" --version 2>&1
     )" || fail "runtime EPUBCheck version inspection failed"
     [[ "$epubcheck_version" == *'5.3.0'* ]] \
         || fail "runtime EPUBCheck version does not match the release spec"

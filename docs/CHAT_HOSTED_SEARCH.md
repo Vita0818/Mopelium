@@ -1,19 +1,19 @@
 # Chat 与 Agent 托管网络搜索产品合同
 
 文档状态：当前产品合同与实现说明
-最近核对：2026-08-14
+最近核对：2026-08-17
 产品基线：v0.10（build 49）
 
 ## 一句话定义
 
 托管网络搜索只属于用户当前选择的 exact Chat provider/model/variant route。该 route 明确支持
-托管搜索时，Intatis 向模型提供厂商对应的搜索能力，并由模型通过 `tool_choice: auto` 自己决定
-当前问题是否需要搜索。该 route 不支持、未声明、无法确认或尚未适配时，Intatis 静默发送普通
+托管搜索时，Mopelium 向模型提供厂商对应的搜索能力，并由模型通过 `tool_choice: auto` 自己决定
+当前问题是否需要搜索。该 route 不支持、未声明、无法确认或尚未适配时，Mopelium 静默发送普通
 Chat 请求：不搜索、不提示，也不切换到其他模型或搜索服务。
 
 ## 用户可观察行为
 
-| 当前所选 exact Chat route | Intatis 发给模型的能力 | 最终行为 | 用户界面 |
+| 当前所选 exact Chat route | Mopelium 发给模型的能力 | 最终行为 | 用户界面 |
 |---|---|---|---|
 | 明确支持托管搜索 | 厂商对应的托管搜索声明，`tool_choice: auto` | 当前模型自行决定是否搜索 | 不新增按钮、开关、状态或提示 |
 | 明确不支持 | 不声明搜索能力 | 当前模型普通回答 | 静默，不提示 |
@@ -21,7 +21,7 @@ Chat 请求：不搜索、不提示，也不切换到其他模型或搜索服务
 | 搜索能力已提供，但模型认为无需搜索 | 搜索能力仍可用 | 当前模型直接回答，不产生来源 | 不显示空 Sources |
 | 当前模型实际使用搜索 | 搜索能力可用 | 当前模型返回回答及结构化来源 | 只展示通过安全校验的 citations |
 
-“模型自己选择”只表示当前所选模型决定是否调用已经提供给它的托管搜索能力。Intatis 不按关键词
+“模型自己选择”只表示当前所选模型决定是否调用已经提供给它的托管搜索能力。Mopelium 不按关键词
 预判是否搜索、不强制执行搜索，也不先发一次可能失败的搜索请求来探测能力。
 
 ## 每次 Send 的路由合同
@@ -49,7 +49,7 @@ Chat 请求：不搜索、不提示，也不切换到其他模型或搜索服务
 provider 请求。
 
 为兼容既有配置，decoder 可以继续接受并保留该字段，且不得因此显示警告或阻止普通 Chat；但它
-在运行时没有效果。Intatis 新生成的配置不应再主动加入该字段。是否在未来 schema 版本中彻底
+在运行时没有效果。Mopelium 新生成的配置不应再主动加入该字段。是否在未来 schema 版本中彻底
 删除兼容 decode，需要另行进行配置迁移评审，不能在读取用户文件时擅自删除或改写。
 
 ## 厂商协议适配
@@ -63,9 +63,9 @@ OpenAI-compatible 接入点。
 | OpenRouter server tools | `openrouter:web_search` | OpenRouter adapter 与对应 stream/citation decoder 已实现，且当前 exact route 可使用该 server tool |
 | `@ai-sdk/openai-compatible`、legacy 或其他 custom adapter | 默认无托管搜索 | 只有新增并审查对应 dialect 后才可启用，不能因“OpenAI-compatible”自动继承 |
 
-上表描述的是 Chat 的 provider-hosted 能力，不是 Chat 中的 Intatis Tool。现有
+上表描述的是 Chat 的 provider-hosted 能力，不是 Chat 中的 Mopelium Tool。现有
 `Capability.toolSearch` 表示 MCP deferred `tool_search` 合同，不得复用为网络搜索能力。
-Code/Cowork 另有一个显式 `hosted_web_search` Intatis Tool 包装同一类 provider-hosted wire；它与
+Code/Cowork 另有一个显式 `hosted_web_search` Mopelium Tool 包装同一类 provider-hosted wire；它与
 Chat 的透明能力、MCP `tool_search`、`browser_search`、`web_fetch` 各自独立。
 
 新增厂商或模型接入点时，必须同时提供 dialect encoder、stream/citation decoder、能力声明来源
@@ -78,7 +78,7 @@ Chat 的透明能力、MCP `tool_search`、`browser_search`、`web_fetch` 各自
   response format 和 provider routing 配置不得因开启或省略搜索而丢失。
 - `provider.only`、`allow_fallbacks`、`require_parameters` 等严格路由选项必须保真。不得通过关闭
   `require_parameters`、放开 fallback 或删除用户路由限制来掩盖搜索参数不兼容。
-- Intatis 只拥有运行时结构字段。支持搜索时只注入该 dialect 必需的 tool/endpoint 字段；不支持
+- Mopelium 只拥有运行时结构字段。支持搜索时只注入该 dialect 必需的 tool/endpoint 字段；不支持
   时只省略托管搜索字段，不得改写其他用户配置。
 - provider 实际是否执行搜索仍由 `tool_choice: auto` 和当前模型决定；advertise capability 不等于
   execute search。
@@ -98,7 +98,7 @@ Chat 的透明能力、MCP `tool_search`、`browser_search`、`web_fetch` 各自
 
 - 只有当前模型实际使用托管搜索且 provider 返回结构化 URL annotation 时才产生 citations。
 - citation 只接受带 host、无 user-info 的 HTTP(S) URL 并去重；不得从 Markdown 正文猜测来源。
-- provider annotation 若同时暴露 `content`、`start_index`、`end_index`，Intatis 必须和
+- provider annotation 若同时暴露 `content`、`start_index`、`end_index`，Mopelium 必须和
   `url`、`title` 一起接收；`web_search_call.action.sources` 另行暴露的 URL 也必须并入同一来源集。
   流式增量、search-call item 与最终 response 中的同 URL 记录合并为信息更完整的一项，不能因为
   较早记录只含 URL 就丢掉最终 evidence excerpt。
@@ -110,13 +110,13 @@ Chat 的透明能力、MCP `tool_search`、`browser_search`、`web_fetch` 各自
 - 不为每条消息强制执行网络搜索。
 - 不在不支持时显示提示、警告或搜索错误。
 - 不使用 `web_search_model` 切换隐藏模型或执行 fallback。
-- Chat 不注册或调用 Intatis 搜索工具，也不调用 `hosted_web_search`、`web_fetch`、
+- Chat 不注册或调用 Mopelium 搜索工具，也不调用 `hosted_web_search`、`web_fetch`、
   `browser_search`、本地浏览器、shell、MCP 或第三方搜索后端作为 fallback。
 - 不按关键词预分类是否搜索，不选择“相似”模型，不从 URL 或名称猜测支持情况。
 - 不为了规避 provider 路由错误而放松用户的严格 routing options。
 - 不实现任何两模型搜索编排。
 
-因此，macOS/iOS Chat 仍是无 Intatis Tools、无 PermissionEngine 的产品面；托管搜索只是在当前
+因此，macOS/CLI Chat 仍是无 Mopelium Tools、无 PermissionEngine 的兼容能力面；托管搜索只是在当前
 exact provider wire 上向当前模型提供的一项可选能力。
 
 ## Code/Cowork 的显式工具边界
@@ -142,7 +142,7 @@ exact provider wire 上向当前模型提供的一项可选能力。
   provider 没有向客户端暴露的搜索后端原始记录。所有来源在既有 50,000 Character 输出边界内
   按返回顺序保留；超界时显式标记 truncated，不再使用独立的 24-source 提前截断。
   OpenRouter `openrouter:web_search` 未暴露 engine 参数，因此遵守其服务端默认 engine 选择；
-  Intatis 不在本工具内另行选择搜索后端。
+  Mopelium 不在本工具内另行选择搜索后端。
 
 ## 当前实现（2026-08-14）
 
@@ -167,12 +167,12 @@ exact provider wire 上向当前模型提供的一项可选能力。
 - provider 只有返回受审结构化 code/type + `tools`/`tool_choice` parameter（或明确的结构化
   web-search unsupported code），且尚未接受任何有效 Responses payload 时，才会在同一路由重发
   一次普通 Chat。裸 404、自由文本和 partial payload 后失败不会触发重放。
-- macOS 新生成的 Intatis 配置不再写出 `web_search_model`；读取与内存兼容字段仍保留，更新既有
+- macOS 新生成的 Mopelium 配置不再写出 `web_search_model`；读取与内存兼容字段仍保留，更新既有
   JSON 时也不会擅自删除用户原字段。无效 legacy 值不阻止普通 Chat，有效 legacy 值也不再把
   隐藏搜索模型追加到用户可见模型列表。
 - 离线 provider/request、capability、fallback 与 ChatLoop citation tests 已覆盖本文核心矩阵；
   Agent Tool 另由 `HostedWebSearchToolTests`、`ProviderHostedWebSearchToolServiceTests`、
   `InferenceCatalogStoreResolverTests` 与 `ToolRegistryLeaseTests` 覆盖 exact route、strict schema、
-  fail-closed 与 lease 隔离。SwiftPM build、macOS Debug unsigned App build、iOS generic Simulator Debug
-  unsigned build 均已通过；完整 `swift test` 仍受既有 SharedUI suite 静默停滞影响，不能记为全量通过。
+  fail-closed 与 lease 隔离。迁移前 SwiftPM build、macOS Debug unsigned App build、iOS generic Simulator Debug
+  unsigned build 均曾通过；这些历史证据不替代当前 Mopelium macOS-only 构建。完整 `swift test` 仍受既有 SharedUI suite 静默停滞影响，不能记为全量通过。
   真实厂商 smoke 仍属于独立的环境验证，不改变默认 fail-closed 语义。

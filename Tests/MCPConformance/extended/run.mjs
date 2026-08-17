@@ -1,13 +1,13 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 
-const client = process.env.INTATIS_MCP_CONFORMANCE_CLIENT;
-if (!client) throw new Error("INTATIS_MCP_CONFORMANCE_CLIENT is required");
+const client = process.env.MOPELIUM_MCP_CONFORMANCE_CLIENT;
+if (!client) throw new Error("MOPELIUM_MCP_CONFORMANCE_CLIENT is required");
 
 const scenarios = [
-  "intatis/task-complete",
-  "intatis/task-timeout",
-  "intatis/task-cancel"
+  "mopelium/task-complete",
+  "mopelium/task-timeout",
+  "mopelium/task-cancel"
 ];
 
 for (const scenario of scenarios) {
@@ -38,7 +38,7 @@ for (const scenario of scenarios) {
     const methods = observed.map((entry) => entry.method);
     assertSubsequence(
       methods,
-      scenario === "intatis/task-complete"
+      scenario === "mopelium/task-complete"
         ? ["tools/call", "tasks/get", "tasks/result"]
         : ["tools/call", "tasks/get", "tasks/cancel"],
       scenario
@@ -58,7 +58,7 @@ for (const scenario of scenarios) {
 }
 
 console.log(
-  "Intatis MCP extended interoperability complete: task creation, poll, result, timeout, and cancellation"
+  "Mopelium MCP extended interoperability complete: task creation, poll, result, timeout, and cancellation"
 );
 
 async function handle(request, response, scenario, taskID, observed) {
@@ -98,7 +98,7 @@ async function handle(request, response, scenario, taskID, observed) {
     case "initialize":
       result = {
         protocolVersion: "2025-11-25",
-        serverInfo: { name: "intatis-task-peer", version: "1.0.0" },
+        serverInfo: { name: "mopelium-task-peer", version: "1.0.0" },
         capabilities: {
           tools: {},
           tasks: {
@@ -129,7 +129,7 @@ async function handle(request, response, scenario, taskID, observed) {
     case "tasks/get":
       result = taskWire(
         taskID,
-        scenario === "intatis/task-complete" ? "completed" : "working",
+        scenario === "mopelium/task-complete" ? "completed" : "working",
         now
       );
       break;

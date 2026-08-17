@@ -77,7 +77,7 @@ public enum MarkdownDocumentParser {
 
   /// Compatibility path for the package convenience views. It preserves the
   /// caller's complete configuration, but intentionally performs all work on
-  /// the main actor. Intatis production streaming uses `parse(text:config:)`
+  /// the main actor. Mopelium production streaming uses `parse(text:config:)`
   /// above with its external output-free scheduler instead.
   @MainActor
   static func parseOnMain(

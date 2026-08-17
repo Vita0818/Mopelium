@@ -27,7 +27,7 @@ blob identities reviewed for this adoption are:
 
 ## Local adoption
 
-- Local path: `.agents/skills/intatis-skill-creator/`
+- Local path: `.agents/skills/mopelium-skill-creator/`
 - Reuse classification: `vendored` + `derived`
 - Distributed local files:
   - `SKILL.md`
@@ -37,19 +37,19 @@ blob identities reviewed for this adoption are:
   - `scripts/quick_validate.py`
   - `scripts/generate_openai_yaml.py`
 
-Every distributed file above is modified by Intatis. The upstream
+Every distributed file above is modified by Mopelium. The upstream
 `agents/openai.yaml`, icons, images, branded assets, and all other Codex
 system Skills are not copied.
 
-## Intatis modifications
+## Mopelium modifications
 
-- Renamed the Skill from `skill-creator` to `intatis-skill-creator` so the
+- Renamed the Skill from `skill-creator` to `mopelium-skill-creator` so the
   project copy does not collide with the separately discovered Codex system
   Skill of the same upstream name.
-- Reworked the operating instructions for Intatis project roots,
+- Reworked the operating instructions for Mopelium project roots,
   invocation-scoped snapshots, `WorkspaceLease`, the ordinary permission
   chain, the 48 KiB text-resource limit, and truthful tool availability.
-- Removed examples that trigger Intatis' credential-shaped-content scanner
+- Removed examples that trigger Mopelium's credential-shaped-content scanner
   and documented the prohibition against sensitive examples.
 - Split and reorganized design guidance into
   `references/design-guide.md`.
@@ -60,17 +60,17 @@ system Skills are not copied.
   scaffolding, made portable `agents/openai.yaml` metadata opt-in, and added
   same-directory/name, placeholder, UTF-8, secret-marker, symlink, 48 KiB
   text-resource, and separate 16 KiB `agents/openai.yaml` safety checks.
-- Narrowed `agents/openai.yaml` guidance to Intatis' supported MCP dependency
+- Narrowed `agents/openai.yaml` guidance to Mopelium's supported MCP dependency
   subset. Interface and policy fields remain optional cross-harness metadata;
-  they are not described as Intatis runtime permissions. The helper does not
+  they are not described as Mopelium runtime permissions. The helper does not
   claim to duplicate the authoritative Swift MCP schema parser.
 
 The Skill is contextual guidance, not an executable privilege bundle.
 Bundled scripts can run only when the active agent already has an advertised
 execution tool, an appropriate workspace lease, and authorization through the
-normal Intatis permission and durable-execution path. It adds no network,
+normal Mopelium permission and durable-execution path. It adds no network,
 filesystem, shell, MCP, communication, or delegation capability of its own.
-It is not linked into the iOS target.
+It does not create or enter a second App target.
 
 ## License and upgrades
 
@@ -79,5 +79,5 @@ The complete Apache License 2.0 text used for this derivative is preserved at
 
 When upgrading, fix a new upstream commit, recheck the exact target files and
 their blob identities, review the upstream license and NOTICE, reapply and
-document all local modifications, and rerun the Intatis Skill validation and
+document all local modifications, and rerun the Mopelium Skill validation and
 focused loader tests before changing this record.

@@ -5,30 +5,30 @@ set -eu
 #
 # Required inputs are explicit so this script never depends on one developer's
 # home directory, Swiftly layout, or temporary installation path.
-: "${INTATIS_SWIFT_BIN:?set INTATIS_SWIFT_BIN to the validated Swift executable}"
-: "${INTATIS_LINUX_SDKS_PATH:?set INTATIS_LINUX_SDKS_PATH to the directory containing the validated artifact bundles}"
-: "${INTATIS_LINUX_SDK_AARCH64:?set INTATIS_LINUX_SDK_AARCH64 to the aarch64-swift-linux-musl SDK selector}"
-: "${INTATIS_LINUX_SDK_X86_64:?set INTATIS_LINUX_SDK_X86_64 to the x86_64-swift-linux-musl SDK selector}"
-: "${INTATIS_LINUX_VALIDATION_ROOT:?set INTATIS_LINUX_VALIDATION_ROOT to an empty or reusable output directory}"
+: "${MOPELIUM_SWIFT_BIN:?set MOPELIUM_SWIFT_BIN to the validated Swift executable}"
+: "${MOPELIUM_LINUX_SDKS_PATH:?set MOPELIUM_LINUX_SDKS_PATH to the directory containing the validated artifact bundles}"
+: "${MOPELIUM_LINUX_SDK_AARCH64:?set MOPELIUM_LINUX_SDK_AARCH64 to the aarch64-swift-linux-musl SDK selector}"
+: "${MOPELIUM_LINUX_SDK_X86_64:?set MOPELIUM_LINUX_SDK_X86_64 to the x86_64-swift-linux-musl SDK selector}"
+: "${MOPELIUM_LINUX_VALIDATION_ROOT:?set MOPELIUM_LINUX_VALIDATION_ROOT to an empty or reusable output directory}"
 
-case "$INTATIS_LINUX_VALIDATION_ROOT" in
+case "$MOPELIUM_LINUX_VALIDATION_ROOT" in
     ""|"/"|"."|"..")
-        echo "unsafe INTATIS_LINUX_VALIDATION_ROOT" >&2
+        echo "unsafe MOPELIUM_LINUX_VALIDATION_ROOT" >&2
         exit 2
         ;;
 esac
 
-if [ ! -x "$INTATIS_SWIFT_BIN" ]; then
-    echo "INTATIS_SWIFT_BIN is not executable" >&2
+if [ ! -x "$MOPELIUM_SWIFT_BIN" ]; then
+    echo "MOPELIUM_SWIFT_BIN is not executable" >&2
     exit 2
 fi
-if [ ! -d "$INTATIS_LINUX_SDKS_PATH" ]; then
-    echo "INTATIS_LINUX_SDKS_PATH is not a directory" >&2
+if [ ! -d "$MOPELIUM_LINUX_SDKS_PATH" ]; then
+    echo "MOPELIUM_LINUX_SDKS_PATH is not a directory" >&2
     exit 2
 fi
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-mkdir -p "$INTATIS_LINUX_VALIDATION_ROOT"
+mkdir -p "$MOPELIUM_LINUX_VALIDATION_ROOT"
 
 build_one() {
     architecture=$1
@@ -38,34 +38,34 @@ build_one() {
         echo "SDK selector must be the exact target triple: expected $target_triple, got $sdk_selector" >&2
         exit 2
     fi
-    scratch="$INTATIS_LINUX_VALIDATION_ROOT/$architecture"
+    scratch="$MOPELIUM_LINUX_VALIDATION_ROOT/$architecture"
     CLANG_MODULE_CACHE_PATH="$scratch/module-cache/clang"
     SWIFTPM_MODULECACHE_OVERRIDE="$scratch/module-cache/swiftpm"
     export CLANG_MODULE_CACHE_PATH SWIFTPM_MODULECACHE_OVERRIDE
     mkdir -p "$CLANG_MODULE_CACHE_PATH" "$SWIFTPM_MODULECACHE_OVERRIDE"
 
-    "$INTATIS_SWIFT_BIN" build \
+    "$MOPELIUM_SWIFT_BIN" build \
         --package-path "$repository_root" \
         --disable-sandbox \
-        --swift-sdks-path "$INTATIS_LINUX_SDKS_PATH" \
+        --swift-sdks-path "$MOPELIUM_LINUX_SDKS_PATH" \
         --swift-sdk "$sdk_selector" \
         --triple "$target_triple" \
         --scratch-path "$scratch" \
-        --product intatis
+        --product mopelium
 
     binary_directory=$(
-        "$INTATIS_SWIFT_BIN" build \
+        "$MOPELIUM_SWIFT_BIN" build \
             --package-path "$repository_root" \
             --disable-sandbox \
-            --swift-sdks-path "$INTATIS_LINUX_SDKS_PATH" \
+            --swift-sdks-path "$MOPELIUM_LINUX_SDKS_PATH" \
             --swift-sdk "$sdk_selector" \
             --triple "$target_triple" \
             --scratch-path "$scratch" \
             --show-bin-path
     )
-    binary="$binary_directory/intatis"
+    binary="$binary_directory/mopelium"
     if [ ! -f "$binary" ]; then
-        echo "missing intatis product for $architecture" >&2
+        echo "missing mopelium product for $architecture" >&2
         exit 1
     fi
 
@@ -93,8 +93,8 @@ build_one() {
     echo "BUILT_STATIC_ELF architecture=$architecture sha256=$digest path=$binary"
 }
 
-build_one aarch64 aarch64-swift-linux-musl "$INTATIS_LINUX_SDK_AARCH64"
-build_one x86_64 x86_64-swift-linux-musl "$INTATIS_LINUX_SDK_X86_64"
+build_one aarch64 aarch64-swift-linux-musl "$MOPELIUM_LINUX_SDK_AARCH64"
+build_one x86_64 x86_64-swift-linux-musl "$MOPELIUM_LINUX_SDK_X86_64"
 
 host_system=$(uname -s)
 host_architecture=$(uname -m)

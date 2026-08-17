@@ -4,15 +4,17 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 project_root="$(cd "$script_dir/.." && pwd -P)"
-output_dir="${INTATIS_OUTPUT_DIR:-$project_root/dist}"
-notary_profile="${INTATIS_NOTARY_PROFILE:-}"
-requested_identity="${INTATIS_DEVELOPER_IDENTITY:-}"
-pause_before_notarization="${INTATIS_PAUSE_BEFORE_NOTARIZATION:-0}"
-notary_timeout="${INTATIS_NOTARY_TIMEOUT:-30m}"
-resume_release_dir="${INTATIS_RESUME_RELEASE_DIR:-}"
-document_runtime_arm64_root="${INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT:-}"
-document_runtime_x86_64_root="${INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT:-}"
-recovery_parent="$project_root/.intatis/release-recovery"
+# Canonical Mopelium variables always win. The predecessor names are bounded
+# command-line compatibility aliases and are never emitted in resume output.
+output_dir="${MOPELIUM_OUTPUT_DIR:-${INTATIS_OUTPUT_DIR:-$project_root/dist}}"
+notary_profile="${MOPELIUM_NOTARY_PROFILE:-${INTATIS_NOTARY_PROFILE:-}}"
+requested_identity="${MOPELIUM_DEVELOPER_IDENTITY:-${INTATIS_DEVELOPER_IDENTITY:-}}"
+pause_before_notarization="${MOPELIUM_PAUSE_BEFORE_NOTARIZATION:-${INTATIS_PAUSE_BEFORE_NOTARIZATION:-0}}"
+notary_timeout="${MOPELIUM_NOTARY_TIMEOUT:-${INTATIS_NOTARY_TIMEOUT:-30m}}"
+resume_release_dir="${MOPELIUM_RESUME_RELEASE_DIR:-${INTATIS_RESUME_RELEASE_DIR:-}}"
+document_runtime_arm64_root="${MOPELIUM_DOCUMENT_RUNTIME_ARM64_ROOT:-${INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT:-}}"
+document_runtime_x86_64_root="${MOPELIUM_DOCUMENT_RUNTIME_X86_64_ROOT:-${INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT:-}}"
+recovery_parent="$project_root/.mopelium/release-recovery"
 work_root=""
 recovery_dir=""
 state_file=""
@@ -33,7 +35,7 @@ print_resume_instructions() {
     fi
     print -u2 -- "Resume the same Apple submissions on an Apple-reachable network with:"
     print -u2 -- \
-        "  INTATIS_NOTARY_PROFILE=\"$notary_profile\" INTATIS_RESUME_RELEASE_DIR=\"$recovery_dir\" scripts/package-macos-release.sh"
+        "  MOPELIUM_NOTARY_PROFILE=\"$notary_profile\" MOPELIUM_RESUME_RELEASE_DIR=\"$recovery_dir\" scripts/package-macos-release.sh"
 }
 
 fail() {
@@ -112,15 +114,15 @@ initialize_state() {
 }
 
 prepare_recovery_parent() {
-    local metadata_root="$project_root/.intatis"
+    local metadata_root="$project_root/.mopelium"
     [[ ! -L "$metadata_root" ]] \
-        || fail "the Intatis metadata directory must not be a symlink"
+        || fail "the Mopelium metadata directory must not be a symlink"
     /bin/mkdir -p "$recovery_parent"
     [[ ! -L "$recovery_parent" ]] || fail "release recovery root must not be a symlink"
     local canonical_recovery_parent
     canonical_recovery_parent="$(cd "$recovery_parent" && pwd -P)"
-    [[ "$canonical_recovery_parent" == "$project_root/.intatis/release-recovery" ]] \
-        || fail "release recovery root must remain inside the canonical Intatis project root"
+    [[ "$canonical_recovery_parent" == "$project_root/.mopelium/release-recovery" ]] \
+        || fail "release recovery root must remain inside the canonical Mopelium project root"
     /bin/chmod 0700 "$canonical_recovery_parent"
     recovery_parent="$canonical_recovery_parent"
 }
@@ -128,7 +130,7 @@ prepare_recovery_parent() {
 load_recovery_directory() {
     prepare_recovery_parent
     [[ "$resume_release_dir" == /* ]] \
-        || fail "INTATIS_RESUME_RELEASE_DIR must be an absolute path"
+        || fail "MOPELIUM_RESUME_RELEASE_DIR must be an absolute path"
     [[ -d "$resume_release_dir" && ! -L "$resume_release_dir" ]] \
         || fail "release recovery directory is missing or is a symlink"
 
@@ -138,7 +140,7 @@ load_recovery_directory() {
         "$recovery_parent"/*)
             ;;
         *)
-            fail "release recovery directory is outside the Intatis recovery root"
+            fail "release recovery directory is outside the Mopelium recovery root"
             ;;
     esac
 
@@ -151,12 +153,12 @@ load_recovery_directory() {
 
     recovery_dir="$canonical_resume"
     state_file="$recovery_dir/state.plist"
-    staged_app="$recovery_dir/Intatis.app"
+    staged_app="$recovery_dir/Mopelium.app"
     preserve_recovery=1
     [[ -f "$state_file" && ! -L "$state_file" ]] \
         || fail "release recovery state is missing or unsafe"
     [[ -d "$staged_app" && ! -L "$staged_app" ]] \
-        || fail "recovery directory does not contain a safe staged Intatis.app"
+        || fail "recovery directory does not contain a safe staged Mopelium.app"
     state_owner="$(/usr/bin/stat -f '%u' "$state_file")"
     state_mode="$(/usr/bin/stat -f '%Lp' "$state_file")"
     state_links="$(/usr/bin/stat -f '%l' "$state_file")"
@@ -165,7 +167,7 @@ load_recovery_directory() {
         && "$state_links" == "1" ]] \
         || fail "release recovery state must be owner-only, single-link, and mode 0600"
     [[ "$app_owner" == "$(/usr/bin/id -u)" ]] \
-        || fail "staged Intatis.app is not owned by the current user"
+        || fail "staged Mopelium.app is not owned by the current user"
     /usr/bin/plutil -lint "$state_file" >/dev/null
     [[ "$(state_get schemaVersion)" == "1" ]] \
         || fail "unsupported release recovery state schema"
@@ -175,10 +177,10 @@ create_recovery_directory() {
     local source_app="$1"
     prepare_recovery_parent
     recovery_dir="$(/usr/bin/mktemp -d \
-        "$recovery_parent/Intatis-${version}-${build_number}.XXXXXX")"
+        "$recovery_parent/Mopelium-${version}-${build_number}.XXXXXX")"
     /bin/chmod 0700 "$recovery_dir"
     state_file="$recovery_dir/state.plist"
-    staged_app="$recovery_dir/Intatis.app"
+    staged_app="$recovery_dir/Mopelium.app"
     /usr/bin/ditto "$source_app" "$staged_app"
     initialize_state
     preserve_recovery=1
@@ -189,7 +191,7 @@ create_recovery_directory() {
 inspect_release_app() {
     local app="$1"
     [[ -d "$app" ]] || fail "Release App is missing: $app"
-    local executable="$app/Contents/MacOS/IntatisMac"
+    local executable="$app/Contents/MacOS/MopeliumMac"
     [[ -f "$executable" ]] || fail "Release executable is missing"
 
     local architectures
@@ -201,7 +203,12 @@ inspect_release_app() {
         "$app/Contents/Info.plist")"
     build_number="$(/usr/bin/plutil -extract CFBundleVersion raw -o - \
         "$app/Contents/Info.plist")"
+    local bundle_identifier
+    bundle_identifier="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - \
+        "$app/Contents/Info.plist")"
     [[ -n "$version" && -n "$build_number" ]] || fail "Release bundle has invalid version metadata"
+    [[ "$bundle_identifier" == "com.Vita0818.Mopelium" ]] \
+        || fail "Release bundle has an unexpected bundle identifier"
     [[ "$version" != *[^A-Za-z0-9._-]* ]] \
         || fail "Release version contains unsafe filename characters"
     [[ "$build_number" != *[^A-Za-z0-9._-]* ]] \
@@ -226,7 +233,7 @@ validate_document_runtime() {
 stage_document_runtimes() {
     local app="$1"
     [[ -n "$document_runtime_arm64_root" && -n "$document_runtime_x86_64_root" ]] \
-        || fail "INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT and INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT are required"
+        || fail "MOPELIUM_DOCUMENT_RUNTIME_ARM64_ROOT and MOPELIUM_DOCUMENT_RUNTIME_X86_64_ROOT are required"
 
     validate_document_runtime "$document_runtime_arm64_root" arm64 "$signing_identity"
     validate_document_runtime "$document_runtime_x86_64_root" x86_64 "$signing_identity"
@@ -458,25 +465,25 @@ create_app_zip_if_missing() {
 }
 
 [[ -n "$notary_profile" ]] || fail \
-    "INTATIS_NOTARY_PROFILE is required and must name a notarytool Keychain profile"
+    "MOPELIUM_NOTARY_PROFILE is required and must name a notarytool Keychain profile"
 
 case "$pause_before_notarization" in
     0|1)
         ;;
     *)
-        fail "INTATIS_PAUSE_BEFORE_NOTARIZATION must be 0 or 1"
+        fail "MOPELIUM_PAUSE_BEFORE_NOTARIZATION must be 0 or 1"
         ;;
 esac
 
 if ! print -r -- "$notary_timeout" | /usr/bin/grep -Eq '^[1-9][0-9]*(s|m|h)?$'; then
-    fail "INTATIS_NOTARY_TIMEOUT must be a positive duration such as 30m or 2h"
+    fail "MOPELIUM_NOTARY_TIMEOUT must be a positive duration such as 30m or 2h"
 fi
 
 if [[ -z "$resume_release_dir" && "$pause_before_notarization" == "1" && ! -t 0 ]]; then
-    fail "INTATIS_PAUSE_BEFORE_NOTARIZATION=1 requires an interactive terminal"
+    fail "MOPELIUM_PAUSE_BEFORE_NOTARIZATION=1 requires an interactive terminal"
 fi
 
-entitlements="$project_root/Apps/IntatisMac/IntatisMac.DeveloperID.entitlements"
+entitlements="$project_root/Apps/MopeliumMac/MopeliumMac.DeveloperID.entitlements"
 /usr/bin/plutil -lint "$entitlements" >/dev/null
 if /usr/bin/plutil -extract com.apple.security.app-sandbox raw -o - "$entitlements" \
     >/dev/null 2>&1; then
@@ -496,7 +503,7 @@ done <<< "$identity_lines"
 
 if [[ -n "$requested_identity" ]]; then
     if ! print -r -- "$identity_lines" | /usr/bin/grep -Fqx -- "$requested_identity"; then
-        fail "INTATIS_DEVELOPER_IDENTITY is not an available Developer ID Application identity"
+        fail "MOPELIUM_DEVELOPER_IDENTITY is not an available Developer ID Application identity"
     fi
     signing_identity="$requested_identity"
 else
@@ -508,12 +515,12 @@ else
             signing_identity="${identities[1]}"
             ;;
         *)
-            fail "multiple Developer ID Application identities are available; set INTATIS_DEVELOPER_IDENTITY to one exact common name"
+            fail "multiple Developer ID Application identities are available; set MOPELIUM_DEVELOPER_IDENTITY to one exact common name"
             ;;
     esac
 fi
 
-work_root="$(/usr/bin/mktemp -d /private/tmp/intatis-direct-release.XXXXXX)"
+work_root="$(/usr/bin/mktemp -d /private/tmp/mopelium-direct-release.XXXXXX)"
 
 if [[ -n "$resume_release_dir" ]]; then
     load_recovery_directory
@@ -531,27 +538,27 @@ if [[ -n "$resume_release_dir" ]]; then
     require_current_project_version
     verify_signed_release_app "$staged_app"
     validate_staged_document_runtimes "$staged_app" execute
-    print -- "Resuming preserved Intatis $version (build $build_number) release state."
+    print -- "Resuming preserved Mopelium $version (build $build_number) release state."
 else
     xcodegen_path="$(command -v xcodegen || true)"
     [[ -n "$xcodegen_path" ]] || fail "xcodegen is required"
 
     derived_data="$work_root/DerivedData"
     build_staging_root="$work_root/build-staging"
-    build_staged_app="$build_staging_root/Intatis.app"
+    build_staged_app="$build_staging_root/Mopelium.app"
     /bin/mkdir -p "$build_staging_root"
 
-    print -- "Generating Intatis.xcodeproj..."
+    print -- "Generating Mopelium.xcodeproj..."
     (
         cd "$project_root"
         "$xcodegen_path" generate
     )
     "$project_root/scripts/check-version-consistency.sh"
 
-    print -- "Building the IntatisMac universal Release target..."
+    print -- "Building the MopeliumMac universal Release target..."
     /usr/bin/xcodebuild -quiet \
-        -project "$project_root/Intatis.xcodeproj" \
-        -scheme IntatisMac \
+        -project "$project_root/Mopelium.xcodeproj" \
+        -scheme MopeliumMac \
         -configuration Release \
         -destination 'platform=macOS' \
         -derivedDataPath "$derived_data" \
@@ -561,14 +568,14 @@ else
         CODE_SIGNING_ALLOWED=NO \
         build
 
-    source_app="$derived_data/Build/Products/Release/IntatisMac.app"
-    [[ -d "$source_app" ]] || fail "Release build did not produce IntatisMac.app"
+    source_app="$derived_data/Build/Products/Release/MopeliumMac.app"
+    [[ -d "$source_app" ]] || fail "Release build did not produce MopeliumMac.app"
     /usr/bin/ditto "$source_app" "$build_staged_app"
     stage_document_runtimes "$build_staged_app"
     inspect_release_app "$build_staged_app"
     require_current_project_version
 
-    print -- "Signing Intatis.app with Developer ID and Hardened Runtime..."
+    print -- "Signing Mopelium.app with Developer ID and Hardened Runtime..."
     /usr/bin/codesign \
         --force \
         --sign "$signing_identity" \
@@ -587,14 +594,14 @@ else
     pause_for_notarization_network_if_requested
 fi
 
-zip_name="Intatis-${version}-${build_number}-macOS-universal.zip"
-dmg_name="Intatis-${version}-${build_number}-macOS-universal.dmg"
-manifest_name="Intatis-${version}-${build_number}-SHA256SUMS.txt"
+zip_name="Mopelium-${version}-${build_number}-macOS-universal.zip"
+dmg_name="Mopelium-${version}-${build_number}-macOS-universal.dmg"
+manifest_name="Mopelium-${version}-${build_number}-SHA256SUMS.txt"
 zip_path="$recovery_dir/$zip_name"
 dmg_path="$recovery_dir/$dmg_name"
 manifest_path="$recovery_dir/$manifest_name"
 
-pre_notary_zip="$recovery_dir/Intatis-notary-upload.zip"
+pre_notary_zip="$recovery_dir/Mopelium-notary-upload.zip"
 create_app_zip_if_missing "$staged_app" "$pre_notary_zip" "pre-notarization ZIP"
 
 submit_artifact_if_needed \
@@ -619,7 +626,7 @@ if [[ -e "$dmg_path" || -L "$dmg_path" ]]; then
 else
     dmg_staging_root="$work_root/dmg-staging"
     /bin/mkdir -p "$dmg_staging_root"
-    /usr/bin/ditto "$staged_app" "$dmg_staging_root/Intatis.app"
+    /usr/bin/ditto "$staged_app" "$dmg_staging_root/Mopelium.app"
     /bin/ln -s /Applications "$dmg_staging_root/Applications"
 
     dmg_recovery_staging="$(/usr/bin/mktemp -d "$recovery_dir/.dmg.XXXXXX")"
@@ -627,7 +634,7 @@ else
     staged_dmg="$dmg_recovery_staging/$dmg_name"
     /usr/sbin/diskutil image create from \
         --format UDZO \
-        --volumeName "Intatis $version" \
+        --volumeName "Mopelium $version" \
         "$dmg_staging_root" \
         "$staged_dmg" >/dev/null
 

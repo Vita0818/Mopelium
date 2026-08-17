@@ -1,7 +1,7 @@
 # Math rendering third-party notices
 
 This notice covers the native math engine and font resources conditionally
-linked into the Intatis Markdown renderer on macOS and iOS.
+linked into the Mopelium Markdown renderer on macOS.
 
 ## iosMath
 
@@ -11,15 +11,15 @@ linked into the Intatis Markdown renderer on macOS and iOS.
 - Tree: `a01638e2bffe9064cb77c66f766ce67c83ca3201`
 - Local reuse mode: `dependency`
 - Product role: native TeX math parsing and layout for code-aware
-  inline and display math on macOS and iOS
+  inline and display math on macOS
 - License files reviewed: root `LICENSE`, `iosMath/fonts/*.txt`, the bundled
   per-font README files, and the font inventory at the pinned revision
 - Engine license: MIT
 - SwiftPM contract: Swift tools 6.0, iOS 13 or newer, macOS 10.15 or newer,
   one `iosMath` library product, and no transitive package dependency
 
-The Intatis derivative pins iosMath exactly to 2.5.0 and links its product only
-when building for iOS or macOS. Intatis does not copy or modify the iosMath
+The Mopelium derivative pins iosMath exactly to 2.5.0 and links its product only
+when building for macOS. Mopelium does not copy or modify the iosMath
 parser/layout engine or its sample wrapper. The code-aware delimiter
 preprocessing, attachment integration, accessibility source preservation, and
 first-release feature policy are changes maintained in the vendored
@@ -48,17 +48,17 @@ Consequently, a built `iosMath_iosMath.bundle` contains 27 files in total:
 that generated plist plus the exact 26-file / 7,234,424-byte `fonts/`
 payload. The resource-copy behavior was checked by byte comparison against an
 isolated iOS Simulator Release product. Cambria Math is proprietary and is
-intentionally not included by iosMath or Intatis.
+intentionally not included by iosMath or Mopelium.
 
 The exact dependency audit used Swift 6.3.3 / Xcode 26.6. macOS SwiftPM Debug,
 macOS SwiftPM Release, compile-only `swift build --build-tests`, and an
 unsigned iOS Simulator Release build all completed at the pinned revision.
 The upstream test executables were not run, so this evidence must not be
-described as an upstream test pass. Intatis' renderer integration, streaming,
+described as an upstream test pass. Mopelium's renderer integration, streaming,
 accessibility, resource, and GUI-performance gates remain separate release
 obligations.
 
-Intatis explicitly approved use of iosMath 2.5.0 and distribution of the
+Mopelium explicitly approved use of iosMath 2.5.0 and distribution of the
 audited unmodified GUST/LPPL and OFL font resources on 2026-07-23.
 
 ### MIT License — iosMath
@@ -85,7 +85,7 @@ SOFTWARE.
 
 ## Bundled font inventory and license mapping
 
-The following files are iosMath resources, not Intatis-owned interface assets.
+The following files are iosMath resources, not Mopelium-owned interface assets.
 They are distributed unmodified under their upstream filenames. The default
 iosMath font is Latin Modern Math; all eight fonts remain in the package
 resource bundle regardless of which one is selected for formula layout.
@@ -146,7 +146,7 @@ The following notice is shipped by iosMath as
 > <http://www.latex-project.org/lppl.txt> and version 1.3c or later is part of
 > all distributions of LaTeX version 2006/05/20 or later.
 
-The rename clause is a request, not a legal requirement. Intatis distributes
+The rename clause is a request, not a legal requirement. Mopelium distributes
 these fonts unmodified under their upstream filenames. The raw GUST notice and
 the four per-font README files are also preserved inside the iosMath resource
 bundle.

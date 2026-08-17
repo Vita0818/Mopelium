@@ -1,343 +1,168 @@
 # PROJECT_MAP
 
 文档状态：当前仓库地图
-最近自查日期：2026-08-11
+最近核对：2026-08-17
 产品基线：v0.10（build 49）
 
-本文描述当前仓库结构。判断依据来自 `Package.swift`、`project.yml`、`Makefile`、源码、测试文件和脚本。
+本文描述内部身份迁移后的当前构建图。事实源是 `Package.swift`、`project.yml`、源码、测试与脚本；`SNAPSHOT.md` 单独保留 Intatis 来源树的历史身份。
 
-macOS 唯一发行 target 是 Developer ID/direct-distribution `IntatisMac`。
-`IntatisMacAppStore` 仍列在地图中只是因为源码和 `project.yml` 尚未删除它；
-它是 legacy/non-shipping target，不是产品面、架构约束或默认验收项。分发
-合同见 `docs/MACOS_DISTRIBUTION.md`。
-
-## 2026-08-10 模型驱动 Knowledge 接线地图
-
-- 配置、route 与 provider-reported Knowledge usage：`Apps/IntatisMac/Sources/AppConfig.swift`、
-  `Apps/intatis-cli/Sources/CLIProviderCatalog.swift`、
-  `Packages/IntatisProviders/Sources/KnowledgeModelProviders.swift`。
-- Provider/Core bridge：
-  `Packages/IntatisKnowledge/Sources/ProviderKnowledgeModelAdapters.swift`。
-- exact external authority：`KnowledgeLease.swift`、`KnowledgeStoreAuthority.swift`、
-  `SessionKnowledgeAccessStore.swift`；macOS bookmark host 在
-  `Apps/IntatisMac/Sources/KnowledgeAccess.swift`，CLI explicit authorization 在
-  `Apps/intatis-cli/Sources/CLIKnowledgeTools.swift`。
-- model-facing tools：`Packages/IntatisKnowledge/Sources/PathAwareKnowledgeTools.swift`；build 复用
-  `KnowledgeBundleBuildService.swift`，search 复用 immutable mount/search/final-grounding core。
-- published-store/anti-bypass：`KnowledgeSnapshotStore.swift` 管理 `.intatis-rag-snapshots`、legacy
-  layout migration、writer lock 与 typed commit uncertainty；`Packages/IntatisProtocol/Sources/Leases.swift`
-  冻结 managed-store deny floor，`IntatisTools` 的 file/patch/Git/process/managed-terminal 执行边界执行它。
-- lifecycle：`HostToolRegistryAugmentation.swift` 提供 checked close，Code/Cowork/CLI composition root
-  必须把 drain timeout 当作失败，不得静默结算成功。
-- 产品 composition：Mac Code/Cowork 在 `IntatisMacApp.swift` / `CoworkViewModel.swift`，CLI
-  Code/Cowork 在 `Interactive.swift`，Cowork exact-`@main` capability 边界在
-  `Packages/IntatisCowork/Sources/Orchestrator.swift`。
-- E2E/合同测试：`ModelDrivenKnowledgeAgentLoopTests.swift`、
-  `ModelDrivenKnowledgeToolHostTests.swift`、`KnowledgeModelProviderTests.swift` 与
-  `CLIProviderAdapterTests.swift`；外部库 fresh-host restore 也在 AgentLoop E2E 内。真实 route 和
-  reranked-vs-baseline 质量入口及真实主模型 read-organize-build-search-cite 入口都在
-  `RealProviderSmokeTests.swift`，分别由 `INTATIS_REAL_KNOWLEDGE_SMOKE`、
-  `INTATIS_REAL_KNOWLEDGE_QUALITY`、`INTATIS_REAL_KNOWLEDGE_AGENT_E2E` 显式开启；会报告 provider
-  token/billable units，默认均跳过且不推算金额。
-
-## 2026-08-02 本地诊断日志导出地图
-
-- `Packages/IntatisCore/Sources/IntatisDiagnosticExport.swift`：共享的 owner-only、
-  no-follow、bounded 文件尾部读取，以及 EventLog 结构化脱敏投影；不改变
-  EventLog/Envelope schema。
-- `Apps/IntatisMac/Sources/IntatisDiagnosticExportService.swift`：macOS-only 导出
-  编排。主线程只取得保存位置与不可变环境快照，实际采集/脱敏/打包在 utility task
-  中完成；通过绝对系统工具路径采集 unified log/代理摘要并用 `/usr/bin/ditto`
-  生成 ZIP，最后以 owner-only 原子写入用户选择位置。
-- `Apps/IntatisMac/Sources/IntatisChatScreen.swift`：Settings 最底部的导出卡片、
-  `NSSavePanel` 和成功/部分成功/失败状态；
-  `Apps/SharedResources/Localizable.xcstrings` 提供英文与简体中文文案。
-- `Packages/IntatisCore/Tests/IntatisDiagnosticExportTests.swift`：原始正文、工具数据、
-  credential、URL/路径/身份信息脱敏，尾部保留与 symlink 拒绝的回归测试。
-- canonical session truth 仍是
-  `~/Library/Application Support/Intatis/<session>/events.jsonl`；导出器只读它并生成
-  `events.redacted.jsonl`。hang/crash/unified-log 是独立只读诊断源，原始文件不会被
-  修改或删除；配置、auth、workspace、artifact 与浏览器目录不在采集地图中。
-
-## 2026-08-02 Apple 应用图标资源
-
-- 根目录 `Intatis.icon/` 是用户提供的 Apple Icon Composer 工程；
-  `project.yml` 把它接入 `IntatisMac` 与 `IntatisiOS` 的 resources build phase，并以
-  `ASSETCATALOG_COMPILER_APPICON_NAME=Intatis` 选择为主图标。
-- macOS 构建把它编译为 `Intatis.icns` 与 `Assets.car`，iOS 构建把它编译为
-  `Assets.car` 及 iPhone/iPad 主图标 PNG；generated `Info.plist` 分别注入平台所需的
-  `CFBundleIconFile` / `CFBundleIconName`。源码树不保存额外导出的 `.icns` 或 PNG，
-  遗留 App Store target 不共享这次接线。
-
-## 2026-07-28 replacement-history compaction
-
-- `IntatisProtocol` 的 `ModelHistory.swift` / `Event.swift` / `Envelope.swift`
-  定义 additive `model_history_compacted` checkpoint、typed replacement item
-  和 real/contextual/summary 分类；`IntatisConversation/EventLog.swift` 提供
-  complete-known replay 下的 per-agent CAS 与 WAL-safe durable append。
-- `IntatisAgentKernel` 的 `AgentModelHistoryProjector.swift` 负责 checkpoint
-  chain、coverage、provenance 与 suffix 恢复；`AgentModelHistoryCompactor.swift`
-  负责 same-route summary；未知 replacement window 且无显式 token budget 时不
-  注入 output ceiling，只有已知 usable window 或显式预算才派生并由 host 执行、
-  leading trusted-prefix protection、adjacent call/output 裁剪与
-  secret-like summary 拒绝的 summary-only 请求，以及最多 20k 且按 usable
-  window 动态收缩的 real-user replacement；
-  `AgentTokenEstimator.swift` 提供确定性近似预算，
-  `AgentModelHistoryWindowID.swift` 生成 UUIDv7 lineage；`AgentLoop.swift`
-  接通稳定 Code conversation / Cowork `@main` pre/mid-turn、每个下一请求 exact dynamic tool
-  snapshot 的 freeze/measure/reuse、95% replacement postcondition 与
-  durable-first swap。
-- `IntatisProviders/AgentModelContextPolicy.swift` 从 exact profile metadata 解析
-  context window；raw/max 均缺失时统一使用 1,000,000 token 产品缺省值，并计算
-  90% auto / 95% usable threshold。`ProviderRegistry.swift` 为 Code 原子返回
-  provider/model/policy，Cowork 从 frozen exact inference binding 取得相同
-  policy。完整审计与边界记录在
-  `codex-report/07_28_26-10_17-codex-skill-lifecycle-and-history-compaction.md`。
-
-## 2026-07-26 独立 Web renderer parity 实验
-
-- `Experiments/WebRendererParity/` 是 source-tree-only 的 React/Vite 渲染与 session-lifecycle 实验，带独立 npm lockfile、DOM/lifecycle tests、许可证扫描、README 与 native 接入评估。`src/renderer/` 实现 Markdown、bounded KaTeX/MathML 和 read-only CodeMirror；`src/session/` 提供 3 个合成 session fixture 与可取消的 30 秒 warm-residency store；`src/components/ConversationPane.tsx` / `ViewportMessage.tsx` 实现 newest-first 分页、exact-generation subtree replacement 和近视口 mount；`DiagnosticsPanel.tsx` 与 `window.rendererHarness` 提供无消息正文的生命周期计数。它不在 `Package.swift`、`project.yml`、`Makefile`、App target、Swift package 或 release resource graph 中。
-- 生产 renderer 仍只有 `IntatisSharedUI` → `Vendor/SwiftStreamingMarkdown` / iosMath 与 `.plainSafe` 两条路径。本实验不能读取或替代 EventLog、session、permission、agent、workspace 或 credential 边界；后续若采用其行为，优先在既有 native renderer seam 内移植。
-
-## 2026-07-23 UI 活跃状态接线
-
-- `Packages/IntatisConversation/Sources/SessionActivityHistoryStore.swift` 是 app-facing recent-session recency projection：一次读取 EventLog，同时统计 event count，并 newest-first 查找 durable `turn_outcome`；只有 legacy session 回退 assistant/agent completion。file size/mtime 只作为 cache invalidation signature，`SessionHistoryStore` 的文件 mtime 不再是 UI 排序权威。
-- `Apps/IntatisMac/Sources/SessionRuntimeManager.swift` 继续持有 exact session runtime，并直接组合各 ViewModel 的 published data-plane activity，发布 active→idle 的低频 settlement；`IntatisMacRootView.swift` 只重扫该 settlement 所属的 Chat / Code / Cowork 列表。macOS 与 iOS 的 `AppConfig` / `IOSConfig` 都通过 Conversation projection 取得同一排序，iOS 也在 Chat busy→idle 后刷新 history。
-- `Packages/IntatisSharedUI/Sources/ThreadSurfaces.swift` 负责 composer 唯一主操作位的 Send↔native destructive Stop 切换，以及 phase-local `IntatisThinkingElapsedLabel`；Mac Chat、共享 Code / Cowork 接入同一 Stop 几何与取消入口。
-- `Packages/IntatisSharedUI/Sources/IntatisTypography.swift` 是 macOS/iOS 共用的字体角色事实源：品牌与页面标题使用系统 serif，Chat/正文/控件使用系统 sans，技术值使用系统 monospaced；iOS 在相同名义字号与字重之上通过 `@ScaledMetric` 保留 Dynamic Type。
-
-## 目录结构总览
+## 目录结构
 
 ```text
-Intatis/
-├── .build/            SwiftPM 构建产物（gitignored）
-├── .agents/skills/    项目级 Agent Skills；当前含 intatis-skill-creator
-├── .git/              Git 仓库（产品版本以 project.yml 为准；commit 标题只记录里程碑）
-├── .gitattributes     LF 规范化
-├── .gitignore         忽略 .build、Intatis.xcodeproj、dist、*.env、.intatis 本地运行/受管 worktree 状态
-├── .swiftpm/          SwiftPM 缓存
-├── AGENTS.md          项目常驻上下文与操作协议入口
-├── Intatis.icon/      macOS/iOS 共用的 Apple Icon Composer 主图标源（由 Xcode 按平台编译）
-├── Apps/              app target
-│   ├── SharedResources/ macOS/iOS 共用 English + zh-Hans String Catalog
-│   ├── IntatisMac/    全量 macOS app（默认 DeveloperID/non-sandbox workbench）+ entitlements
-│   ├── IntatisiOS/    Chat-only iOS app（7-product 子集）
-│   └── intatis-cli/   CLI
-├── ARCHITECTURE.md    兼容入口；当前正文位于 docs/ARCHITECTURE.md
-├── Experiments/       不接入生产 build graph 的独立实验；当前含 WebRendererParity
-├── Makefile           build/test/release/install/app 便利 target
-├── NOTICE.md          项目来源、当前上游采用状态 + 第三方依赖声明
-├── ThirdPartyNotices/ OKF/Yams / Markdown / syntax / math / MCP SDK / tool_search / HTTP / Swift Crypto / Codex Skill 采用声明
-├── ThirdPartyStandards/ byte-exact 第三方标准；当前含 Open Knowledge Format v0.2
-├── Vendor/            仓内维护的第三方派生源码
-│   ├── SwiftStreamingMarkdown/ Microsoft v0.6.0 thin derivative
-│   └── MCPClientSDK/  官方 Swift MCP SDK 0.12.1 的 client-only derivative + upstream/patch ledger
-├── Package.swift      SwiftPM manifest（15 public libraries + 3 internal C targets + CLI + 15 tests + dev conformance executable）
-├── Packages/          Intatis Swift/C targets
-│   ├── IntatisKnowledge/ OKF/Profile、build/validation/snapshot、embedding/rerank、KnowledgeLease 与 build/search tools
-│   ├── IntatisSkills/ Code/Cowork Skill discovery、snapshot、catalog、产品内置 Cowork 调度 Skill 与专用只读 tools
-│   ├── IntatisMCP/    外部 MCP client core、HTTP/OAuth、catalog/content/callback/tasks 与 tests
-│   ├── IntatisMCPStdio/ 本地 stdio owner、sandbox/network/exec guard
-│   ├── IntatisCurlTransport/ libcurl C boundary
-│   └── IntatisMCPConformanceClient/ 仅开发期 official/extended client conformance driver
-├── README.md          Intatis readme
-├── Tests/
-│   ├── MCPConformance/ pinned official 0.1.16 + Intatis task interoperability + W10 runner
-│   └── MCPBM25ParityOracle/ 不进入产品图的 Codex BM25 Rust 差分 oracle
-├── scripts/
-│   └── validate-linux-cli.sh 双架构 musl 静态 CLI 交叉构建 gate
-├── docs/              项目状态/架构/测试/禁区说明 + Cowork 设计文档
-└── project.yml        XcodeGen spec（生成 Intatis.xcodeproj）
+Mopelium/
+├── .agents/skills/mopelium-skill-creator/
+├── Apps/
+│   ├── MopeliumMac/             唯一 App target
+│   ├── SharedResources/         macOS 本地化 String Catalog
+│   └── mopelium-cli/            Swift-native CLI 与测试
+├── Mopelium.icon/               Apple Icon Composer 源
+├── Packages/
+│   ├── MopeliumCore/
+│   ├── MopeliumProtocol/
+│   ├── MopeliumProviders/
+│   ├── MopeliumArtifacts/
+│   ├── MopeliumConversation/
+│   ├── MopeliumPTYLauncher/
+│   ├── MopeliumTools/
+│   ├── MopeliumKnowledge/
+│   ├── MopeliumSkills/
+│   ├── MopeliumPermission/
+│   ├── MopeliumCurlTransport/
+│   ├── MopeliumMCP/
+│   ├── MopeliumMCPStdio/
+│   ├── MopeliumMCPConformanceClient/
+│   ├── MopeliumAgentKernel/
+│   ├── MopeliumCowork/
+│   ├── MopeliumMultimodal/
+│   └── MopeliumSharedUI/
+├── Vendor/                      固定并记录 provenance 的派生包
+├── ThirdPartyNotices/           当前分发声明与完整许可证入口
+├── ThirdPartyStandards/         byte-exact 第三方标准
+├── Tests/                       MCP conformance / BM25 parity
+├── docs/                        当前规范与显式历史文档
+├── scripts/                     构建、验证、诊断、发行
+├── Package.swift                SwiftPM 构建图
+├── project.yml                 XcodeGen 唯一 App 工程图
+├── NOTICE.md
+└── SNAPSHOT.md                 Intatis 来源 commit/provenance
 ```
 
-## Target / 模块
+生成或本地状态：
 
-### Intatis public library products（15）+ internal C targets（3）
+- `.build/`、`.swiftpm/`：SwiftPM；
+- `Mopelium.xcodeproj/`：XcodeGen 生成物；
+- `.mopelium/`：当前本地 workspace/release 状态；
+- `.intatis/` 与 `Intatis.xcodeproj/`：只为迁移期忽略的 predecessor 状态，不是当前构建输入；
+- `dist/`：发行输出，只有正式脚本完成所有门槛后才可使用。
 
-| Target | 类型 | 依赖 | 职责 |
+## SwiftPM products 与 targets
+
+### 15 个公共 library products
+
+| Target | 主要职责 |
+|---|---|
+| `MopeliumCore` | ID、错误、PlatformProfile、路径约束、session 历史、owner-only durable file、Application Support identity migration |
+| `MopeliumProtocol` | Event/Envelope、Goal/WorkTask/Run、lease、permission、tool execution、model history、MCP 与 multimodal wire vocabulary |
+| `MopeliumProviders` | provider catalog、exact route、OpenAI-compatible/Responses/OpenRouter wire、streaming、image/transcription/Knowledge adapters |
+| `MopeliumArtifacts` | owner-only blob/index store 与安全图片解析 |
+| `MopeliumConversation` | append-only EventLog、ChatLoop、projection、session.json、submitted-intent outbox 与恢复 |
+| `MopeliumTools` | file/patch/Git/managed terminal/browser/document/media/Knowledge host seams 与 ToolRegistry |
+| `MopeliumKnowledge` | OKF profile、validator、build/publish、snapshot、embedding/BM25/rerank/search/grounding |
+| `MopeliumSkills` | Skill discovery/snapshot/catalog/resource tools；不授予权限 |
+| `MopeliumPermission` | DeterministicPolicyGate、ModelPermissionReviewer、PermissionEngine、SecretScanner |
+| `MopeliumMCP` | 外部 MCP client-only core、HTTP/OAuth/catalog/callback/task/output security |
+| `MopeliumMCPStdio` | stdio process owner、Seatbelt/bwrap/guard、network gateway、drain |
+| `MopeliumAgentKernel` | 共享 headless AgentRuntime/AgentLoop、context/history/compaction、permission responder |
+| `MopeliumCowork` | Orchestrator、scheduler、MessageBus/Mediator、WorkTask/Goal、permission reviewer、goal verifier |
+| `MopeliumMultimodal` | image/video/transcription → artifact |
+| `MopeliumSharedUI` | macOS SwiftUI conversation、composer、Cowork/thread、renderer 与共享 presentation |
+
+### 3 个内部 C/guard targets
+
+- `MopeliumPTYLauncher`：macOS controlling PTY；
+- `MopeliumCurlTransport`：macOS/Linux libcurl socket-binding boundary；
+- `MopeliumMCPStdioGuard`：Linux seccomp/ptrace guard，Apple 平台为空实现。
+
+### Executables
+
+| Target/product | 用途 |
+|---|---|
+| `MopeliumCLI` / `mopelium` | Chat/Code/Cowork REPL、managed execution、Skills、Knowledge、MCP |
+| `MopeliumMCPConformanceClient` | 开发期 official/extended MCP client conformance driver；不发行 |
+
+### Test targets
+
+15 个 test target 与公共模块对应：
+
+```text
+MopeliumCoreTests
+MopeliumProtocolTests
+MopeliumProvidersTests
+MopeliumArtifactsTests
+MopeliumConversationTests
+MopeliumToolsTests
+MopeliumKnowledgeTests
+MopeliumSkillsTests
+MopeliumPermissionTests
+MopeliumMCPTests
+MopeliumCLITests
+MopeliumAgentKernelTests
+MopeliumCoworkTests
+MopeliumMultimodalTests
+MopeliumSharedUITests
+```
+
+## Xcode App target
+
+| Target | 平台 | Bundle ID | 分发 |
 |---|---|---|---|
-| `IntatisCore` | lib | — | 类型化 ID、错误、工作区路径约束、平台能力信封、会话类型、`SessionHistoryStore`、session-owned `SessionWorkspaceAccessStore`、进程级低开销 performance diagnostics 与 owner-only bounded hang bundle |
-| `IntatisProtocol` | lib | Core | 结构化事件/线协议词汇（Event/Envelope/JSONRPC/Command/CoworkEvents/Goal/WorkTask/ContinuationRun/TaskGoalEvents/ModelHistory/SessionStateEvents/InferenceProfile/PermissionIntent/PermissionReview/ToolAuthorization/ToolExecution/MultimodalEvents/TurnStats/MessageCitation/JSONValue） |
-| `IntatisProviders` | lib | Core, Protocol | OpenAI-compatible 模型访问、当前 exact Chat/agent route 的独立 `hosted_web_search` capability/planner、OpenAI `web_search` 与 OpenRouter `openrouter:web_search` dialect encoder、Chat `tool_choice:auto`/typed same-route ordinary fallback 与 Agent `required`/fail-closed mode、结构化 URL citations、bounded/secret-aware `ChatConfigurationImporter`、OpenCode-shaped npm package adapter selection/lowering、Chat/Code lossless model options、Cowork 显式 durable-options schema、exact per-agent inference catalog/resolver 与只读配置展示投影（ProviderRequestAdapter/ProviderRegistry/InferenceCatalog/InferenceCatalogStore/Capability/Endpoints/ChatProvider/OpenAIWireProvider/OpenAIToolCalling/ChatConfigurationImport/ModelConfigurationPresentation/SSE/HTTPDataClient/ImageGeneration/Transcription/VideoGeneration/ToolCalling） |
-| `IntatisArtifacts` | lib | Core, Protocol | 文件-backed blob 存储 + JSON 索引；`ArtifactImageResolver` 对 exact ArtifactID 执行 owner-only/no-follow 有界读取、PNG/JPEG 完整解码、尺寸/像素/批量限制与 SHA-256 验证，provider data URL 只在当次 request 生成 |
-| `IntatisConversation` | lib | Core, Protocol, Providers, Artifacts | 事件溯源会话 + UI 投影（跨进程锁定、multi-event WAL 与 checked replay 的 EventLog JSONL / schema-v2 `SessionProjectionStore` / 无本地工具且可冻结托管 web-search 请求与 citation 的 ChatLoop / Chat-only `ChatSessionAutoTitle` 隐藏无工具请求、exact route + completed seq 冻结前缀、严格前三 completed 回合投影、single-flight/timeout/stream-start attempt 与 set-if-absent rename / GoalInputParser / Projection / CodeProjection typed per-agent index 与最多 16-row Cowork page / Cowork live roster + EventLog-derived historical identity roster / settings/Goal/WorkTask/ContinuationRun/tool-execution recovery projection / TurnStatsProjection / `SessionProjectionPump` 逐 seq exact fold、50 ms delta publication、agent-scoped publication、non-delta barrier 与 session/generation/throughSeq fence） |
-| `IntatisPTYLauncher` | internal C helper | libc / macOS `forkpty` | 为 managed terminal 建立真实 controlling PTY；child 在 fork 后只执行 C/POSIX signal/FD/chdir/exec，CLOEXEC error pipe 把启动错误返回父进程；非 macOS 返回不支持 |
-| `IntatisTools` | lib | Core, Protocol, PTYLauncher | 哑工具执行器与 task/goal host 接口（ToolProtocol/TaskGoalManagement/FileTools/PatchTool/PathConfinement/ShellGit/TerminalTools/DocumentMediaTools/DocumentTools/ExactDocumentTools/DocumentToolContracts/DocumentInfrastructure/DocumentPythonBackend/DocumentFixedBackends/PDFNativeDocumentService/HTMLDocumentPDFRenderer/BrowserTools/HostedWebSearchTool）；`HostedWebSearchTool` 只有 strict `query` 并依赖 host-bound provider service，与 BrowserTools 分流；`ToolRegistration` / `ToolRegistry` 是 schema、concrete tool、canonical permission、lease resolver、semantic preview 与 executor 的单一事实源；文档与浏览器各使用 typed fixed-backend runner，在 spawn 前完成 WorkspaceLease/touched-path preflight，与 generic shell 分流 |
-| `IntatisKnowledge` | lib（non-iOS product） | Core, Protocol, Tools, Providers, Permission, Yams；Linux 条件链接 Crypto | 固定 OKF v0.2 上的 Intatis RAG Profile、strict schemas、canonical writer、deterministic Validator/receipt、build/publish、immutable snapshots、dense/BM25/RRF、source-locator/final grounding；另含 configured provider bridge、exact `KnowledgeLease`/external authority、session bookmark store，以及 host-validated closed-schema path-aware `build_knowledge` / required-semantic-rerank `search_knowledge` host；只经 generic HostToolRegistryAugmenter opt in，不进入 Chat/iOS |
-| `IntatisSkills` | lib | Core, Protocol, Tools, Permission | Code/Cowork 的 Codex-like Skill context capability：受限 root discovery、frontmatter 校验、exact-model 自适应 developer catalog、每次 AgentInvocation 的 immutable snapshot、无歧义 `$name` user fragment、严格 `agents/openai.yaml` MCP dependency preflight、随产品 resource bundle 发布的 system-scope `cowork-agent-orchestration`，以及只读 frozen `activate_skill` / `read_skill_resource` tools；不授予文件、shell、网络、通信或委派权限 |
-| `IntatisPermission` | lib | Core, Protocol, Providers | 3 层权限门（PermissionTypes/PermissionEngine/DeterministicPolicyGate/ModelPermissionReviewer/SecretScanner） |
-| `IntatisCurlTransport` | internal C target | system/SDK libcurl | MCP Streamable HTTP 的 native socket-binding boundary；Darwin 链系统 libcurl，Linux 静态 CLI 链官方 Static Linux SDK closure；iOS 不链接 |
-| `IntatisMCP` | lib | Core, Protocol, Tools, MCPClientSDK, CurlTransport(macOS/Linux), Crypto(Linux) | 外部 MCP Server 的 client-only core：配置/import/catalog、authority/session runtime、Streamable HTTP/OAuth、protocol negotiation、tools/resources/prompts/completions/roots、sampling/elicitation、logging/progress/cancel/subscription、tasks、输出安全与可靠性；无 Server target/API/product seam |
-| `IntatisMCPStdioGuard` | internal C target | libc/kernel API | Linux stdio 后代 exec/network 的 seccomp/ptrace guard；Apple 平台为空实现，不进入 portable client core |
-| `IntatisMCPStdio` | lib | MCP, Core, Protocol, Tools, MCPClientSDK, StdioGuard, Crypto(Linux) | 本地 MCP stdio process ownership：exact launch artifact、direct exec/pipe、Seatbelt 或 Linux bwrap+guard、exact network gateway、TERM→KILL/drain；独立 linkage 隔离 portable client core 与本地进程 ownership |
-| `IntatisAgentKernel` | lib | Core, Protocol, Providers, Tools, Permission, Conversation, Artifacts, MCP, Skills | 共享 headless 单 agent runtime（AgentRuntime/RuntimeEnvironmentManifest/AgentLoop/ContextBuilder/ContextProjector/AgentModelHistoryProjector/AgentModelHistoryCompactor/AgentTokenEstimator/AgentExecutionBudget/PermissionResponder），以及把 exact agent route 绑定到普通 Tool executor 的 `ProviderHostedWebSearchToolService`；稳定 Code/Cowork 主线程支持 durable replacement-history checkpoint，每次 provider dispatch 冻结 exact `AgentRequestToolSnapshot` |
-| `IntatisCowork` | lib | Core, Protocol, Providers, Tools, Permission, Conversation, AgentKernel, Skills | 多 agent 编排与 Goal 控制面（Orchestrator/AgentScheduler/MessageBus/Mediator/AgentRegistry/WorkTaskTools/GoalTools/GoalVerifierControlPlane/CoordinatorTools/AgentPermissionResponder/PermissionReviewControlPlane）；Orchestrator 只在 exact route、bound service 与独立 hosted-search lease capability 同时成立时注册该工具 |
-| `IntatisMultimodal` | lib | Core, Protocol, Providers, Artifacts, Conversation | 图像/视频/转写 → artifacts |
-| `IntatisSharedUI` | lib | Core, Protocol, Providers, Conversation, Artifacts, `Vendor/SwiftStreamingMarkdown` thin derivative（Microsoft v0.6.0 basis；传递 exact iosMath 2.5.0，仅 iOS/macOS） | 跨平台 SwiftUI；`ComposerAttachments.swift` 提供 Chat/Code/Cowork 共用的 security-scoped 文件读取、ArtifactStore 保存/读回校验与 image MIME provider 解析，其中PNG/JPEG扩展使用确定性canonical MIME映射、其他格式才查询系统type database，不把 base64 写入 EventLog。`MessageRendering` 以 `.microsoft` / `.plainSafe` 做产品熔断，rich 结构/原生布局与 code-aware `$...$` / `\(...\)` inline、`$$...$$` / `\[...\]` display 公式由经审计的 Microsoft 派生包负责；iosMath 只提供 Apple-native TeX parse/layout，plain-safe 完全绕开二者。公式通过两平台 TextKit 2 live `MTMathUILabel` attachment 以 intrinsic size 展示，不设公式数量、单式字节或固定附件尺寸上限；semantic appearance 与 Dynamic Type revision 控制更新，不保留 raster cache。Intatis 只做语法无关的 64 KiB whole-message admission、process-wide 1-running/32-pending latest-only Markdown parse permits、每 view 最新 raw revision、50 ms incomplete parse debounce、100 ms fixed-window raw leading/trailing projection、stale publication guard与安全链接；window-local scroll coordinator 保持 geometry observation-only、100 ms follow cadence、one-shot rich settle 与每行 150 ms viewport dwell。macOS Chat/Code/Cowork 的 transcript 通过 `IntatisThreadHistoryWindow` 使用最多 16-row eager page 与 Earlier/Newer/Latest；Cowork 另由 window-local `CoworkAgentThreadPresentationModel` 管理 historical agent selection/generation/per-agent boundary，固定 ScrollView 与 16 row slots，以 selection/content 300 ms quiet gate 阻止切换或持续增量反复挂载 AppKit rich subtree，并用 stable-ID lazy Agents rail 承载 detached identity；共享 iOS 兼容路径仍保留 adaptive container。vendored AppKit paragraph 使用 proposal-owned exact width 和 one-entry measurement memo。`ExecutionTracePresentation.swift` 另在 Code/Cowork 展示边界默认隐藏 verbose tool/patch/note trace 和由 `CodeProjection` 标记的同-task exact `task_completed` 回答镜像，同时保留 `.agentToAgent` 的媒介化 agent 通信；后台启动参数/环境变量仍可 opt in 恢复完整 trace。它不改变 EventLog 或 durable task settlement。当前仍不分发语法高亮或远程 Markdown 图片 |
+| `MopeliumMac` | macOS 26+ | `com.Vita0818.Mopelium` | Developer ID、notarization、direct download |
 
-`IntatisMCPConformanceClient` 是只供固定 conformance runner 启动的开发期 executable，不是发行 product，也不是 MCP Server。
+不存在 iOS App target、Mac App Store target、App Store entitlements 或对应 scheme。`MopeliumMac` 使用 `Apps/MopeliumMac/MopeliumMac.DeveloperID.entitlements`，启用 Hardened Runtime 和最小 audio-input entitlement，不启用 App Sandbox。
 
-### App / executable target
+## 产品入口
 
-| Target | 类型 | 平台 | Bundle ID | 链接 |
-|---|---|---|---|---|
-| `IntatisMac` | application | macOS 26+ | `com.Vita0818.IntatisMac` | 完整 Chat/Code/Cowork + Skills；Chat 的透明 hosted search 合同不变，Code/Cowork 对受支持的 exact agent route 另注册独立 `hosted_web_search` Tool，无 UI 或浏览器耦合。Code/Cowork exact `@main` 在 canonical `embedding_model` + `reranker_model` 均可解析时经 optional augmenter 获得 `build_knowledge` / path-aware `search_knowledge`，外部目录由 exact NSOpenPanel/security-scoped bookmark + `KnowledgeLease` 授权；缺配置时不广告工具并在现有状态面提示。无 Knowledge 管理 UI，Chat/reviewer/GoalVerifier/普通 worker/iOS 无此工具面。DeveloperID/non-sandbox workbench 支持 stdio/HTTP 与显式启用的全局 Skill roots |
-| `IntatisMacAppStore` | legacy application（非发行） | macOS 26+ | `com.Vita0818.IntatisMac` | 源码中尚未删除的旧 App Sandbox/HTTP-only target；不属于产品、默认构建、回归或 release gate |
-| `IntatisiOS` | application | iOS 26+ | `com.Vita0818.Intatis` | 7 个 chat 子集 products；iOS root 在唯一原生 `NavigationStack` 内组合 Chat canvas、顶部 sidebar/session/new、82% 的 `Intatis`/Chat/Recent/New/Settings 抽屉与两排 composer（model/usage；paperclip/input/voice/Send-or-Stop）；品牌/session/Settings 标题为系统 serif，正文与控件为系统 sans；Settings 支持系统 Files 导入 Intatis JSON/JSONC；根 `Intatis.icon` 编译为 iPhone/iPad 主图标；与 macOS 共用当前 exact-route hosted-search planner和 Chat-only 自动命名协调器，并通过 per-session revision/seq metadata relay 即时更新对应标题；无可见搜索 UI并支持结构化 citations；通用照片/文件附件尚未接通；无 `IntatisKnowledge`/MCP client runtime/transport/product surface，也无 Tools/Permission/AgentKernel/Cowork |
-| `intatis-cli` | executable | CLI（macOS/Linux） | — | Code/Cowork + Skills + external MCP client；Code/Cowork exact route 可按 capability/lease 注册独立 provider-hosted `hosted_web_search`。两个 Knowledge role 配齐时 shipping Code/Cowork 组合 concrete Knowledge augmenter，支持自然语言 workspace/external `store_path`、显式 permission 后的 exact CLI `KnowledgeLease`、build/search/rerank；缺配置时提示且不广告工具。没有 mount command 或独立 Knowledge UI；macOS/Linux 支持 stdio/HTTP，CLI 持有 exact session MCP owner |
+- macOS：`Apps/MopeliumMac/Sources/MopeliumMacApp.swift`；
+- CLI：`Apps/mopelium-cli/Sources/MopeliumCLI.swift`；
+- 当前用户可见 App 根：`MopeliumMacRootView`，只展示 Cowork；
+- Chat/Code ViewModel 与 runtime 仍在同一 App 源码和共享 packages 中保留兼容。
 
-Chat 托管搜索的用户确认合同见 `docs/CHAT_HOSTED_SEARCH.md`。目标 runtime 只有当前所选 exact
-Chat route；`web_search_model` 旧字段可兼容 decode/preserve，但不参与路由或产生提示。
-`IntatisSharedUI/ChatViewModel.send()` 与 CLI Chat 调用 `ProviderRegistry.chatRuntimeRoute()`，后者从
-当前 endpoint/model 的普通 adapter、`hosted_web_search` capability 与 exact dialect 原子规划
-`ChatLoop.webSearch`。`OpenAIWireProvider` 分别编码 OpenAI/OpenRouter tool type；未规划搜索时只生成
-普通 `/chat/completions` 请求。
+## 主要链路
 
-Code/Cowork 的显式包装位于 `Packages/IntatisTools/Sources/HostedWebSearchTool.swift` 与
-`Packages/IntatisAgentKernel/Sources/ProviderHostedWebSearchToolService.swift`。它复用 exact agent
-route，使用 required hosted-search request，且只经 `ToolRegistry` / `ToolCapability.hostedWebSearch` /
-权限与 durable executor 链出现；不会转发到 `BrowserTools.swift`、MCP 或隐藏搜索模型。
+- Chat：`ChatViewModel → GoalInputParser → ChatLoop → EventLog → ConversationProjection`；
+- Code：`CodeViewModel → AgentRuntime.code → AgentLoop → ToolRegistry/PermissionEngine → EventLog → CodeProjection`；
+- Cowork：`CoworkViewModel → SubmittedIntentStore → Orchestrator → FIFO scheduler → AgentRuntime.cowork → AgentLoop → durable tool execution → EventLog`；
+- Agent 通信：`MessageBus → Mediator → mailbox/event flow`；
+- 自动权限：acting-model same-call sidecar → deterministic gate → `PermissionReviewControlPlane` → durable settlement → exact authorization delivery；
+- 持久化：`Application Support/Mopelium/<session>/events.jsonl` 为 canonical truth，`session.json` 可重建，bookmark/artifact/catalog 各自独立。
 
-### 测试 target（15）
+## Canonical identity 与 legacy seam
 
-`IntatisCoreTests`、`IntatisProtocolTests`（+V02/V03/V04/InferenceProfile/MCP events/results）、`IntatisProvidersTests`、`IntatisArtifactsTests`、`IntatisConversationTests`、`IntatisToolsTests`、`IntatisKnowledgeTests`、`IntatisSkillsTests`、`IntatisPermissionTests`、`IntatisMCPTests`、`IntatisCLITests`、`IntatisAgentKernelTests`、`IntatisCoworkTests`、`IntatisMultimodalTests`、`IntatisSharedUITests`。`swift test` 无头；official/extended MCP conformance 另由 `Tests/MCPConformance/` 驱动开发期 executable。
+- canonical config：`MOPELIUM_CONFIG`、`~/.config/mopelium/mopelium.json[c]`；
+- canonical CLI：`mopelium` 与 `MOPELIUM_*`；
+- canonical workspace：`.mopelium/`、`.mopelium-rag-*`；
+- canonical registry：`mopelium.standard.v8` / `mopelium.cowork.v8`；
+- canonical sidecar：`__mopelium_authorization_context`。
 
-## 关键文件
+旧 Intatis Application Support、config/env/UserDefaults、adapter ID、registry/event raw values和 `.intatis*` 仅由显式 legacy migrator/decoder/deny floor 处理。新值存在但非法时不回退，历史 JSONL 不重写。
 
-- Cowork/Code 滚动与 hang 诊断：
-  `Packages/IntatisConversation/Sources/SessionProjectionPump.swift`
-  （ordered fold / agent-scoped publication / bounded page query / commit fence）；
-  `Packages/IntatisConversation/Sources/CodeProjection.swift`
-  （typed per-agent all/visible index 与 max-16 page）；
-  `Packages/IntatisSharedUI/Sources/ThreadSurfaces.swift`
-  （window-local follow state、geometry observation、100 ms cadence、rich
-  settle、viewport admission）；
-  `Packages/IntatisSharedUI/Sources/MessageRendering/IntatisMessageContentView.swift`
-  （per-row 150 ms exact-revision dwell）；
-  `Packages/IntatisSharedUI/Sources/CoworkAgentThreadPresentationModel.swift`
-  （window-local selection、per-agent paging、stale generation、300 ms rich quiet gate）；
-  `Apps/IntatisMac/Sources/CoworkAgentConversationFixtureView.swift`
-  （Debug-only 8 × 1,000 rows / 500 delta/s / rapid + soak 验收入口；可由启动参数或专用
-  `.CoworkAgentConversationFixture` bundle identifier suffix 激活）；
-  `Packages/IntatisCore/Sources/IntatisHangDiagnostics.swift`、
-  `Apps/IntatisMac/Sources/IntatisProcessDiagnostics.swift` 与
-  `Apps/intatis-cli/Sources/HangDiagnosticsCommand.swift`
-  （heartbeat/signpost/bounded bundle/进程外采样入口）；vendored
-  `ParagraphView+macOS.swift` / `ParagraphNSView.swift`
-  （单一 width owner 与 one-entry exact-width measurement）。
+## 关键脚本
 
-- 入口：`Apps/IntatisMac/Sources/IntatisMacApp.swift`、`Apps/IntatisiOS/Sources/IntatisiOSApp.swift`、`Apps/intatis-cli/Sources/IntatisCLI.swift`
-- Skills：`Packages/IntatisSkills/Sources/SkillTypes.swift`（root/limit/metadata/snapshot、Codex Core-style 2%/8k catalog budget、count-only metrics/mention）、`BundledSkills.swift`（SwiftPM `Bundle.module` 内产品 Skill roots）、`SkillCatalogService.swift`（canonical discovery、frontmatter、no-follow bounded freeze）、`SkillMCPDependencies.swift`（严格 `agents/openai.yaml` MCP-only metadata 与 locator fingerprint）、`SkillTools.swift`（snapshot-bound dynamic tools、request-owned MCP preflight、registry revision）；`Packages/IntatisSkills/Resources/BundledSkills/cowork-agent-orchestration/` 保存 coordinator 的主动执行循环、调度正文与按需读取的 dated model-routing reference（capability hard gate、新 generation preference、cost modes、multimodal companion、11-provider 正式 recommendation matrix）。`Packages/IntatisCowork/Sources/Orchestrator.swift` 的 runtime-only `InferenceProfileRoutingMetadata` 与 `list_inference_profiles` 把 macOS/CLI 用户 JSON 已声明 capability 安全投影给 coordinator，不进入 EventLog/binding。`Packages/IntatisTools/Sources/MCPToolAvailabilitySnapshot.swift` 冻结不披露 endpoint/command 的 exact server/tool/dependency host assertion，`Packages/IntatisAgentKernel/Sources/AgentRequestToolSnapshot.swift` 把它与同一 provider request 的 dynamic registry/specs 绑定，`MCPEventLogHostAdapters.swift` 只从 capability/policy-filtered agent-visible tool entries 派生 production assertion（每个 server 至少一个可见 tool）。`ContextBuilder.swift` 负责 system → developer catalog → history/context → explicit user Skill → current user 的角色排序，要求 coordinator 先建立 execution objective、检查/激活明确相关的 exact Skills、为非简单工作维护最小 WorkTask 图并尽早委派有收益的分支，同时继续自己的关键路径；请求真实暴露 `spawn_agent` 时，外部目录工作还必须从直接越界重试改路由为目录绑定子 agent + `delegate_task`。Code hosts 与 `Orchestrator.run` 负责每次 send/invocation 的独立冻结。
-- 项目级 Skill：`.agents/skills/intatis-skill-creator/` 是面向 Intatis
-  Code/Cowork 的创建与验证 Skill，含 `SKILL.md`、两个 reference 和三个
-  Python 标准库 helper；以独立名称避免与
-  `$CODEX_HOME/skills/.system/skill-creator` 歧义。固定上游、修改与许可证见
-  `ThirdPartyNotices/OpenAICodexSkillCreator.md`。
-- App 本地化：`Apps/SharedResources/Localizable.xcstrings` 由 `project.yml` 同时加入 IntatisMac / IntatisiOS 主 bundle，source/development language 为 English，支持 `en` / `zh-Hans`；`Packages/IntatisSharedUI/Sources/IntatisLocalization.swift` 为普通 `String` 展示值提供 `Bundle.main` 查表与 English fallback。iOS 系统设置页另读 `Apps/IntatisiOS/Resources/Settings.bundle/{en,zh-Hans}.lproj/Root.strings`；两端生成式 Info.plist 的麦克风说明分别读 `Apps/IntatisMac/Resources/{en,zh-Hans}.lproj/InfoPlist.strings` 与 `Apps/IntatisiOS/Resources/{en,zh-Hans}.lproj/InfoPlist.strings`。语言由系统/App Language 在启动时选择，不持久化 Intatis 自有语言偏好。
-- Per-agent inference profile：`Packages/IntatisCore/Sources/IDs.swift`（profile/connection exact ID + revision）、`Packages/IntatisProtocol/Sources/InferenceProfile.swift`（safe `AgentInferenceBinding`）、`Packages/IntatisProviders/Sources/InferenceCatalog.swift`（immutable connection/profile definitions、显式 allowlisted durable-options schema、reconcile、含 safe route/trust/egress 的 exact resolve）、`InferenceCatalogStore.swift`（owner-only versioned store、corruption/schema/permission fail closed、稳定 sidecar 上的进程内 + Darwin/Linux 跨进程独占锁、锁内 revision allocation、原子替换）、`ProviderRegistry.swift`（同一 resolution 原子返回 binding/model/provider；当前只实例化 OpenAI-compatible wire）、`ProviderURLSession.swift`（provider traffic 禁止 HTTP redirect）、`OpenAIWireProvider.swift` / `OpenAIToolCalling.swift`（所有 Chat/Agent request 移除 config `stream_options`/多候选字段并固定 `n = 1`）、`Packages/IntatisAgentKernel/Sources/Agent.swift` 与 `Packages/IntatisProtocol/Sources/{Task,CoworkEvents,TurnStats,ToolAuthorization}.swift`（additive optional binding/frozen invocation/安全归因；diagnostic URL + secret redaction）、`Packages/IntatisCowork/Sources/Orchestrator.swift`（strict attach/restore/invocation、只接受 atomic resolved tuple 的 shipping runtime、host-approved explicit profile、exact spawn inheritance、delegate target snapshot、catalog update/admission lock、resolver suspension 后 revalidation、GUI local-admission/execution-readiness split、CLI control-plane startup gate 与 unresolved-worker invocation isolation、host-only idle durable rebind、next-main submission/live-binding root admission guard）。完整契约见 `docs/PER_AGENT_INFERENCE_PROFILES.md`。
-- Cowork 链路：`Packages/IntatisCowork/Sources/Orchestrator.swift`（生产 `runtime` session writer lease、fresh empty session 固定 `@main` restricted bootstrap admission + admission-wait 后 exact profile/empty-session recheck、普通 reviewed attach + allow 后 catalog snapshot/exact profile revalidation、真实 root AgentInvocation、Session-scoped WorkTask manager 与 optional invocation binding、exact RunID in-flight close tombstone + durable first-write claim/pre-wait fence/drain/restore、`delegate_task` exact attached-target preflight + pure mediation + 单 EventLog admission batch、单审批 `spawn_agent` admission batch、permission reviewer 逐 generation exact provider factory、bounded scheduler/watchdog、non-replayable crash guard、durable-first detach/revoke、恢复/取消/超时/重试、mailbox wake、lease lifecycle、Task Report、idle recycle）、`RunControlTools.swift`（只对 exact `@main` root 暴露 host-bound `finish_run` / `stop_run`）、`GoalRuntimeController.swift`（普通 turn run scope、host-only durable Goal create/edit/pause/resume/clear、host continuation、scheduler barrier、checkpoint/recovery、active Run 中断结算、显式 Resume 新建 Run、budget/usage/no-progress/blocked policy）、`AgentScheduler.swift`（queue/claim/single-flight/snapshot/mailbox）、`WorkTaskTools.swift`（`task_create/update/get/list`）、`GoalTools.swift`（模型只读/提交验证候选的 `get_goal/update_goal`）、`GoalVerifierControlPlane.swift`（独立 no-tools Goal audit，不以 WorkTask 终态作为 completion authority）、`AgentPermissionResponder.swift`（普通 automatic tool 的 bound-invocation 协议，以及仅供 Orchestrator 使用的 host-agent-admission 入口）、`PermissionReviewControlPlane.swift`（reviewer 独立 FIFO/single-flight/timeout/soft usage warning/typed allow-deny failure、request generation、首 terminal/late-result guard、fresh-provider recovery）、`CommunicationDelegationTools.swift`（只含 send/request/reply 与 `delegate_task`，无请求委派工具）、`CoordinatorTools.swift`（`spawn_agent` 无 raw model 参数，只接受可选 approved profile ID）、`MessageBus.swift`、`Mediator.swift`、`AskAgentTool.swift`
-- Cowork 独立协议/投影：`Packages/IntatisProtocol/Sources/Goal.swift`（durable user objective + audit）、`WorkTask.swift`（当前 Session 可见计划节点 + revision/DAG/agent-reported evidence，不含 Run/Goal/agent owner）、`ContinuationRun.swift`（host continuation checkpoint + terminal `interrupted`）、`TaskGoalEvents.swift`（各自追加事件与 `ContinuationRunCloseRequestedPayload`）、`Task.swift` / `TaskGraph.swift`（保留的 AgentInvocation execution layer 与可选 Goal/run/WorkTask binding）、`CoworkEvents.swift`（mailbox consumed/discarded 生命周期与 additive `conversationID` / `basedOn` correlation）、`Leases.swift`（含 main-only `controlRun`）、`PermissionIntent.swift`、`Event.swift` / `Envelope.swift`；`Packages/IntatisConversation/Sources/CoworkProjection.swift` 分别折叠 Goal、Session WorkTask、ContinuationRun close claim、执行任务、agent roster、mailbox、report/attempt/retry 与未决 tool execution，`EventLog.swift` 负责 append-only replay、cross-process flock、multi-event WAL/父目录同步、session identity/known payload checked replay、run-close first-write CAS、session writer lease 与 crash-tail 防护。
-- Mailbox/turn settlement：`Packages/IntatisProtocol/Sources/Task.swift` 的 optional additive `mailboxMessageIDs` 冻结 exact delivery identity；information request/reply 用 fresh RequestID、stable conversation root、`inReplyTo` 与 `basedOn` 表达多轮 correlation；`Packages/IntatisAgentKernel/Sources/AgentLoop.swift` 将普通工具错误结算为 model-visible failed observation，不再把 denied/failed call 登记为副作用完成债务，并在 provider 正常 final 时原子提交 final terminal；`ContextProjection.swift` / `ContextBuilder.swift` 负责 exact mailbox 投影与 no-ACK/fresh-follow-up 提示。
-- Agent 内核：`Packages/IntatisAgentKernel/Sources/AgentRuntime.swift`（Code/Cowork 共用 headless runtime）、`AgentLoop.swift`（stable history、用户/FCO 图片的 canonical append-return 物化、pre/mid-turn compaction、授权与 durable tool ticket）、`AgentImageResolution.swift`（model ref 与 verified artifact 逐字段绑定）、`AgentToolOutputLowering.swift`（structured-result 唯一 canonical text + source-order image refs）、`AgentModelHistoryProjector.swift`（strict v1/v2 direct/checkpoint、等长 media sidecar、lineage/provenance/coverage/suffix 恢复）、`AgentModelHistoryCompactor.swift`（summarizer 看完整 active media window、summary-only checkpoint）、`AgentTokenEstimator.swift`（确定性预算与每图 4096 charge）、`AgentModelHistoryWindowID.swift`、`AgentThreadHistoryProjector.swift`、`EventLogSessionNamingService.swift`、`AgentExecutionBudget.swift`、`Agent.swift`、`ContextBuilder.swift`、`ContextProjection.swift`、`PermissionResponder.swift`、`ProviderImageGenerationToolService.swift`
-- Mailbox runtime：`Packages/IntatisCowork/Sources/Orchestrator.swift` 的 message admission/wake/retry/restore 路径按 exact MessageID 去重并保留同 TaskID bounded attempts；专用 preparation 只按 ordinary one-way、information request reply-only、information reply fresh-request-only 三类生成窄 lease，全部无 delegation grant；一个 RequestID 只接受一个 terminal reply，实质 follow-up 必须 fresh RequestID + `basedOn`，receipt 不 ACK；successful task terminal、candidate WorkTask progress 与 consumed events 单批提交，runtime ack 在后。`WorkTaskTools.swift` 提供 task create/update 的 bounded semantic permission preview，以及 WorkTask/AgentInvocation ID namespace 和 latest-revision 引导。
-- 稳定 Code conversation / Cowork `@main` 模型历史协议与回归：`Packages/IntatisProtocol/Sources/ModelHistory.swift`、`Event.swift`、`Envelope.swift`；`Packages/IntatisConversation/Tests/ModelHistoryCompactionEventLogTests.swift`；`Packages/IntatisAgentKernel/Tests/ModelHistoryProjectionTests.swift`、`AgentModelHistoryCompactorTests.swift`、`ModelHistoryCompactionAgentLoopTests.swift`、`CodeModelHistoryCompactionTests.swift`、`SkillDurableActivationTests.swift`，并与 `SubmittedIntentHistoryTests.swift`、`ContextProjectionTests.swift` 和 Cowork main continuity / worker isolation 回归组合运行。
-- `model_history_item` / `model_history_compacted` 展示边界：`Packages/IntatisConversation/Sources/Projection.swift`、`CodeProjection.swift`、`CoworkProjection.swift` 对这两个 provider-facing event 执行 no-op；用户可见消息仍来自原消息事件，不会因恢复事实链多渲染一份 assistant/tool 气泡。
-- Cowork 编排可靠性回归：`Packages/IntatisCowork/Tests/OrchestrationReliabilityTests.swift`、`SchedulerMailboxTests.swift`、`TaskGraphSchedulerIntegrationTests.swift`、`ToolRegistryLeaseTests.swift`、`PermissionReviewControlPlaneTests.swift`、`AutomaticPermissionReviewTests.swift`、`AgentInvocationNonRecursiveTests.swift`、`SpawnAgentPermissionTests.swift`；per-agent inference 回归：`Packages/IntatisProtocol/Tests/InferenceProfileProtocolTests.swift`、`Packages/IntatisProviders/Tests/InferenceCatalogTests.swift`（durable schema 与 safe route/trust/egress mismatch）、`IntatisProvidersTests.swift` / `InferenceCatalogStoreResolverTests.swift`（unconditional single-candidate request clamp 与 HTTP redirect no-follow；后者另含 32 个并发 reconciler 的 revision 保留/无碰撞，以及 lock owner/权限/符号链接/普通单链接校验）、`Packages/IntatisCowork/Tests/PerAgentInferenceProfileTests.swift`（attach review-await / bootstrap admission-wait exact revalidation、catalog mutation、suspended resolver、rebind/spawn TOCTOU、recovered worker frozen/live mismatch 在 provider 前 durable failure）、`Packages/IntatisSharedUI/Tests/CoworkInferencePresentationTests.swift`；CLI offline coverage 在 `Apps/intatis-cli/Sources/SelfTest.swift` 验证 multi-route/model/variant、旧 revision、route-scoped credentials、unique-model route 与 reasoning mismatch；explicit restore-main 当前由 `Interactive.swift` command boundary 承担，最终 CLI recovery smoke 以 `docs/TESTING.md` 为准；`Packages/IntatisProtocol/Tests/PermissionReviewProtocolTests.swift` 覆盖 diagnostic complete-URL redaction；authorization wire/compatibility 也由该 suite 覆盖；Goal/WorkTask runtime：`WorkTaskRuntimeTests.swift`、`GoalManagerRuntimeTests.swift`、`GoalVerifierControlPlaneTests.swift`、`GoalRuntimeControllerTests.swift`；Agent completion/lease/budget/context 回归：`Packages/IntatisAgentKernel/Tests/AgentLoopOutcomeTests.swift`、`AgentLoopPolicyTests.swift`、`ContextProjectionTests.swift`；Goal/WorkTask 协议与回放：`Packages/IntatisProtocol/Tests/TaskGoalProtocolTests.swift`、`Packages/IntatisConversation/Tests/TaskGoalProjectionTests.swift`，Goal 创建入口边界由 `ToolRegistryLeaseTests.swift` 与 GUI/CLI `/goal` 路径覆盖，旧 Cowork replay 继续由 `CoworkProjectionRegressionTests.swift` 与 Protocol lease/task tests 覆盖。
-- mailbox/terminal/run-control 专项回归分布在 `TaskContractTests.swift`、`AgentLoopPolicyTests.swift`、`ModelHistoryProjectionTests.swift`、`ContextProjectionTests.swift`、`IntatisConversationCodeTests.swift`、`MessageDelegationSplitTests.swift`、`MailboxCorrelationTests.swift`、`RunControlTests.swift`、`ContinuationRunCloseClaimTests.swift`、`CommunicationCorrelationProtocolTests.swift`、`OrchestrationReliabilityTests.swift`、`WorkTaskRuntimeTests.swift`、`ToolRegistryLeaseTests.swift` 与 `PermissionReviewControlPlaneTests.swift`；覆盖 legacy decode、failed/interrupted history/UI、1–8 exact projection、authority-class 窄 lease、单 terminal reply/fresh follow-up/no-ACK、first-write run close、恢复 drain、原子 consume、live/restore 同 TaskID retry、legacy poison lineage、新 ID 独立投递及 reviewer semantic preview。
-- Agent session / Terminal / Shell / Git / 文档 / 媒体/托管搜索工具：`Packages/IntatisTools/Sources/SessionNamingTool.swift`（严格单字段 `rename_session` schema、只描述字符数的 permission preview、宿主 current-session service seam）、`HostedWebSearchTool.swift`（严格单字段、network/model-cost intent、host service seam）、`WorkspaceImageTool.swift`（path-only `view_image`，只转发 reviewed workspace path 并返回 structured image reference）、`Packages/IntatisAgentKernel/Sources/ArtifactStoreImageViewingService.swift`（ImageIO-backed exact-session ArtifactStore adapter）、`TerminalTools.swift`（runtime-owned `exec_command` / `write_stdin`、persistent process/PTY、exact owner + WorkspaceLease revalidation、跨调用输入行 guard、无法证明的编辑控制 fail closed、partial-write session teardown、bounded head+tail drain、delayed stdin echo redaction、task/runtime cleanup）、`Packages/IntatisPTYLauncher/{IntatisPTYLauncher.c,include/IntatisPTYLauncher.h}`（macOS controlling PTY 与 exec-error pipe）、`ShellGit.swift`（managed terminal 与 fixed backend 共用 Seatbelt/workspace/network/process cleanup helper；raw `ProcessShellRunner` 在 Linux 使用 bwrap 且缺失时 fail closed；production registry 不暴露 `run_shell`；document/browser fixed backend、managed terminal 与 raw runner 分流；文档进程树有独立 2 GiB aggregate RSS ceiling；shipping App 只接受 bundle 内 active-architecture document runtime，CLI/debug 才可使用历史用户 runtime；LibreOffice 每调用短 `OSL_SOCKET_PATH` 与 exact `OSL_PIPE_*` Unix socket Seatbelt；Git 仍走参数数组 backend）、`DocumentMediaTools.swift`（`inspect_pdf` / `read_pdf`、Tectonic-only `compile_latex`、图片生成/编辑；`inspect_pdf` 只返回 PDFKit 计算的来源 identity 与 OCR 状态，不返回正文；旧自动读取/PDF mutation/reconstruct wrapper 已移除）、`DocumentTools.swift`（五个初读工具及五个 source-bound opaque cursor continuation、exact `ocr_pdf` 与单页 `pdf_render_page` execution）、`ExactDocumentTools.swift`（四个 format-fixed PDF export registration，以及 17 个 DOCX、7 个 PPTX、5 个 XLSX 一操作一工具 registration；共用 transport 只做 snapshot/CAS/sandbox/原子提交）、`DocumentToolContracts.swift`（闭合 exact schema，不再含 `format + mode + operations[]` 聚合 DSL）、`DocumentInfrastructure.swift`（source/destination snapshot、owner-only staging、CAS、单文件原子提交、typed error）、`DocumentPythonBackend.swift`（route 名固定为五个 reader、`ocr_pdf`、HTML sanitizer 或 exact write tool；直接调用 Docling/python-docx/python-pptx/openpyxl，不含通用 write/verify dispatcher）、`DocumentFixedBackends.swift`（三个 LibreOffice fixed PDF filter 与 pdfcpu 校验）、`PDFNativeDocumentService.swift` / `HTMLDocumentPDFRenderer.swift`（PDFKit 单页 renderer / WebKit PDF renderer）、`ToolProtocol.swift`（`intatis.standard.v7` production registry、document/browser/provider-hosted/current-session/image service seams）、`Packages/IntatisProtocol/Sources/ShellCommandRisk.swift`（启动命令与交互输入共用危险命令判定）、`Leases.swift`（fresh read-write lease 的独立 hosted-search capability、五个 exact reader capability 与历史 `readPDF` / `documentOCR` / `documentRender` / `documentExportPDF` / `documentWrite` raw values；`readWorkspace` 同时暴露 `read_file` / `view_image`；aggregate capability 只分组 exact registrations，不注册旧 concrete tool）
-- EPUB helper source：`Packages/IntatisTools/Runtime/rbook-helper/`（已审查的 optional external runtime；普通 EPUB read 已切换 Docling，当前 production registry 不暴露 EPUB write）、`ThirdPartyNotices/DocumentRBookHelper.md`（固定依赖/许可证闭包及二进制分发 gate）。
-- 外部文档读取运行时发行合同：`Packages/IntatisTools/Runtime/document-runtime/{release-spec.json,README.md}` 固定 Docling/Python/格式依赖、Heron model、Tesseract/tessdata、pdfcpu、EPUBCheck/Temurin、LibreOffice 与 rbook helper 的版本、layout、model/data hash 和 2 GiB RSS 合同；`ThirdPartyNotices/DocumentReadingRuntime.md` 记录来源、许可证与“不含手写 parser”的采用边界；仓库不包含或声称已经完成签名的双架构 runtime binary roots。
-- Managed terminal 回归：`Packages/IntatisTools/Tests/TerminalToolsTests.swift`（真实 cwd/pipe/TTY/controlling `/dev/tty`/Ctrl-C、凭据环境、不可移除且大小写无关的凭据路径 floor、workspace/owner isolation、拆分输入、真实 zsh cursor/escape/keymap 拒绝、partial-write teardown、timeout descendant cleanup、大型 build artifact、有界输出 tail、延迟回显清洗、无人轮询自动收口、workspace replacement 后无需 poll 收口、same-sandbox signal、schema/opt-in registry）、`Packages/IntatisAgentKernel/Tests/TerminalAgentLoopTests.swift`（durable prepare/settle 且 stdin 不落 EventLog）、`Packages/IntatisPermission/Tests/ShellPermissionTests.swift`（`write_stdin` 不能绕过危险命令 hard deny）、`Packages/IntatisCowork/Tests/ToolRegistryLeaseTests.swift` 与 `Packages/IntatisProtocol/Tests/CapabilityLeaseTests.swift`（read-write worker/host exposure 与 read-only/reviewer suppression）
-- Agent 网络/浏览器工具：`Packages/IntatisTools/Sources/BrowserTools.swift`（`web_fetch` / `browser_diagnostics` / `browser_profiles` / `browser_profile_delete` / `browser_history` / `browser_navigate` / `browser_snapshot` / `browser_handoff` / `browser_reload` / `browser_back` / `browser_forward` / `browser_click` / `browser_type` / `browser_submit` / `browser_select_option` / `browser_press_key` / `browser_scroll` / `browser_wait` / `browser_screenshot` / `browser_upload_file` / `browser_download` / `browser_downloads` / `browser_search`，通过 URLSession 或已安装 Node.js + Playwright persistent context；Playwright 缺失时用 Node.js 内置 WebSocket + Chrome DevTools Protocol 驱动已安装 Chromium/Chrome/Edge profile；页面快照和动作结果返回可定位交互元素摘要，并可跟随 click/type-submit/select/submit/press 打开的新 tab/window；profile inventory 只列安全 metadata 和 runtime marker 存在性；profile 删除是显式 `.destructive` 清理工具，删除前只概括提示 runtime marker 状态；表单提交作为 exec+network browser action 暴露）、`Packages/IntatisPermission/Sources/DeterministicPolicyGate.swift`（exec+network/destructive 权限顺序）、`Packages/IntatisProtocol/Sources/Leases.swift`（`browse_web`）
-- Provider-hosted search 专项回归：`Packages/IntatisTools/Tests/HostedWebSearchToolTests.swift`、`Packages/IntatisAgentKernel/Tests/ProviderHostedWebSearchToolServiceTests.swift`、`Packages/IntatisProviders/Tests/IntatisProvidersTests.swift` / `InferenceCatalogStoreResolverTests.swift`、`Packages/IntatisCowork/Tests/ToolRegistryLeaseTests.swift` 与 `Packages/IntatisProtocol/Tests/CapabilityLeaseTests.swift`；分别覆盖 query-only strict schema、network/model cost intent、exact route + required/fail-closed request、citation/output bound、adapter/capability gate、service/lease 双门和 browser/MCP 独立性。
-- 权限门：`Packages/IntatisProtocol/Sources/PermissionIntent.swift`、`PermissionReview.swift`（`PermissionRequestContext.reviewInvocationEvidence` 以 additive metadata 保存 generation/snapshot/digest/status receipt；`PermissionReviewTask` 不复制 raw transient；旧 `PermissionAuthorizationContext` 仅保留 decode/replay）、`ToolAuthorization.swift`（宿主解析的 concrete tool/membership/lease/args digest/preview 不可变快照）、`Packages/IntatisPermission/Sources/PermissionEngine.swift`、`DeterministicPolicyGate.swift`、`ModelPermissionReviewer.swift`、`PermissionReviewTextVerdict.swift`、`SecretScanner.swift`。`Packages/IntatisAgentKernel/Sources/AuthorizationSidecar.swift` 在 Cowork request-owned provider schema 上增加 required string `__intatis_authorization_context`，递归验证 strict function 的 `required == properties.keys` 与 `additionalProperties:false` 并在发网前 typed fail closed；原 ToolDescriptor/business required/executor schema 不变。`AgentLoop.swift` 还只在 provider-bound message copy 中装饰 `tool_search_output` 的 deferred function/namespace children，durable output 不变。codec 按 call 拆分并绑定 session/turn/task/call/tool/provider generation/tool snapshot/digests，只有 gate 到达 automatic ask 时宿主才消费并验证该字段。`AgentLoop.swift` 在 original business validation/durable history/EventLog/authorization/executor 前移除 sidecar；valid sidecar 只留在当前 turn 的 acting-model 内存 history。`PermissionReviewControlPlane` 只接收 complete safe business args、complete string sidecar 与 mechanical host facts，不接收 objective/role/deliverable/userGoal/user/assistant history/PDF/image 原文。missing/malformed/secret-bearing sidecar 只写 failed/runtimeFailed `tool_result`，不创建 permission lifecycle、不调用 reviewer、不消耗 denial fuse；binding mismatch 单独 typed fail closed。manual/nonautomatic 保留字段与误配 in-engine reviewer 均在 business execution 前拒绝。不存在第二次 acting-model Reporter request；deterministic allow/deny 仍直接结算。
-- 事件日志与输入投影：`Packages/IntatisConversation/Sources/EventLog.swift`（JSONL、multi-event WAL、`replayChecked` / `isEmptyChecked`、session/seq 校验）、`ChatSessionAutoTitle.swift`（Chat-only 轻量 admission、最早三轮 strict projector、user/assistant 正文字段合计 6,000-Character 预算的 JSON 上下文、独立无工具 request、严格输出验收、15 秒 request-owned consumer、per-session attempt/single-flight/close fence、双平台共用 display-name watermark 与 verified commit）、`SessionProjectionStore.swift`（跨进程锁内 Chat-only set-if-absent rename）、`GoalInput.swift`（Chat/Code legacy Goal metadata 与 Cowork durable `/goal` 明确入口共用的语法解析；普通自然语言不触发 Goal）、`Projection.swift`（Chat 用户消息保留 optional ArtifactID 附件引用）、`CodeProjection.swift`、`CoworkProjection.swift`
-- assistant/agent 回答时间展示：`Projection.swift` / `CodeProjection.swift` 把首个对应 message envelope 的 `ts` 保留为 presentation timestamp，后续 delta/completion 只补缺不覆盖；`Packages/IntatisSharedUI/Sources/ThreadSurfaces.swift` 提供按滚动 24 小时 / 7 天分层且遵循系统 locale/calendar/time-zone/12–24 小时偏好的公共格式，`Views.swift`、`CodeViews.swift` 与 `Apps/IntatisMac/Sources/IntatisChatScreen.swift` 在 agent 名称右侧消费。Cowork 复用 `CodeItemRow`，不新增 EventLog event/schema 或独立时间存储。
-- Phase S session 状态：`Packages/IntatisProtocol/Sources/SessionStateEvents.swift`（版本化完整 settings 快照、`session_settings_updated`、幂等 `session_storage_migrated`、rename source/operation ID；canonical encoding 不写 legacy `defaultProviderID`）、`Packages/IntatisConversation/Sources/EventLog.swift` / `SessionProjectionStore.swift`（append/stream 发布落盘反解 canonical Envelope；`events.jsonl` → schema-v2 `session.json`；full-fold EventLog-wins；legacy name append-before-rebuild；exact rename retry first-write-wins、冲突 operation fail closed、A→X/B→Y/retry-A 不覆盖 Y；严格 revision helper；owner-only atomic projection）、`Packages/IntatisCore/Sources/SessionWorkspaceAccessStore.swift`（session-owned schema-v1 binary plist、`0600`、no-follow lock、原子写、primary 默认拒删与显式事务回滚）、`Apps/IntatisMac/Sources/Workspace.swift` / `CoworkProjectSettings.swift` / `CoworkViewModel.swift` / `IntatisMacApp.swift`（RAII scope、shared 零引用清理、primary UI/方法/store 三层保护、scope-first symlink alias→canonical settings-before-marker migration、精确 reauthorization）、`Packages/IntatisCowork/Sources/Orchestrator.swift`（fresh 七事件 bootstrap 与严格历史 main CAS 恢复）、`Apps/intatis-cli/Sources/Interactive.swift`（专用 `/agent restore-main`）。对应测试：`SessionStateProtocolTests.swift`、`SessionProjectionStoreTests.swift`、`SessionRenameAgentLoopTests.swift`、`SessionNamingToolTests.swift`、`IntatisConversationTests.swift`、`IntatisCoreTests.swift`、`AutomaticPermissionReviewTests.swift`。
-- Phase A Cowork submitted intent：`Packages/IntatisProtocol/Sources/Event.swift` / `Task.swift`（`SubmissionID` 关联的 user/status/task additive protocol；`UserMessagePayload.mainAgentInferenceBinding` 冻结每次 Send 的 optional-schema/non-nil-new-main exact binding）、`Goal.swift`（新式 durable Goal 保存同一 binding 供 continuation/restart 使用）、`Packages/IntatisConversation/Sources/SubmittedIntentStore.swift`（session-owned outbox、canonical `user_message + queued` transaction、状态机校验与纯 `SubmittedIntentRetryPlanner`；restored queued exact resume不增attempt，restored running durable requeue只对齐exact下一attempt，只有failed/cancelled whole-task retry递增）、`CodeProjection.swift` / `CoworkProjection.swift`（提交状态 fold）、`Packages/IntatisAgentKernel/Sources/ContextProjection.swift`（accepted submission 顺序与 fail-closed 归属过滤）、`Packages/IntatisCowork/Sources/Orchestrator.swift`（FIFO、exact root retry、restored-task fence、main rebind + root/retry queue atomic admission batch）、`GoalRuntimeController.swift`（Goal create/每轮 continuation 传递 durable binding）、`Apps/IntatisMac/Sources/CoworkViewModel.swift`（冻结 draft/附件/route/Goal/next-main binding、durable admission、main/Goal nil fail-closed、drain/retry）、`Packages/IntatisSharedUI/Sources/CoworkViews.swift` / `ThreadSurfaces.swift`（始终可编辑的 composer、提交状态与 Retry）。附件 durability 由 `Packages/IntatisCore/Sources/DurableOwnerOnlyFile.swift` 与 `Packages/IntatisArtifacts/Sources/ArtifactStore.swift` 提供。对应测试：`SubmissionProtocolTests.swift`、`SubmittedIntentStoreTests.swift`、`SubmissionProjectionTests.swift`、`SubmittedIntentHistoryTests.swift`、`ContextProjectionTests.swift`、`OrchestrationReliabilityTests.swift`、`AutomaticPermissionReviewTests.swift`、`IntatisArtifactsTests.swift`。
-- macOS Chat/Code/Cowork composer 附件：`Packages/IntatisSharedUI/Sources/ComposerAttachments.swift` 统一 security scope、文件读取与 ArtifactStore 保存/读回校验；`Apps/IntatisMac/Sources/ComposerAttachmentSurfaces.swift` 提供共享 paperclip/import/drop/draft-menu surface。Chat 继续由 `ChatViewModel` / `ChatLoop` 按 ArtifactID 恢复；Code/Cowork 将 IDs 交给 AgentLoop 的 durable media resolver，stable history规则见 Agent内核条目。macOS Chat不再提供独立提示词生图composer action；iOS能力边界不随此接入扩张。对应测试：`ComposerAttachmentTests.swift`、`IntatisConversationTests.swift`、`DurableMultimodalAgentLoopTests.swift`。
-- Phase B permission reviewer request isolation：`Packages/IntatisCowork/Sources/PermissionReviewControlPlane.swift`（`{reviewTaskID, nonce}` generation、provider/timeout first-terminal race、exact-generation claim、request-owned cancellation、late/duplicate drop、verdict/delivery cancel guard；live model call 复核 receipt、session/turn/task/call/tool/generation/snapshot/business/context digest、string sidecar、secret 与 exact authorization snapshot；provider prompt 只投 exact args + sidecar + mechanical host facts；raw transient 只存活于 request-local 调用/active Job；terminal 使用固定宿主文案）、`AgentPermissionResponder.swift` / `Orchestrator.swift`（automatic-only transient overload、dedicated host-agent-admission overload、冻结 reviewer exact binding、逐代 fresh-resolve provider wrapper）、`Packages/IntatisPermission/Sources/PermissionReviewTextVerdict.swift`（非空 plain-text reason + 唯一 final-line ASCII ALLOW/DENY；约 240 Character 仅为共享 prompt 建议；完整 reason 先做敏感信息检查；结构/transport failure 使用 secret-free 细分诊断）、`Packages/IntatisProviders/Sources/ToolCalling.swift`（request-owned stream/cancellation）。旧 Reporter protocol types、`authorization_context_unavailable`、`malformed_verdict` 与 `provider_still_stopping` 仅保留 legacy decode/reconciliation。acting model 自行写入 ordinary assistant text 与 malformed provider-error preview 仍分别服从既有消息持久化和通用 diagnostic sanitizer；live 没有固定 sidecar byte ceiling 或 `review_input_too_large` admission。2026-08-12 strict-schema corrective gate 为 `AuthorizationSidecarTests` 12/12、`PermissionReviewControlPlaneTests` 47/47、`AutomaticPermissionReviewTests` 35/35、`AgentLoopPolicyTests` 37/37、`DurableMultimodalAgentLoopTests` 9/9、`IntatisPermissionReviewerTests` 10/10、`PermissionReviewProtocolTests` 12/12，合计 162/162；另有 `SearchKnowledgeToolTests` 4/4，以及覆盖 deferred schema 压缩阈值、compactor request 与 durable raw output 的 `ModelHistoryCompactionAgentLoopTests`。`swift build --disable-automatic-resolution`、`IntatisMac` macOS Debug unsigned build 与受影响目标 `IntatisAgentKernelTests` 217/217、`IntatisKnowledgeTests` 118/118、`IntatisCoworkTests` 364/364、`IntatisCLITests` 45/45（8 skipped）通过；完整测试完成 Tools 223/223 后挂于既有 SharedUI async waiter并人工中断，不能记为本次全量通过。opt-in `RealProviderSmokeTests.testRealAgentAuthorizationSidecarShapeWhenEnabled` 已编译但真实计费请求与 UI/manual switch smoke 尚未运行。
-- Phase C permission/turn outcome：`Packages/IntatisProtocol/Sources/TurnOutcome.swift` 与 `PermissionReview.swift` / `Event.swift` / `Envelope.swift`（稳定 TurnID、typed call/turn outcome、failure source、approve/decline/cancel-turn action、manual/automatic mode 和 legacy-decodable correlation）；`Packages/IntatisConversation/Sources/EventLog.swift` / `Projection.swift` / `CodeProjection.swift`（RequestID first-write、first-terminal CAS、FIFO pending 投影与 typed failure projection）；`Packages/IntatisAgentKernel/Sources/AgentLoop.swift`、`ChatLoop.swift`（Decline call 继续、Cancel turn 中断且无伪 tool result、每轮 terminal）；`PermissionReviewControlPlane.swift`（同 RequestID duplicate/reconnect 共享 owner generation/terminal）；`ToolProtocol.swift` / `ShellGit.swift`（可信 wrapper-startup sandbox denial 分类）；`CodeViewModel.swift` / `CoworkViewModel.swift` / SharedUI permission card / CLI（结构化人工动作与自动审查不可操作状态）。DEBUG-only 离线验收入口为 `Apps/IntatisMac/Sources/PhaseCPermissionFixtureView.swift`。对应测试：`TurnOutcomeProtocolTests.swift`、`PermissionSettlementTransactionTests.swift`、`PermissionProjectionTests.swift`、`AgentLoopOutcomeTests.swift`、`SandboxDenialOutcomeTests.swift`、`WorkspaceSandboxDenialTests.swift`、`PermissionReviewControlPlaneTests.swift`、`OrchestrationReliabilityTests.swift`。
-- Phase L app/runtime lifecycle：`Apps/IntatisMac/Sources/SessionRuntimeManager.swift`（进程级 exact `{SessionKind, SessionID}` Chat/Code/Cowork ownership、Cowork creation single-flight、runtime status/removal 发布、exact deletion drain、全局 bounded shutdown，以及按 exact session 的低频 display-name publisher/revision+seq watermark）、`IntatisMacApp.swift`（窗口级 selection + shared manager、AppKit terminate-later/Command-Q、model-tool rename verified commit bridge）、`IntatisMacRootView.swift`（切换不 stop、exact busy/delete、跨窗口 removal 与手工/model rename 的单行摘要更新）、`ChatViewModel.swift` / `CodeViewModel.swift` / `CoworkViewModel.swift`（idempotent shutdown、operation admission/drain、permission/subscription/workspace release）、`Packages/IntatisCore/Sources/BoundedSessionRuntimeShutdown.swift`（concurrent stop、monotonic deadline、settled/timed-out report、single-flight）、`GoalRuntimeController.swift` 与 CLI `Interactive.swift`（冷启动只 reconcile/pause，显式 Resume/data-plane boundary）。DEBUG-only 离线验收入口为 `PhaseLSessionLifecycleFixtureView.swift`。对应测试：`BoundedSessionRuntimeShutdownTests.swift`、`GoalRuntimeControllerTests.swift`；Computer Use 矩阵见 `docs/TESTING.md`。
-- Phase T tool outcome / task-local recovery：`Packages/IntatisProtocol/Sources/ToolExecution.swift` / `ToolExecutionRejection.swift` 定义 additive effect disposition 与 typed no-effect rejection；`Packages/IntatisConversation/Sources/CoworkProjection.swift` / `EventLog.swift` 负责 exact prepare/settlement、重复 ID/冲突终态 fail-closed 与 complete-known history；`Packages/IntatisAgentKernel/Sources/AgentLoop.swift` 原子记录 model-visible failure + no-effect settlement；`Packages/IntatisCowork/Sources/WorkTaskTools.swift` / `Orchestrator.swift` 负责 production `task_create` / `task_update` pre-first-append proof，以及 delegation 全预检后的单 EventLog admission batch；`GoalRuntimeController.swift` 负责 active Run 的 `interrupted` 结算和显式 Resume 新建 Run。`ContextBuilder.swift` 与 bundled `cowork-agent-orchestration` Skill 另冻结 multi-call 非事务/非并发、依赖成功 ToolResult 后分轮，以及 Task create → confirmed spawn → confirmed attached-target delegation 的模型合同；`delegate_task` 不隐式创建 worker。对应测试：`ToolExecutionProtocolTests.swift`、`ToolExecutionProjectionTests.swift`、`AgentLoopPolicyTests.swift`、`ContextProjectionTests.swift`、`IntatisSkillsTests.swift`、`WorkTaskRuntimeTests.swift`、`GoalRuntimeControllerTests.swift`、`AgentInvocationNonRecursiveTests.swift`、`OrchestrationReliabilityTests.swift`。
-- 对话内容渲染：`IntatisMessageRendererMode.swift`（无偏好默认 `.microsoft`，未知值 fail closed `.plainSafe`，固定持久键，新/旧启动 override 和旧 `rich` 迁移）、`IntatisMessageContentView.swift`（角色/mode facade、facade-lifetime raw projection、仅 exact current revision 显示上游 `DocumentView`、安全链接）、`IntatisMicrosoftMarkdownPipeline.swift`（64 KiB whole-message admission、50 ms incomplete parse debounce、100 ms raw fixed-window leading/trailing throttle、activation/reentry/correction/truncation/final exact flush、timer generation guard、view 内 `bufferingNewest(1)`、MainActor document ownership、appearance/config/stale guard、图片/animation/citations 关闭）、`IntatisLatestOnlyPermitScheduler.swift`（output-free、全局 concurrency 1 / pending 32、每 key latest-only/fair permit；不保存 work/result/document）、`ThreadSurfaces.swift`（macOS 使用的 16-row bounded history window/page scope/pager；shared iOS adaptive compatibility container）。vendor 的公式面由 `MathRenderConfig.swift`、`InlineMathCatalog.swift`、`MathAttachmentData.swift`、`InlineMathPreprocessor.swift`、`UI/Paragraph/InlineMathAttachment.swift`、Markdown parser/config/inline bridge 和两平台 paragraph host 组成；处理 protected-context-aware `$...$` / `\(...\)` inline 与 `$$...$$` / `\[...\]` display，原始 TeX 和 presentation 随 attachment 保留，不设公式数量、单式字节或固定附件尺寸上限。接入点为 macOS/iOS Settings（Picker 也将 legacy `rich` resolved 为 Microsoft）、macOS `RendererFixtureView`、`IntatisChatScreen.swift` 与共享 `{Views,CodeViews,CoworkViews}.swift`；旧 `IntatisRenderDocument.swift` / `IntatisCodeBlockView.swift` / `IntatisMathView.swift`、旧 regex `LaTexPreProcessor.swift` 和 highlight.js/CSS 资源仍保持删除。
-- Code/Cowork execution trace 展示策略：`Packages/IntatisConversation/Sources/CodeProjection.swift`（用 per-agent active `{TaskID, attempt}` + 该 invocation 最后一个完整 message index 判定 exact `task_completed` 镜像；迟到旧 attempt 不清除新 attempt，不匹配时保留 conversation fallback；通用 agent message 与 information request/reply 投影为 `.agentToAgent`，统一生成 `sender->recipient` identity 与 envelope timestamp）、`Packages/IntatisSharedUI/Sources/ExecutionTracePresentation.swift`（默认保留 conversation、`.agentToAgent` 与 error，仅隐藏 tool/patch/note 等 trace；后台 `-IntatisShowExecutionTrace` / `INTATIS_SHOW_EXECUTION_TRACE=1` 恢复完整 trace）、`ThreadSurfaces.swift`（在任何 thread filter 前从 raw page 收集 error/失败 trace/recovery/submission failure，再生成不含错误 chrome 的 presentation-only transcript copy）、`CodeViews.swift` / `CoworkViews.swift`（清理后的 items 才进入 thread、auto-scroll 与 thinking；错误列表只进入右栏，`.agentToAgent` 复用普通 agent 无外框回答版式）。该 UI 路由不删除或改写 EventLog/`CodeProjection` facts。测试为 `Packages/IntatisConversation/Tests/IntatisConversationCodeTests.swift`、`Packages/IntatisSharedUI/Tests/ExecutionTracePresentationTests.swift` 与 `ThreadLayoutTests.swift`。
-- iOS 预渲染救援资源：`Apps/IntatisiOS/Resources/Settings.bundle/Root.plist` 通过系统 Settings 写入同一 renderer key，values 为 `microsoft` / `plainSafe` 且默认 Microsoft；`project.yml` 将该目录只加入 iOS app resource phase。最终 `IntatisiOS.app/Settings.bundle/Root.plist` 必须存在，plain-safe 仍须可在打开问题 session 前选择。
-- 开源声明入口：`NOTICE.md`、`ThirdPartyNotices/MarkdownRendering.md`、`ThirdPartyNotices/SyntaxHighlighting.md`、`ThirdPartyNotices/MathRendering.md`；`Packages/IntatisSharedUI/Sources/ThirdPartyNoticesView.swift` 在设置 UI 暴露声明，`project.yml` 将根 NOTICE 与三份 notice 复制到 macOS/iOS app bundle。
-- 渲染测试/fixture：`MarkdownSchedulerTests.swift`、`MessageRendererModeTests.swift`、`MessageRenderingTests.swift` 与 vendor formula/parser/platform suites 共同覆盖模式、背压、raw/final、delimiter/code/currency/fallback、attachment source、两平台 TextKit 2 paragraph/live-provider integration、Dynamic Type 与 semantic appearance；既有 vendored AppKit/UIKit stable-width invalidation 与 `DocumentView`/ParagraphView equality/selection contracts 继续保留。当前 `MessageRenderingTests` 41/41，`ThreadScrollCoordinatorTests` 28/28；两者新增 16-row history window/paging/page-scope、真实 `NSScrollView` top↔bottom 和 macOS 三 surface 无消息级 lazy 的结构合同。此前 vendor full 77 XCTest + 11 Swift Testing = 88/88 是独立既有结果。AppKit `ParagraphNSView` 还冻结 TextKit 2 root content-storage retention、wholesale replacement 后 primary-manager restoration、coalesced viewport layout、flexible intrinsic width、exact proposal ownership 与 one-entry measurement；`InlineMathAttachment` 冻结专用动态 UTI、direct provider 与无 generic attachment cell。`Tests/Fixtures/incident-1249-sanitized-v1.json` 是脱敏的 17-message / 1,249-delta 固定样本，SHA-256 `fb548849d0b708d31e8c6d055805f29f5c09ee4c8306bf9adc537a48e95707f1`，不得因公式功能改写；validation-only host 除 formula stages 外还提供 production `CodeShell` 的 `thread-burst` stage。旧 lazy 容器曾完成三次 180 秒 soak、60 秒显式 AX 滚动和约 90 秒 Hangs/Time Profiler，这只保留为历史证据；当前 bounded history window 已完成真实 session entry/scroll/paging，但尚未重跑 >160 秒 soak。2026-07-18 三实例事故的最终 retaining edge 仍以 `UNKNOWN` 历史 evidence 保留；当前证据仍不等于真实 clipboard/VoiceOver 或低端真机通过，plain-safe 也不能冒充 no-math baseline。
-- macOS UI 信息架构：`Apps/IntatisMac/Sources/IntatisMacRootView.swift`（系统 `NavigationSplitView` sidebar 内的 `Intatis` 标题、带 SF Symbol 的 Chat/Code/Cowork 竖向三行导航且仅当前项使用 interactive Liquid Glass、mode history/New、底部 Settings；session display name 解析；新建 Cowork session 选择主 workspace）、`Apps/IntatisMac/Sources/IntatisChatScreen.swift`（session-title Chat header；16-row bounded eager transcript page 与 Earlier/Newer/Latest；仅用户消息保留 trailing 原生 `Glass.regular` 气泡 cap/gutter，且无自定义蓝色描边；assistant/agent/system 包括失败/中断回复均无外层卡片；无通用 agent 头像/Agent badge；名称旁稳定消息时间；composer 第一排 40pt、关闭态仅模型名的 model/variant glass 菜单左、usage 右；第二排复用 Cowork paperclip 附件 surface）、`Apps/IntatisMac/Sources/ComposerAttachmentSurfaces.swift`（Chat/Cowork 共用的 40pt paperclip、文件选择、URL 拖放、附件数量菜单和逐项删除）、`Packages/IntatisSharedUI/Sources/CodeViews.swift`（紧凑 session-title Code shell + 原生 inspector；同一 bounded history/page-scope 合同；Code/Cowork 共用仅用户消息有 regular Liquid Glass 气泡、其余 conversation row 无框正文、名称旁时间与专用结构化卡片分流；permission card/notice 可由宿主选择保留 Material 或让外层 rail 提供 surface）、`Packages/IntatisSharedUI/Sources/CoworkViews.swift`（紧凑 session-title Cowork shell + bounded history/page-scope + 宽屏 permission-first Liquid Glass rail；rail 作为同一 detail canvas 的 trailing overlay，不再有 divider 或整栏 `.bar` 背景，thread ScrollView 延伸至最右侧并以 trailing scroll-content margin 为 cards 留位；pending permission/notice 位于第一位，其后为 Agents/Goal/Tasks，Cowork rail 不再显示 Git；pending 时宽屏 rail 临时固定可见，窄到无法容纳 rail 时才在 thread 提供同一卡片兜底；不复制 Goal/Tasks；两排 composer 与可选 stop；status rail toggle 使用系统 compact 圆形 icon control）、`Apps/IntatisMac/Sources/IntatisMacApp.swift` / `MCPProjectSettingsSurfaces.swift` / `AppInferenceCatalog.swift` / `CoworkViewModel.swift` / `CoworkProjectSettings.swift`（Cowork 无常驻 reviewer 顶部横幅，也无独立 MCP Content header shortcut；MCP 内容浏览收进 `Project Settings → MCP → Browse Content`；第一排 secret-free exact profile 菜单与 Chat/Code 共用 40pt interactive Liquid Glass 几何，关闭态仅显示 model title；忙时仍可暂存下一次 `@main`，Send 冻结、FIFO 执行边界才 main-only durable rebind；第二排保留既有附件入口并使用同一个共享附件 surface；future-agent default、其他 ordinary agent rebind 与异常恢复入口位于 Project Settings）、`Packages/IntatisSharedUI/Sources/ThreadSurfaces.swift`（用户消息原生 regular glass surface、Recent 旁 30×30 原生圆形 glass `+`、原生圆形 icon controls、40pt composer control/selection-menu contract、两排 composer、首排 usage、session presentation、history window/pager/page scope、消息时间格式与 role-aware message-width policy reusable surfaces；单行等高、多行底边对齐、无 top accessory 时不生成空行）、`Packages/IntatisSharedUI/Sources/ProviderModelMenu.swift`（弹出菜单内部由 Chat/Code/Cowork 共用 provider 分组、真实 model ID + optional presentation variant identity、模型名与灰色 detail；关闭态按钮不复用这些辅助信息）
-- Code/Cowork 错误展示路由：`Apps/IntatisMac/Sources/IntatisMacApp.swift` 把 Code 的
-  voice/composer 与 Cowork 的 voice/composer/inference/projection/session-storage 错误完整传入
-  SharedUI；`ThreadSurfaces.swift` 从 raw bounded page 收集 `.error`、失败 execution row、
-  `recoveryAdvice`、失败 submission 与全部 host 文案，按规范化消息去重，并生成不含错误 chrome
-  的 presentation-only transcript copy；`CodeViews.swift` / `CoworkViews.swift` 只在右栏最底部
-  生成一张非空“错误信息”卡片，Cowork 通过 exact `SubmissionID` 保留 Retry。EventLog、
-  projection、runtime 与 permission 语义不变。
-- iOS UI 信息架构：`Apps/IntatisiOS/Sources/IntatisiOSApp.swift` 保持单一
-  `NavigationStack` + Chat-only root；顶部为 sidebar、serif session title 与 New，约
-  82% 左抽屉复用 `IntatisSessionHistoryList`，组织 serif `Intatis`、选中 Chat、Recent/New
-  和底部 Settings。底部通过 `ThreeColumnShell` 参数化共享两排 composer：第一排是
-  model glass `Menu` 与可用 usage，第二排是 paperclip Chat 功能菜单、输入、voice 和唯一
-  Send/Stop；voice 紧邻主操作左侧，iOS 的 glass merge spacing 固定为 0，使各个 8pt 间隔的
-  控件保持独立形状；composer 专用 icon modifier 给 action/voice/Send/Stop 统一 40×40 外框，并在
-  iOS 使用 `.small` native control size 纠正 `.regular` glass 的可见膨胀，macOS 仍使用 `.regular`。
-  关闭状态支持从 24pt 左缘水平右滑打开抽屉；侧栏内水平左滑关闭，两者都用
-  方向优势阈值避免抢占聊天和 Recent 的垂直滚动。品牌/session/Settings 标题使用系统 serif，正文与原生控件使用系统 sans；
-  根 `Intatis.icon` 由 iOS target 编译为主图标。产品图仍不链接本地 agent/workspace。
-- 2026-07-31/08-02 conversation chrome（由 2026-08-13 用户气泡表面收口补充）：`ThreadSurfaces.swift` 还定义 user-header policy、低对比结构化 surface、可选 subtitle 的 workspace thread header、单行 session history row 与原生 `GlassEffectContainer`/glass surface helper；`Views.swift` / `IntatisChatScreen.swift` / `CodeViews.swift` 统一省略 user sender label，并只让 user row 使用原生 regular Liquid Glass 气泡，assistant/agent/system 对话行直接继承 canvas；active Chat/Code/Cowork header 只显示 session title。`CodeViews.swift` 的 `PermissionCard` / `PermissionResolutionNoticeView` 使用默认折叠、structured secret-safe details、窄宽自适应 actions，并支持由 Cowork rail 接管外层 surface；`CoworkViews.swift` 把 pending/resolved permission 放到 glass rail 第一位；`IntatisMacRootView.swift` 的 sidebar 品牌块只保留 `Intatis`，Recent item 只传 session name 而不生成 event/date/path/runtime detail；`PhaseCPermissionFixtureView.swift` 提供不接 provider/EventLog/executor 的真实生产组件视觉验收面。
-- 当前 UI 配色规范：`docs/CURRENT_UI_COLOR_SYSTEM.md`（系统原生表面 + Liquid Glass：动态 macOS window / sidebar、仅用户消息使用 regular glass 气泡、其余 conversation row 继承 canvas、专用结构化内容 Material、导航与交互功能层玻璃、系统语义色、iOS 边界与验收清单）
-- 上一版 UI 配色底稿：`docs/UI_COLOR_SYSTEM.md`（保留迁移前 macOS 香槟金/暖中性色与玻璃体系、明暗模式、语义状态色及 iOS 差异，供历史对照）
-- GUI token/turn stats：`Packages/IntatisProtocol/Sources/TurnStats.swift`、`Packages/IntatisProviders/Sources/ChatProvider.swift`（`Usage`）、`Packages/IntatisProviders/Sources/OpenAIWireProvider.swift` / `OpenAIToolCalling.swift`（OpenAI-compatible usage parsing）、`Packages/IntatisConversation/Sources/CodeProjection.swift`（`TurnStatsProjection`）、`Packages/IntatisSharedUI/Sources/ThreadSurfaces.swift`（`IntatisTurnStatsSummaryView`）、`Packages/IntatisSharedUI/Sources/ChatViewModel.swift`、`Apps/IntatisMac/Sources/CodeViewModel.swift`、`Apps/IntatisMac/Sources/CoworkViewModel.swift`
-- Chat/Code/Cowork session/history：`Packages/IntatisCore/Sources/SessionKind.swift`（`SessionSummary` / `SessionHistoryStore`，读取 EventLog-derived schema-v2 `session.json` 与执行安全删除）、`Apps/IntatisMac/Sources/IntatisMacRootView.swift`（mode history、右键 Rename/Delete）、`Apps/IntatisMac/Sources/IntatisMacApp.swift`、`Apps/IntatisiOS/Sources/IntatisiOSApp.swift`。macOS 与 iOS 共享最近会话扫描和 `events.jsonl` / `artifacts` 路径生成；平台层只传不同 root 与 `SessionID`。手工 Rename 与 Code/Cowork `@main` 的 `rename_session` 都先追加 EventLog settings event 再刷新 projection，不改变目录名、`SessionID` 或既有 envelope；model schema 不接受目标 session 字段。Cowork 的 `CoworkProjectSettings.swift` 负责 GUI projection 与 legacy UserDefaults migration；canonical project/workspace/future-agent exact default/default permission/token budget metadata 已由 session settings events 持久化，bookmark bytes 独立保存在 session-owned `workspace-access.plist`。
-- Provider：`Packages/IntatisProviders/Sources/ProviderRequestAdapter.swift`（保留 raw npm identity，reviewed compatible/OpenRouter lowering，unknown/unsupported fail closed）、`Endpoints.swift`（Chat/Code 兼容路径按 provider/model 保存 exact adapter 与任意 JSON `modelRequestOptions`，旧 Codable 缺 adapter 保持 legacy）、`InferenceCatalog.swift` / `InferenceCatalogStore.swift`（Cowork versioned immutable connection/profile catalog、adapter revision identity、OpenCode-style deep merge + explicit durable option schema）、`ModelConfigurationPresentation.swift`（只读识别原始 reasoning/thinking effort/level/budget 供 UI 展示，不参与请求）、`OpenAIWireProvider.swift` / `OpenAIToolCalling.swift`（package-aware Chat/Agent body lowering、runtime structural fields、config usage/candidate fields 清除与 host-owned `n = 1`）、`ProviderRegistry.swift`（兼容全局角色 provider + exact agent inference resolver）
-- GUI/CLI Cowork 恢复与自动权限审查：`Apps/IntatisMac/Sources/CoworkViewModel.swift`（session replay → orchestrator restore，并保持 persistent scheduler suspension → first-resolvable-main GoalVerifier freeze + 独立 config-derived reviewer binding/reviewer health → GoalRuntime start/recovery/reconcile-only pause → `startNewTasksKeepingRestoredTasksPaused`；历史 root task 只有精确 submission Retry 才解除；普通 unresolved worker 只在自己的 invocation provider dispatch 前 durable fail closed；per-agent provider resolution、安全 resolution state、host rebind；submitted intent FIFO、普通 turn scoped run、durable `/goal`、Goal/WorkTask projection、pause/resume/edit/clear、permission FIFO、cancel/retry、async stop 先 checkpoint Goal 再 `cancelAll`）、`Apps/IntatisMac/Sources/IntatisMacApp.swift` / `AppInferenceCatalog.swift`（catalog 编译/持久化/refresh、在 runtime-creation await 前冻结 canonical `permission_reviewer_model` base binding、raw variant key → opaque durable variant ID、CoworkShell submission/Goal/Tasks/profile binding、Goal edit sheet、clear confirmation、窗口级 selection + shared `AppSessionRuntimeManager`、Command-Q terminate-later）、`Apps/IntatisMac/Sources/IntatisMacRootView.swift`（session/mode transition generation guard；切换只改选择并取得 manager-cached runtime，不 stop；exact busy/delete/removal）、`Apps/intatis-cli/Sources/CLIProviderCatalog.swift` / `CLIConfig.swift`（Intatis-owned OpenCode-compatible multi-route/model/variant config、canonical `permission_reviewer_model` + missing-to-document-model compatibility、unique unqualified main model route、reasoning selection fail-closed、exact per-route credential refs）、`CLIInferenceProfiles.swift`（全部 route profile 编译、immutable catalog、独立 reviewer base binding、first-main GoalVerifier freeze）、`SelfTest.swift`（offline two-route/model/variant、retained revision、credential isolation）、`Interactive.swift`（per-workspace durable Cowork log；strict exact binding；配置 reviewer 与 `@main`/GoalVerifier 分离；non-empty missing `@main` 不自动套 default，显式 `/agent restore-main <path> <profile-id>`；`/profiles`、`/profile`、`/agent add ... --profile`、`/agent profile|rebind`；先 restore/GoalRuntime reconcile-only start，只有显式 `/auto|/default` 或 `/goal resume` 才恢复对应 data plane；`/goal <objective>|status|pause|resume|clear|edit`、退出/切 mode 前 Goal checkpoint + `cancelAll`、Code/Cowork image-generation/editing service 注入）、`Apps/intatis-cli/Sources/Terminal.swift`（渲染 `permission_review`）
-- Cowork macOS project mode：`Apps/IntatisMac/Sources/CoworkProjectSettings.swift`（EventLog-backed settings projection、legacy UserDefaults ownership/migration、future-agent exact default + settings/rebind sheet；异常时显示 workspace reauthorization / automatic-review retry Recovery 区）、`Apps/IntatisMac/Sources/CoworkViewModel.swift`（恢复后先注册 EventLog stream；fresh settings-first seven-event bootstrap；historical main repair before reviewer replacement；`SubmittedIntentStore` outbox/canonical acceptance、FIFO drain/retry；`projectSettings` / `project` 与 durable submission/Goal/WorkTask/inference projection、GUI no-mention 默认路由到 `@main`、project directory metadata add/remove）、`Apps/IntatisMac/Sources/Workspace.swift`（workspace picker、session-owned bookmark restore、RAII `WorkspaceAccessLease`）、`Packages/IntatisSharedUI/Sources/CoworkViews.swift`（composer 始终可编辑，Send 只按本地 draft/同次 persistence gate；submission status/retry；roster 安全 profile label/resolution；宽屏 rail 置顶 pending permission，随后显示 `Agents` / `Goal` / `Tasks` 且不显示 Git；窄屏只为 pending approval 保留 thread 兜底，不显示 Goal/Tasks 顶部副本；Goal pause/resume/edit/clear 与 WorkTask criteria/result/evidence/dependency/invocation detail；默认不提供用户手动新建 agent 入口）
-- macOS Agent 文档/媒体/网络工具接入：`Apps/IntatisMac/Sources/CodeViewModel.swift`（Code AgentLoop 注入 provider-backed image generation/editing）、`Apps/IntatisMac/Sources/CoworkViewModel.swift`（Cowork Orchestrator 按 agent 注入 provider-backed image generation/editing；coordinator lease 可用全部文档/媒体和网络/浏览器工具，worker 默认可用 `read_pdf`、五个 exact reader 与 `documentOCR`，且无 `browse_web`）；`Packages/IntatisAgentKernel/Sources/ProviderImageGenerationToolService.swift`（宿主从 `ResolvedModels.imageGen` 解析 provider/model，`generate_image` / `edit_image` model-facing tool 都不携带路由）
-- GUI provider/model catalog：`Apps/IntatisMac/Sources/AppConfig.swift`、`Apps/IntatisiOS/Sources/IOSConfig.swift`（provider 保存 Base URL + Chat endpoint + secret ref 元数据；model 保存 id + 展示名；macOS 外部配置额外把 `models.<id>.options` 与 `variants` 保真到内存，不写 UserDefaults，并把顶层 `permission_reviewer_model` 解析为独立授权控制面 base route、把顶层 `image_model` 解析为独立宿主 image route；reviewer 字段缺失只继承该 JSON 的 top-level model，显式非法保留存在性并 fail closed，当前聊天 selection 不覆盖它；显式 image-only provider 可为空模型列表且不进入 inference menu；variant 作为同一 model 的请求参数预设，选择时只保存 identity并以原始字段覆盖基础 options；macOS 额外支持 `INTATIS_CONFIG` 显式指定文件、Intatis-owned JSON/JSONC discovery 与模板创建；iOS 通过 `Packages/IntatisProviders/Sources/ChatConfigurationImport.swift` + 系统 Files picker 显式导入同 shape JSON/JSONC，把 base model options/adapter/capabilities 保存到 app-owned protected `Intatis/imported-chat-configuration.json`，将 literal key 迁入 protected `Intatis/auth.json`，不监视原文件、不把 raw options/key 写入 UserDefaults，variants 当前显式警告后忽略；两端均不自动发现任何 `opencode.json` 或 OpenCode app 配置，旧 `config.json` 和 direct `providers` 数组兼容读取）；modern CLI 对应解析位于 `Apps/intatis-cli/Sources/CLIProviderCatalog.swift` / `CLIConfig.swift`；设置 UI：`IntatisSettingsPanel`（macOS，含 Open Intatis Config 按钮；无 reviewer picker）、`IOSRootView.settingsSheet`（iOS，含 Import Intatis Config）；Chat 模型菜单：`IntatisChatScreen`（macOS）、`IOSRootView` 底部 composer 第一排（iOS）；配置文件 secret 桥接：`Apps/IntatisMac/Sources/Keychain.swift`、`Apps/IntatisiOS/Sources/Keychain.swift`（历史文件名；真实请求不读写 OS Keychain，只按 auth JSON / Intatis-owned OpenCode-compatible config `options.apiKey` / env / file 懒加载并缓存 secret）
-- Composer 语音输入：`Packages/IntatisSharedUI/Sources/ComposerVoiceInput.swift`（macOS/iOS 共用的
-  `ComposerVoiceInputController`、process-wide microphone lease、Flotis-derived recorded-file generation
-  state machine、WAV/16 kHz/mono AVAudioRecorder、120 秒/25 MiB 上限、owner-only audio/stale cleanup、
-  shutdown/cancel drain 与只追加 draft merge）；`Packages/IntatisProviders/Sources/Transcription.swift`
-  （普通/extension/size 校验、owner-only disk-backed multipart/JSON body、严格 JSON response 与
-  `TranscriptionFileRequest`）；`HTTPDataClient.swift` / `ProviderRuntimePolicy.swift`（no-redirect file upload、
-  timeout/retry/cancel）；`ProviderRequestAdapter.swift` / `ProviderRegistry.swift`（exact adapter →
-  compatible multipart 或 OpenRouter JSON-base64 runtime plan）、`ThreadSurfaces.swift`
-  （voice trailing action 固定在唯一 Send/Stop 左侧）、`ChatViewModel.swift`、
-  `Apps/IntatisMac/Sources/{CodeViewModel,CoworkViewModel,IntatisChatScreen,IntatisMacApp}.swift` 和共享
-  `{Views,CodeViews,CoworkViews}.swift`（四个产品 composer 接线及 lifecycle drain）。
-  `Apps/IntatisMac/IntatisMac.DeveloperID.entitlements` 只为 shipping Hardened Runtime target 增加
-  `com.apple.security.device.audio-input=true`；`project.yml` 同步声明 Audio Input resource access，
-  App Sandbox 与遗留 App Store target 不变。
-  `Apps/IntatisMac/Sources/AppConfig.swift`、`Apps/IntatisiOS/Sources/IOSConfig.swift` 与
-  `Packages/IntatisProviders/Sources/{ChatConfigurationImport,ProviderRegistry}.swift` 只通过顶层
-  canonical `transcription_model` 建立 exact route；专用 provider 可为空 `models`，不进入 inference
-  menu，未配置/unsupported adapter 时无 hidden fallback。没有新设置页；macOS/iOS 继续分别用高级
-  配置与显式 Files import。未迁入 Flotis 的多模型对比、设置 UI、全局快捷键、剪贴板或输入法 target。
-- Cowork 设计文档：`docs/COWORK_AGENT_ARCHITECTURE.md`、`COWORK_TASK_CONTEXT_MODEL.md`、`COWORK_AGENT_INVOCATION_MODEL.md`、`COWORK_CURRENT_FINDINGS.md`、`COWORK_MIGRATION_PLAN.md`、`COWORK_V0_10_SMOKE.md`、`COWORK_V0_10_STATUS.md`；当前 per-agent inference durable 契约：`docs/PER_AGENT_INFERENCE_PROFILES.md`
-- 开源复用政策：`docs/OPEN_SOURCE_REUSE.md`（允许的复用形式、许可证准入、provenance、NOTICE、Apple-first 集成、OpenCode 当前 research-only 状态与上游升级规则）
+- `scripts/check-version-consistency.sh`：`project.yml`、macOS reference plist、当前文档和生成工程版本；
+- `scripts/hide-xcode-package-schemes.sh`：只展示 `MopeliumMac` 与 CLI scheme；
+- `scripts/package-macos-release.sh`：唯一正式 macOS ZIP/DMG 入口；
+- `scripts/validate-document-runtime.sh`：双架构 document runtime 静态/执行门；
+- `scripts/validate-linux-cli.sh`：Linux static CLI gate；
+- `scripts/RendererValidationWatchdog.swift`：bundle/executable/renderer containment 验证。
 
-## 生成物 / 产物
+## 历史与 provenance
 
-- SwiftPM 构建产物：`.build/`（含 release 可执行）
-- Xcode 工程产物：`Intatis.xcodeproj`（xcodegen 生成，gitignored）
-- App bundle：`IntatisMac.app` / `IntatisiOS.app`（Xcode 构建产物）
-
-## 脚本与工具
-
-| 脚本 | 用途 | 调用方式 |
-|---|---|---|
-| `Makefile` | version/build/test/release/install/app/clean 便利 target；常用构建入口先核对版本 | `make version` / `make build` / `make test` / `make app` 等 |
-| `project.yml` | XcodeGen 工程规格 | `xcodegen generate`（`make app` 内调用） |
-| `scripts/check-version-consistency.sh` | 核对工程、参考 plist、当前文档和生成工程版本 | `scripts/check-version-consistency.sh` |
-| `scripts/validate-document-runtime.sh` | 对单个 external document runtime root 核验 exact manifest/version、全文件 SHA-256 inventory、model/tessdata hash、SBOM/license、目标 Mach-O architecture 与可选 exact Developer ID identity | `scripts/validate-document-runtime.sh <absolute-root> <arm64\|x86_64> [identity]` |
-| `scripts/package-macos-release.sh` | Developer ID 直分发 ZIP/DMG 严格流水线；要求已完成审查/签名的 arm64+x86_64 document runtime roots，在入 App 前后复验；可在签名后切换网络，并以 owner-only state 有界等待/恢复同一 App 或 DMG submission | 首次同时设置 `INTATIS_DOCUMENT_RUNTIME_ARM64_ROOT` / `INTATIS_DOCUMENT_RUNTIME_X86_64_ROOT`；需要时再设置 `INTATIS_PAUSE_BEFORE_NOTARIZATION=1`；超时后按脚本打印的 `INTATIS_RESUME_RELEASE_DIR` 命令恢复 |
-| `scripts/RendererValidationWatchdog.swift` | hash-pinned 单实例 renderer/session replay、telemetry、runtime-log audit 与 TERM→KILL containment | 通过经批准的 Release validation 命令调用 |
+- `SNAPSHOT.md` 中的 Intatis 仓库、commit、旧 target/path 是不可改写的来源事实；
+- `docs/INTATIS_MULTI_AGENT_MIGRATION_AUDIT.md` 和 dated reports 不是当前构建地图；
+- `NOTICE.md` 与 `ThirdPartyNotices/` 使用当前 Mopelium 路径描述分发闭包，同时保留 upstream 版权、许可证和来源 commit。
 
 ## 不确定项
 
-- 当前仓库没有 Git tag；HEAD/origin main 的里程碑提交不替代 `project.yml` 这一产品版本
-  唯一事实源。
-- `Apps/intatis-cli/Sources/Interactive.swift` 已由 `IntatisCLI.main` 经 `runMode` 接入，
-  不再列为未知。
-- 最终 notarization/staple/Gatekeeper、最低支持设备、第三方 provider/MCP/OAuth 与长时
-  性能矩阵仍是环境证据缺口，详见 `CURRENT_STATE.md` 和 `TESTING.md`。
+- 双架构签名 document runtime roots、notarized App/DMG 和 clean-machine acceptance 尚未完成；
+- 真实 provider、OAuth、长时 browser/profile、VoiceOver 与最低系统真实矩阵仍需单独授权和验证；
+- 旧 browser profile、Knowledge publication 和 managed Git worktree 的自动迁移只可在各自 owner/lock/drain 边界证明安全后继续，不能裸移动。

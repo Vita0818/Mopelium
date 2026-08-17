@@ -5,7 +5,7 @@ three upstream packages in the vendored SDK's final SwiftPM dependency graph.
 The Linux portable-crypto closure and the native libcurl transport closure
 have their own notices at `ThirdPartyNotices/SwiftCrypto.md` and
 `ThirdPartyNotices/MCPHTTPTransport.md`. None of these notices covers or
-authorizes an MCP server product: Intatis excludes every upstream server
+authorizes an MCP server product: Mopelium excludes every upstream server
 runtime, server transport, server/conformance executable, and hosting API.
 
 ## Official Model Context Protocol Swift SDK
@@ -25,11 +25,11 @@ runtime, server transport, server/conformance executable, and hosting API.
 
 The copied client source consists of the upstream Base, Client, and Extensions
 closure plus the client-consumed Completion, Logging, Prompts, Resources, and
-Tools wire schemas. Intatis moved those five wire-schema files out of the
+Tools wire schemas. Mopelium moved those five wire-schema files out of the
 upstream `Server` directory because they define data and JSON-RPC methods used
 by the client and do not host requests.
 
-Intatis modifications:
+Mopelium modifications:
 
 - replaces the nested upstream `Server.Info` and `Server.Capabilities` wire
   values with client-only `RemoteServerInfo` and
@@ -73,7 +73,7 @@ modification notice.
 
 The SwiftLog notice identifies derivations from Tony Stone's
 `process_test_files.rb` and from SwiftNIO scripts/locking code. SwiftNIO is not
-an Intatis MCP client package dependency.
+an Mopelium MCP client package dependency.
 
 ## EventSource
 
@@ -91,8 +91,8 @@ swift-docc-plugin, swift-atomics, and swift-collections are absent.
 
 ## Native production HTTP transport
 
-Production MCP HTTP/OAuth I/O uses the Intatis-owned
-`IntatisCurlTransport` boundary, not the SDK HTTP transport. macOS links the
+Production MCP HTTP/OAuth I/O uses the Mopelium-owned
+`MopeliumCurlTransport` boundary, not the SDK HTTP transport. macOS links the
 Apple system libcurl; the fully static Linux CLI incorporates libcurl,
 BoringSSL `libssl`/`libcrypto`, and zlib from the pinned official Swift Static
 Linux SDK. Exact artifact/SBOM/archive hashes, the Swift build recipe and

@@ -1,14 +1,14 @@
-# Web renderer 与 Intatis 原生渲染层对比
+# Web renderer 与 Mopelium 原生渲染层对比
 
 日期：2026-07-26
 
 ## 结论
 
-把这个实验的**行为合同**作为 Intatis 的参考是可行的；把 React、KaTeX、
+把这个实验的**行为合同**作为 Mopelium 的参考是可行的；把 React、KaTeX、
 CodeMirror 和会话驻留控制器整套塞进生产 App 的 `WKWebView` 则技术上可行、
 工程上不划算。当前直接接 App 的结论是 **NO-GO**。
 
-推荐保留现有 `IntatisMessageContentView`、plain-safe 熔断、64 KiB admission、
+推荐保留现有 `MopeliumMessageContentView`、plain-safe 熔断、64 KiB admission、
 latest-only scheduler 和原生 `DocumentView`，分阶段把缺失行为移植到
 `Vendor/SwiftStreamingMarkdown`。这个目录应继续作为独立参考实现和 DOM
 合同，不应直接成为 SwiftPM/XcodeGen 的运行时依赖。
@@ -36,11 +36,11 @@ raw source
 - `src/renderer/CodeBlock.tsx`
 - `src/renderer/urlPolicy.ts`
 
-### 当前 Intatis
+### 当前 Mopelium
 
 ```text
 raw message
-  → IntatisMessageContentView
+  → MopeliumMessageContentView
   → rich/plain-safe routing + exact raw fallback
   → 64 KiB admission + latest-only parse scheduling
   → vendored SwiftStreamingMarkdown / swift-markdown
@@ -51,14 +51,14 @@ raw message
 
 生产事实源：
 
-- `Packages/IntatisSharedUI/Sources/MessageRendering/IntatisMessageContentView.swift`
-- `Packages/IntatisSharedUI/Sources/MessageRendering/IntatisMicrosoftMarkdownPipeline.swift`
+- `Packages/MopeliumSharedUI/Sources/MessageRendering/MopeliumMessageContentView.swift`
+- `Packages/MopeliumSharedUI/Sources/MessageRendering/MopeliumMicrosoftMarkdownPipeline.swift`
 - `Vendor/SwiftStreamingMarkdown/Sources/MarkdownText/Parser/InlineMathPreprocessor.swift`
 - `Vendor/SwiftStreamingMarkdown/Sources/MarkdownText/UI/CodeBlockView.swift`
 
 ## 能力对比
 
-| 维度 | 独立 Web 实验 | 当前 Intatis 原生实现 | 判断 |
+| 维度 | 独立 Web 实验 | 当前 Mopelium 原生实现 | 判断 |
 |---|---|---|---|
 | Markdown | CommonMark、GFM table/task/autolink/strikethrough、hard break、source offsets | `swift-markdown` 0.8 + 原生 heading/list/table/quote/code 布局 | 主体已具备；soft/hard-break 和边缘语法仍需同 fixture 比对 |
 | 原始 HTML | 转成文字节点，不进入 HTML parser | 不存在浏览器脚本执行面；HTML 节点最终显示形态尚需 fixture 固定 | 安全目标一致，显示合同未完全等价 |
@@ -87,7 +87,7 @@ header、macOS/iOS 双平台资源和进程生命周期处理。它还会绕开�
 这条路与当前 Apple-first、Swift-native 优先及“本任务不引入生产依赖”的边界不符。
 
 如果下一步只想做同语料 A/B，而不是改默认 renderer，可以在
-`IntatisMessageContentView` 完成 role、plain-safe、revision、appearance 和
+`MopeliumMessageContentView` 完成 role、plain-safe、revision、appearance 和
 typography 判定后，增加仅启动参数可用的第三个实验 backend。Native→Web 只传
 `generation/rawText/isComplete/theme/typography/configVersion`；Web→Native 只回
 `generation/measuredHeight/link/copy/ready/failure`。所有回调必须 exact-generation
@@ -116,8 +116,8 @@ typography 判定后，增加仅启动参数可用的第三个实验 backend。N
 推荐接缝仍是：
 
 ```text
-IntatisMessageContentView
-  → IntatisMicrosoftMarkdownPipeline
+MopeliumMessageContentView
+  → MopeliumMicrosoftMarkdownPipeline
   → MarkdownRenderConfig
       → native math delimiter adapter
       → native code presentation adapter
@@ -146,7 +146,7 @@ disconnect，不会隐藏在另一个 tab panel。warm 状态只保留 session I
 输入事实源，随时可从 cold 重新投影。
 
 这层实现适合验证 teardown、timer cancellation、分页和 viewport release
-合同，但**不能**直接证明 ChatGPT 私有 thread tree、Intatis runtime 或 WebContent
+合同，但**不能**直接证明 ChatGPT 私有 thread tree、Mopelium runtime 或 WebContent
 进程会使用相同内存。真实生产方案还需要：
 
 - active + 1–2 warm 的全局 LRU/byte budget，而不是只按条目数；
@@ -176,7 +176,7 @@ Microsoft Edge 检查使用 DOM、computed style、clipboard 和
 
 尚未验证：
 
-- Web 实验与 Intatis native fixture 的逐语料视觉/辅助功能一致性；
+- Web 实验与 Mopelium native fixture 的逐语料视觉/辅助功能一致性；
 - 原生 block math 的布局和 selection；
 - 生产级 native 语法高亮供应链；
 - 低端 iOS 设备、超长消息与多会话长期 soak；

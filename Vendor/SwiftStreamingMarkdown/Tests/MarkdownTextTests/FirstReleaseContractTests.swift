@@ -6,7 +6,7 @@ import XCTest
 import AppKit
 #endif
 
-// Intatis regression coverage for the narrowed first-release production profile.
+// Mopelium regression coverage for the narrowed first-release production profile.
 final class FirstReleaseContractTests: XCTestCase {
   @MainActor
   func testSendingParserReturnsMainActorOwnedDocument() async {

@@ -35,7 +35,7 @@ final class ViewEquatableContractTests: XCTestCase {
 
   @MainActor
   func testParagraphViewEqualityTracksAttributedContentsAndLineSpacing() {
-    let attribute = NSAttributedString.Key("Intatis.ViewEquatableContract")
+    let attribute = NSAttributedString.Key("Mopelium.ViewEquatableContract")
     let firstContents = NSMutableAttributedString(string: "same paragraph")
     firstContents.addAttribute(attribute, value: "same", range: NSRange(location: 0, length: firstContents.length))
     let secondContents = NSMutableAttributedString(string: "same paragraph")

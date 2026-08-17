@@ -1,4 +1,4 @@
-// Intatis derivative validation. This file is not from upstream v0.6.0.
+// Mopelium derivative validation. This file is not from upstream v0.6.0.
 
 import Foundation
 import SwiftUI

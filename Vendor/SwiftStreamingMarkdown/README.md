@@ -1,15 +1,15 @@
-# SwiftStreamingMarkdown — Intatis-maintained vendored derivative
+# SwiftStreamingMarkdown — Mopelium-maintained vendored derivative
 
 This in-tree package is a dependency-minimal derivative of Microsoft’s
-SwiftStreamingMarkdown v0.6.0 for the first Intatis rich-message cutover.
+SwiftStreamingMarkdown v0.6.0 for the first Mopelium rich-message cutover.
 It retains the upstream Markdown parser and native SwiftUI/TextKit rendering
 path while deliberately narrowing optional behavior.
 
-The vendored source is maintained with the Intatis repository at
-`Vendor/SwiftStreamingMarkdown`. It is not an independently authored Intatis
+The vendored source is maintained with the Mopelium repository at
+`Vendor/SwiftStreamingMarkdown`. It is not an independently authored Mopelium
 renderer. Microsoft’s copyright and MIT license remain in `LICENSE`; the exact
 upstream basis and all local patch groups are recorded in
-`INTATIS_PATCH_LEDGER.md`.
+`MOPELIUM_PATCH_LEDGER.md`.
 
 ## First-release profile
 
@@ -23,11 +23,11 @@ upstream basis and all local patch groups are recorded in
   math on Apple platforms through a live TextKit 2 `MTMathUILabel` attachment
   provider; formulas preserve their source for literal fallback, copy,
   selection, and accessibility
-- Intatis production profile performs no syntax highlighting, image loading,
+- Mopelium production profile performs no syntax highlighting, image loading,
   or inline citation handling
 - no table download/copy actions, bundled media, or paragraph-view reuse cache
 
-The math profile is independently configurable and adds no Intatis-specific
+The math profile is independently configurable and adds no Mopelium-specific
 formula-count, per-formula byte, or fixed attachment-size cap. Code, currency,
 escaped delimiters, and malformed input stay literal. Formula views follow
 their inline/display presentation, semantic appearance, and Dynamic Type.
@@ -65,7 +65,7 @@ fallback.
 
 ## License and provenance
 
-Upstream code remains covered by Microsoft’s MIT license. The Intatis root Git
+Upstream code remains covered by Microsoft’s MIT license. The Mopelium root Git
 revision versions this vendored snapshot and its adjacent modification ledger.
 The consuming application must include notices for this derivative,
 `swift-markdown`, `cmark-gfm`, iosMath, and iosMath's bundled GUST/LPPL and OFL

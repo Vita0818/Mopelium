@@ -2,18 +2,18 @@
 
 ## Adoption status
 
-- Local component: `Packages/IntatisTools/Runtime/rbook-helper`
-- Reuse class: `dependency` inside an Intatis-owned `external-runtime` helper
-- Product scope: macOS/Linux document tools only; never linked into iOS
+- Local component: `Packages/MopeliumTools/Runtime/rbook-helper`
+- Reuse class: `dependency` inside an Mopelium-owned `external-runtime` helper
+- Product scope: macOS/Linux document tools only
 - Runtime protocol: fixed `json-v1` argv plus a versioned JSON envelope
-- Network: denied by the Intatis document process boundary
+- Network: denied by the Mopelium document process boundary
 - Distribution status in this task: buildable source and exact lockfile only;
   no universal signed helper binary is claimed to be bundled
 
 The helper does not copy rbook source. It calls rbook's public Rust API for a
 closed EPUB2/EPUB3 write subset and keeps permission review, path authorization,
 resource limits, staged output, EPUBCheck validation, and commit ownership in
-Intatis.
+Mopelium.
 
 ## Primary upstream
 
@@ -99,12 +99,12 @@ rejects command/environment injection, remote or active resource content,
 unreviewed assets, unsafe paths, symlinks, hard-to-interpret ZIP members,
 encrypted entries, duplicate member names, excessive expansion, and
 operations outside the closed subset. Every write is reopened and checked
-against operation postconditions before Intatis runs EPUBCheck and considers
+against operation postconditions before Mopelium runs EPUBCheck and considers
 the staged commit.
 
 ## Binary distribution gate
 
-Before a compiled helper is put into a signed Intatis distribution, the
+Before a compiled helper is put into a signed Mopelium distribution, the
 runtime-packaging task must additionally:
 
 1. build both supported architectures from this exact lockfile with the fixed
@@ -117,5 +117,5 @@ runtime-packaging task must additionally:
    document sandbox on a clean machine.
 
 Until that separate gate passes, a missing installed helper is reported as
-typed `backend_missing`; Intatis must not download a helper or switch to a
+typed `backend_missing`; Mopelium must not download a helper or switch to a
 different EPUB backend automatically.

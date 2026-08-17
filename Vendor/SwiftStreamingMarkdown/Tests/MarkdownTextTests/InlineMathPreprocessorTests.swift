@@ -1,4 +1,4 @@
-// Intatis derivative validation. This file is not from upstream v0.6.0.
+// Mopelium derivative validation. This file is not from upstream v0.6.0.
 
 import Markdown
 @testable import SwiftStreamingMarkdown
@@ -258,7 +258,7 @@ final class InlineMathPreprocessorTests: XCTestCase {
     )
   }
 
-  func testFormulaSourceHasNoIntatisByteAdmissionCap() {
+  func testFormulaSourceHasNoMopeliumByteAdmissionCap() {
     let formula = String(repeating: "x", count: 12 * 1_024)
     let output = preprocess("$\(formula)$")
 

@@ -7,27 +7,27 @@ OpenAI Codex commit `61a44880a85d2fd0d8770908dea5733495e571c8` for MCP
 `unicode-segmentation 1.12.0`. Exact crates.io checksums and licenses are
 recorded in `ThirdPartyNotices/MCPToolSearch.md`.
 
-It is a developer verification fixture only. It is not linked into Intatis,
+It is a developer verification fixture only. It is not linked into Mopelium,
 not included in an app target, and not an alternate runtime. It generates all
 input corpora in code. In particular, it does not copy or distribute
 `rust-stemmers/test_data`, whose separate license is outside this fixture.
 
-Run from the Intatis repository root:
+Run from the Mopelium repository root:
 
 ```sh
-CARGO_TARGET_DIR=/private/tmp/intatis-mcp-bm25-oracle-target \
+CARGO_TARGET_DIR=/private/tmp/mopelium-mcp-bm25-oracle-target \
 cargo fetch --locked \
   --manifest-path Tests/MCPBM25ParityOracle/Cargo.toml
 
-CARGO_TARGET_DIR=/private/tmp/intatis-mcp-bm25-oracle-target \
+CARGO_TARGET_DIR=/private/tmp/mopelium-mcp-bm25-oracle-target \
 cargo run --quiet --release --locked --offline \
   --manifest-path Tests/MCPBM25ParityOracle/Cargo.toml \
   -- ascii-tokenizer | shasum -a 256
-CARGO_TARGET_DIR=/private/tmp/intatis-mcp-bm25-oracle-target \
+CARGO_TARGET_DIR=/private/tmp/mopelium-mcp-bm25-oracle-target \
 cargo run --quiet --release --locked --offline \
   --manifest-path Tests/MCPBM25ParityOracle/Cargo.toml \
   -- stemmer | shasum -a 256
-CARGO_TARGET_DIR=/private/tmp/intatis-mcp-bm25-oracle-target \
+CARGO_TARGET_DIR=/private/tmp/mopelium-mcp-bm25-oracle-target \
 cargo run --quiet --release --locked --offline \
   --manifest-path Tests/MCPBM25ParityOracle/Cargo.toml \
   -- wide-bm25 | shasum -a 256
@@ -42,7 +42,7 @@ a876375f69ea0d7d7e8e60030760907b000652a4b39592d8fcf28ccbb1c68ead
 ```
 
 The corresponding Swift assertions are self-contained in
-`Packages/IntatisMCP/Tests/MCPBM25CodexParityTests.swift`:
+`Packages/MopeliumMCP/Tests/MCPBM25CodexParityTests.swift`:
 
 ```sh
 swift test --filter MCPBM25CodexParityTests
