@@ -1,332 +1,256 @@
-# CURRENT_UI_COLOR_SYSTEM — 系统原生表面与 Liquid Glass 规范
+# CURRENT_UI_COLOR_SYSTEM — 淡香槟暖色与无色原生 Liquid Glass
 
 文档状态：当前 UI 实施规范
-最近核对日期：2026-08-17
-产品基线：v0.10（build 49）
+最近核对日期：2026-08-18
+产品基线：v0.12（build 50）
 
-> Mopelium 不再把“系统外观”解释为固定的纯白和纯黑。页面、侧栏、内容层与控制层均使用 Apple 平台的动态语义资源；在支持的系统上，导航与交互控件采用原生 Liquid Glass。`docs/UI_COLOR_SYSTEM.md` 只保存上一版香槟金 / 暖中性色方案，不随当前方案修改。
+> Mopelium 沿用 `docs/UI_COLOR_SYSTEM.md` 记录的暖中性 / 香槟视觉方向，
+> 并以它取代此前“完全交给系统 accent 与 window background”的配色方案。
+> 当前值已按实际运行反馈校准：非玻璃层恢复可辨认的淡香槟暖度，所有交互与内容 Glass
+> 统一使用 SwiftUI 原生无色 Liquid Glass。品牌色不再进入 `Glass.tint`、按钮 tint 或
+> `.glassProminent`；透明材质只从下方暖色 canvas 自然取得环境色。
 
-当前唯一 App 是 macOS `MopeliumMac`；文中 dated iOS 构建结果只属于迁移前历史证据，不是当前产品或验证矩阵。
+当前唯一 App 是 macOS `MopeliumMac`。Chat 与 Code 的共享源码仍保留，但当前可见产品入口
+只有 Cowork；本文不把历史 iOS surface 当成当前产品或验收矩阵。
 
-## 1. 核心规则
+## 1. 视觉方向
 
-1. 不为浅色或深色模式声明固定 `.white`、`.black`、RGB、Hex 或取色器采样值。
-2. macOS detail 区使用系统 window surface；sidebar 交还 `NavigationSplitView` 自己渲染，不覆盖自定义底色。
-3. 除用户消息外的对话行（assistant / agent / system，包括失败 / 中断回复与媒介化 Agent 通信）直接继承系统 conversation canvas，不额外叠 Material、圆角或描边；用户消息是唯一对话气泡，使用原生 `Glass.regular`，不再叠加 accent 蓝色描边。tool、error、permission、artifact、Goal / Task 等专用结构化内容继续使用系统 `Material`。
-4. 功能层（导航、模式切换、composer、模型菜单、主要操作与紧凑交互控件）在 macOS 26 采用原生 Liquid Glass；内容层只允许用户消息气泡与 Cowork 紧凑 trailing status rail 两类明确例外。
-5. Liquid Glass 不铺满页面或整段 transcript，也不作为一般长文本或数据卡片的默认背景；用户消息气泡只包裹该条用户输入，其他对话正文仍直接位于 canvas。
-6. 文本、分隔线、强调色与错误色使用系统语义资源：`.primary`、`.secondary`、系统 separator、`.accentColor`、`.red` 等。
-7. 颜色不是状态的唯一信息通道；状态同时保留文字、图标或结构提示。
+当前视觉语言是：**可辨认的淡香槟暖色画布 + 克制强调 + 无色系统原生 Liquid Glass**。
 
-“系统原生”指由当前 Apple 平台实时解析的语义表面和材质，而不是把某一台设备上看到的像素颜色写死。取色器只能用于视觉核对，不能成为令牌来源。
+1. 暗色界面使用近中性炭灰渐变、柔和灰白正文和低色度淡香槟强调，不使用纯黑页面。
+2. 亮色界面使用近白暖灰渐变、深暖墨正文和淡香槟强调，不使用纯白页面。
+3. 淡香槟只用于 canvas、品牌、选中、焦点和少量非玻璃强调；不直接染 Glass，不承担状态色。
+4. assistant / agent / system 正文直接位于暖色 conversation canvas；只有用户消息拥有普通对话气泡。
+5. tool、permission、artifact、Goal、Task 与错误等结构化内容继续使用系统 Material 或专用原生 glass surface。
+6. 错误、警告、成功等状态继续使用系统红 / 橙 / 绿，并同时保留图标或文字；淡香槟不替代状态语义。
+7. 不恢复旧自绘玻璃。禁止用自绘 blur、高光、折射、阴影、shader 或静态渐变模拟 Liquid Glass。
 
-## 2. 表面层级
+## 2. 基础颜色令牌
 
-| 层级 | 当前实现 | 用途 |
+以下 Hex 是 `MopeliumTheme` 中按 sRGB 定义的设计 token，不是截图像素保证。
+Material、Glass、窗口状态、显示器 profile 和系统辅助功能仍会影响最终像素。
+
+| 令牌 | 暗色 | 亮色 | 当前用途 |
+|---|---:|---:|---|
+| `champagne` | `#ECD8BB` | `#ECD8BB` | 高明度淡香槟；暗色强调与暖色基准 |
+| `champagneAccent` | `#BCA17F` | `#BCA17F` | 可辨认的暖香槟强调；只用于非玻璃小面积 affordance |
+| `deepText` | `#F3EEE7` | `#302A23` | 标题、正文与主要信息 |
+| `softText` | `#BFB4A6` | `#736758` | 副标题、说明、非活动控件 |
+| `tertiaryText` | `#8E8171` | `#948676` | 占位、时间、低优先级元数据 |
+| `glassStroke` | `#CBBBA5` | `#DED0BE` | 暖色 Material / Glass 结构轮廓来源；不是 Glass tint |
+
+### 2.1 页面渐变
+
+`MopeliumSystemCanvas` 从左上到右下绘制三段固定品牌渐变：
+
+| 外观 | 色标 |
+|---|---|
+| Dark | `#1A1815` → `#211E19` → `#1C1A17` |
+| Light | `#FCFAF6` → `#F7EFE3` → `#FBF7F0` |
+
+这些颜色只属于 App detail canvas。macOS sidebar 继续由 `NavigationSplitView` 的系统材质拥有，
+不得为了追求完全同色而覆盖自定义侧栏背景。
+
+`MopeliumMacRootView` 同时以 `containerBackground(for: .window)` 把同一
+`MopeliumSystemCanvas` 注册为 WindowGroup 的系统容器背景，并隐藏 `.windowToolbar` 自己的 backing。
+因此 titlebar/toolbar 仍由 macOS 管理控件、拖拽与窗口状态，但右侧不再回退为系统白色；sidebar
+材质仍可独立延伸到左侧 titlebar。
+
+## 3. 语义映射
+
+`MopeliumThreadStyle.mopeliumMac` 是 App 向 SharedUI 注入颜色的语义边界：
+
+| 语义 | Dark | Light | 说明 |
+|---|---|---|---|
+| `primaryText` | `deepText` | `deepText` | 正文与主要标题 |
+| `secondaryText` | `softText` | `softText` | 次要信息 |
+| `tertiaryText` | `tertiaryText` | `tertiaryText` | 只读元数据 |
+| `accent` | `champagne` | `champagneAccent` | 品牌、选择、活动与焦点；不进入 Glass chrome |
+| `stroke` | `glassStroke × 22%` | `glassStroke × 52%` | 去黄后的通用分隔线 |
+| `cardStroke` | `glassStroke × 16%` | `glassStroke × 36%` | Material 内容卡轮廓 |
+| 所有普通 Glass | 无 tint | 无 tint | 原生 `Glass.regular` / `Glass.clear` / `.glass` |
+| destructive Stop | 系统 `.red` | 系统 `.red` | 唯一彩色 glass-button 语义例外 |
+| `error` | 系统 `.red` | 系统 `.red` | 错误与破坏性动作 |
+
+Glass 的材质、折射、光照、交互和 active / inactive window 行为全部由系统决定。当前源码不给
+Glass 传品牌色，因此不同组件不会因 tint 强度或 `.glassProminent` 再产生金黄 / 无色分叉。
+
+## 4. 原生 Liquid Glass 合同
+
+### 4.1 唯一允许的玻璃实现
+
+- 自定义 view 直接使用 `glassEffect(Glass.regular, in:)` 或
+  `glassEffect(Glass.clear, in:)`，需要交互时只追加系统 `.interactive()`。
+- 当前系统上的所有非破坏性玻璃按钮统一使用 `.buttonStyle(.glass)`；不得使用
+  `.glassProminent` 制造另一种有色 chrome。主要操作层级由位置、label weight、默认键盘动作和
+  accessibility 语义表达。
+- Stop 继续使用同一 `.glass` 形态与系统 destructive red；这是状态语义，不是品牌 tint。
+- 确实需要形变或相邻融合的交互 cluster 才使用 `GlassEffectContainer`。
+- macOS 26 以下的 `.regularMaterial` / bordered fallback 只作防御性源码路径；当前产品
+  deployment target 与验收面是 macOS 26。
+
+### 4.2 明确禁止
+
+- 不恢复历史 `intatisGlassCard` / `intatisGlassCapsule` 或同类 Mopelium 自绘替代物。
+- 不向 `Glass.regular` / `Glass.clear` 调用 `.tint(...)`，也不在 Glass button 的祖先层注入品牌 `.tint`。
+- 不手绘玻璃高光、内阴影、折射、噪声纹理、模糊层或动态光源。
+- 不用普通 `LinearGradient`、透明圆角矩形或截图资产冒充玻璃。页面品牌渐变是 canvas，
+  不是 glass implementation。
+- 不把玻璃铺成整页、整段 transcript 或所有普通数据卡。
+- 不把彼此独立、位置必须稳定的 Cowork status cards 放进会自动融合 / 重组 shape 的
+  `GlassEffectContainer`。
+
+### 4.3 SharedUI 原生 lowering
+
+`MopeliumLiquidGlassModifier` 与 `MopeliumClearLiquidGlassBackdrop` 直接构造系统
+`Glass.regular` / `Glass.clear`。SharedUI 不再维护 Glass tint environment key，也不在
+`MopeliumThreadStyle` 保存 user/passive tint。
+
+同文件的 `mopeliumSurfaceStroke(_:)` 只为现有 Material / Glass 结构轮廓注入暖色
+`cardStroke`，不替换或着色系统 surface。根视图统一设置它，避免业务 View 重复硬编码描边。
+
+## 5. 表面与组件映射
+
+| 层级 | 当前实现 | 颜色 / 材质职责 |
 |---|---|---|
-| Window | SwiftUI `.windowBackground`；macOS 13 使用 `NSVisualEffectView.Material.windowBackground` 兼容 | macOS detail 根表面 |
-| Sidebar | `NavigationSplitView` 原生 sidebar | macOS 导航栏及其 vibrancy / active-window 行为 |
-| Conversation text | 继承 Window / 系统容器 canvas | assistant / agent / system 对话正文，包括失败 / 中断时已产生的正文、Markdown 与公式；Chat 的恢复建议仍跟随正文，Code/Cowork 的错误说明统一进入右栏 |
-| User message bubble | 原生 `Glass.regular`；防御性 fallback 为 `.regularMaterial` | 唯一带外层气泡的对话角色；保持 trailing 对齐、既有宽度与 gutter，不加 accent 描边 |
-| Structured content | `.regularMaterial` / 原生 glass + 系统 separator | 正常 tool、permission、artifact、Goal / Task 等专用内容卡片，以及 Code/Cowork 右栏唯一的条件式错误卡片 |
-| Functional glass | `glassEffect`、`GlassEffectContainer`、`.buttonStyle(.glass/.glassProminent)` | composer、模型菜单、主要按钮、操作组、agent pill 等 |
-| Fallback | `.regularMaterial` 或系统 bordered button | macOS 13–15、iOS 16–18 等不支持 Liquid Glass 的部署目标 |
+| Detail canvas | `MopeliumSystemCanvas` | 近中性炭灰或近白暖灰三段渐变 |
+| Sidebar | `NavigationSplitView` 原生 sidebar | 系统 vibrancy / active-window；文字和 controls 使用主题语义 |
+| Conversation text | 直接继承 detail canvas | assistant / agent / system、Markdown、代码与公式 |
+| User message | 无色原生 `Glass.regular` | 唯一普通对话气泡，trailing 对齐，无自定义 stroke |
+| Structured content | `.regularMaterial` + 暖色语义 outline | tool、permission、artifact、Goal / Task 与错误内容 |
+| Functional glass | 无色 native regular glass / `.glass` buttons | composer、模型菜单、选择控件、主要操作 |
+| Cowork status rail | 独立无色 `Glass.clear` | permission、Agents、Goal、Tasks、条件式错误卡 |
 
-系统强调色用于焦点、选中态和 prominent 操作。Mopelium 不再以固定黑白代替系统 accent，也不自行模拟玻璃的高光、折射、阴影或动态响应。
+### 5.1 页面与侧栏
 
-## 3. 组件映射
+- detail 始终显示当前 Light / Dark 的暖色渐变。
+- sidebar 不设置 `MopeliumTheme.canvas` 或自定义 fill；模式图标、标题、session 选中态与
+  Settings 使用主题文字、accent 和 native interactive Glass。
+- window toolbar backing 必须隐藏，并由 `.window` container background 下的同一暖色 canvas 接管；
+  不得在 titlebar 另画白色/纯色矩形，也不得用 NSWindow 私有接线替代 SwiftUI 官方容器 API。
+- 当前选中模式与 ordinary agent 的 affordance 使用淡香槟，不再描述为系统蓝色或金黄色。
 
-### 3.1 页面与侧栏
+### 5.2 对话
 
-- macOS detail 区由 `MopeliumSystemCanvas` 渲染动态 window surface。
-- macOS sidebar 不设置 `MopeliumTheme.canvas` 或其他背景覆盖层；`NavigationSplitView` 继续提供系统侧栏材质，内部是 `Mopelium` 标题、带 SF Symbol 的 Chat/Code/Cowork 竖向三行导航、mode-specific session history/New 与底部 Settings 的连贯结构。只有当前模式行使用 interactive Liquid Glass。
-- iOS 继续由 `NavigationStack` / SwiftUI 容器提供原生根背景，不引入 Mopelium 私有页面色。紧凑 Chat 使用同一容器内的约 82% 左抽屉；抽屉与右移后的圆角主画布都只使用系统语义背景、Material、separator 和 glass controls，不复制参考应用的固定渐变或品牌资产。
+- 用户消息保持 trailing、既有最大宽度与 gutter，使用无色原生 `Glass.regular`；暖度来自 canvas。
+- assistant / agent / system 没有外层卡片、Material 或描边；失败 / 中断时已产生的正文也保持该规则。
+- 正常 tool、permission、artifact 和 task 是结构化内容，不适用“只有用户有气泡”的普通消息规则。
+- Code / Cowork 的 error、失败 trace、recovery 和失败 submission 继续只进入右栏唯一条件式错误卡。
 
-### 3.2 Chat
+### 5.3 Composer 与 controls
 
-- 用户消息保持 trailing 对齐和既有宽度合同，但外层改为原生 `Glass.regular`，不再绘制蓝色细线；这是唯一对话气泡。assistant / agent / system 正文，包括失败 / 中断回复，都没有外层卡片、底色或描边，Markdown、公式与恢复建议直接显示在系统 canvas 上。
-- assistant / agent 名称右侧的消息时间属于三级只读元数据，不加 badge、图标、头像、玻璃或独立容器；它跟随系统本地化，24 小时内仅时间、7 天内星期加时间、更早为年月日加时间。
-- composer 固定为两排：第一排左侧是模型选择控件，右侧是 Context / Input / Cached / Output / Time 只读 usage；Chat/Code/Cowork 的选择器共用原生 `Menu` 语义与 40pt 高 interactive Liquid Glass 胶囊。选择按钮关闭态只显示模型名，不显示 CPU/芯片图标、provider 名或 variant/reasoning 辅助文字；弹出菜单内部仍按 provider 分组并保留 variant 明细。第二排从左到右是当前产品面已有的附件或图像 action、原生多行 `TextField`、voice、唯一主操作位；voice 始终紧邻主操作左侧。
-- composer 第二排的附件/图像 action、voice 与主操作使用 40×40 原生圆形 glass/bordered control，输入容器单行最小高度同为 40，同行 spacing 为 8；多行输入只向上增长，左右按钮保持底边对齐。主操作 idle 时是 Send，工作时在同一位置替换为 `Button(role: .destructive)` + `stop.fill` 的系统红色 Stop，不并排显示两个操作。voice 不占用该唯一槽位：第一次点击开始录音，第二次点击停止并转写，结果只进入可编辑草稿。
-- composer 的附件、图像 action、voice、Stop 与 Send 复用 `.controlSize(.regular)`、圆形 button border shape 和系统原生 glass / bordered 表现；Send 使用 prominent 语义，Stop 使用系统 destructive/red 语义且不自绘。sidebar `Recent` 旁 `+` 则使用 `.controlSize(.small)`、圆形 border shape 与原生 glass，fitting size 为 30×30。没有对应能力的 Chat / Code 不凭空增加附件入口；voice 是四个 composer 共用的输入能力，不生成设置页或自动发送。
-- iOS 复用同一两排 composer 几何：第一排左侧是关闭态只显示模型名的原生 glass
-  `Menu`，右侧在有统计时显示 usage；第二排固定为左侧 paperclip Chat 功能菜单、中间
-  输入、右侧 voice + 唯一 Send/Stop。菜单中的图片生成必须继续使用已有能力；托管网络搜索仍是
-  后台透明路由，不生成 UI。通用附件链没有实现前不得伪装成可发送文件，也不得扩大
-  Chat-only 产品边界。
-- 现有 macOS Chat 与共享 Code/Cowork `Thinking…` 行在 spinner 后显示 phase-local elapsed 文案（例如 `15s Thinking…`）；秒数使用等宽数字并进入 accessibility label，等待行结束即停止并重置，不改变协议或模型内容。
+- 共享 composer 保持两排布局、40pt input / action 几何、voice 紧邻唯一 Send/Stop 和 bottom alignment。
+- model/profile label 与输入容器使用无 tint 的原生 interactive Glass。
+- attachment、voice、New、Send 与普通 actions 全部使用同一种 native `.glass`；不再使用
+  `.glassProminent`。Send 的主要层级由位置、图标、默认动作与可访问性表达。
+- Stop 保持同一 Glass 形态，但继续使用系统 destructive red。
 
-### 3.3 Code
+### 5.4 Cowork rail
 
-- 正常及失败 / 中断时已产生的 agent 对话正文继承系统 canvas；用户消息使用原生 `Glass.regular` 气泡。Plan、Workspace、权限提示和 artifact 仍属于专用结构化内容层，使用系统 Material。
-- Code 与 Cowork 共用名称右侧的低噪声消息时间；时间不参与 agent 状态、权限或任务完成语义。
-- header / workspace 操作与主要 CTA 属于功能层，使用原生 glass button。
-- Code inspector 是内容区内的系统风格 trailing status rail，使用稳定 outer width 决定显隐并继承系统 `.bar` / separator；不创建固定灰色或纯黑 / 纯白面板，也不向 window toolbar 动态增删 item。当前 page 的 runtime error、失败 trace、恢复建议、失败 submission 与全部 voice/composer 页面级错误经过去重后，只在 rail 最底部一张现有圆角 section 风格的“错误信息”卡片内显示；没有任何来源时完全不生成卡片。主 thread 与 composer 上方不得再出现同一错误，旧 `Recent Failures` section 不再存在。
+- rail 仍是同一 detail canvas 上的 trailing overlay，不创建整栏背景或 divider。
+- permission、Agents、Goal、Tasks 与错误卡各自使用稳定、无 tint 的原生 `Glass.clear` backdrop。
+- rail 的 348pt / 318pt 固定几何、10pt scroller clearance、Equatable boundary、单 ScrollView
+  和无坐标回写合同不因配色变化而改变。
 
-### 3.4 Cowork
+### 5.5 Material cards 与状态色
 
-- 用户消息与 Code 共用原生 `Glass.regular` trailing 气泡；其余 agent 对话正文共用无外框渲染。通用 Agent message、`information_requested`、`information_replied` 与其他 agent-to-agent 正文也使用同一普通回答版式，身份只显示 exact `sender->recipient`。正常 tool、permission 与 task 等专用结构化记录继续保留语义容器；error、失败 trace 与 recovery 文案不再占用 thread 中央区域。
-- Cowork trailing status rail 是用户明确指定的紧凑玻璃状态层：待处理权限 / 最近权限结果置顶，其后依次为 Agents、Goal、Tasks；当前选中 agent page 的 runtime error、失败 trace、恢复建议、失败 submission 与全部 voice/composer/inference/projection/session-storage 页面级错误经过去重后，在最底部同一张“错误信息”圆角卡片内显示。没有任何来源时不生成卡片或占位；失败 submission 的 Retry 位于该卡片内，主 thread 与 composer 上方不再重复错误。各 section 使用独立、稳定的系统原生 `Glass.clear` backdrop，不放进会融合或重组 shape 的 `GlassEffectContainer`。rail 作为 conversation detail 同一 canvas 上的 trailing overlay，不再使用 divider、整栏 `.bar` / Material 背板或固定灰底；主 thread 滚动容器延伸到 detail 最右侧，以 trailing scroll-content margin 给 cards 留位，原生滚动条保持在整个内容区最右端；rail 最右透明边缘不参与命中测试，不能遮挡滚动条交互。Cowork rail 不显示 Git。
-- 有 pending permission 且窗口可安全容纳 rail 时，rail 临时固定可见；窗口窄到无法容纳 rail 时，只在 composer 上方保留同一个低对比 Material 权限卡作为安全兜底。两种布局不得同时显示权限卡，也不得在 thread 顶部复制 Goal/Tasks 或保留对应占位高度。
-- Cowork session header 不显示独立 MCP Content 快捷按钮；该浏览能力位于
-  `Project Settings → MCP → Browse Content`。status rail 的显隐使用系统 compact 圆形
-  glass/bordered icon control，不用默认的横向 glass action chrome，也不进入 window toolbar。
-- Goal 操作、agent 操作、task action、项目设置按钮和紧凑 agent pill 属于功能层，可使用 Liquid Glass 并以 `GlassEffectContainer` 组织相邻效果。
-- 红、橙、绿继续只承担错误、等待 / 阻塞、成功等语义状态，并同时保留文字或图标。
+- `.regularMaterial` 继续通过下方暖色 canvas 取得环境混色；结构边界使用暖色 `cardStroke`。
+- error / destructive 使用系统 red；pending / blocked 使用系统 orange；completed 使用系统 green。
+- 淡香槟只表达品牌、active 与 selected；running/completed/failed 等状态继续使用系统语义和文字。
 
-### 3.5 模式切换与设置
+## 6. 代码事实来源
 
-- Chat / Code / Cowork、mode-specific sessions、New 和 Settings 位于同一个 sidebar navigation/session center；mode 是带 SF Symbol 的三行竖向按钮，仅选中行使用 interactive Liquid Glass，session 保留明确选中态与原生 Rename/Delete context menu。
-- 设置表单继续优先使用原生控件；主要操作按语义使用 glass 或 glass prominent，不画自定义黑白按钮。
+- `Apps/MopeliumMac/Sources/MopeliumDesign.swift`：固定 sRGB token、Light/Dark 页面渐变、
+  macOS semantic style 与 Material 卡片描边。
+- `Apps/MopeliumMac/Sources/MopeliumMacRootView.swift`：system sidebar、detail canvas、`.window`
+  container background、透明 window-toolbar backing 与统一结构描边。
+- `Packages/MopeliumSharedUI/Sources/ThreadSurfaces.swift`：无 tint 的原生 Glass lowering、统一
+  `.glass` button style 与 `mopeliumSurfaceStroke`。
+- `Packages/MopeliumSharedUI/Sources/Views.swift`、`CodeViews.swift` 和
+  `Apps/MopeliumMac/Sources/MopeliumChatScreen.swift`：三个无色用户消息 Glass 入口。
+- `Packages/MopeliumSharedUI/Sources/CoworkViews.swift`：无色 passive rail Glass。
+- `docs/UI_COLOR_SYSTEM.md`：重新启用的 palette 来源及旧实现 provenance；旧类型名和自绘玻璃
+  描述不是当前源码事实。
 
-## 4. API 与部署边界
+## 7. 可访问性与对比度
 
-- `glassEffect`、`GlassEffectContainer`、`.glass` 和 `.glassProminent` 只在 macOS 26 / iOS 26 及以上启用。
-- 当前产品 deployment target 是 macOS 26 / iOS 26；源码中的 Material / bordered fallback 只保留为防御性实现，不属于当前产品验收矩阵，也不能被替换成手绘静态“仿玻璃”。
-- `MopeliumSharedUI` 通过可用性检查共享实现，不反向依赖 macOS app target，也不扩大 iOS 的 Chat-only 产品边界。
-- 系统 Reduce Transparency、Increase Contrast、accent、active / inactive window 与其他辅助功能设置应由原生 API 自动响应，不能用固定值覆盖。
+- `deepText` 负责正文；淡香槟不作为长正文色，避免在浅色背景上承担不足的文本对比度。
+- `tertiaryText` 只用于时间、占位和低优先级元数据；关键信息必须使用 primary / secondary 层级。
+- active、pending、failed、completed 等状态必须同时有文字、图标或结构，不可只靠色相区分。
+- Reduce Transparency、Increase Contrast、active / inactive window、focus、hover 与按压光学继续由
+  原生 Material / Glass / control API 处理；不得以固定截图效果覆盖系统响应。
+- Light、Dark、Reduce Transparency、Increase Contrast、键盘焦点和 VoiceOver 必须作为运行态
+  验收项；源码使用语义结构不等于这些场景已经自动通过。
 
-## 5. 事实来源
+## 8. 验收清单
 
-- `Apps/MopeliumMac/Sources/MopeliumDesign.swift`：系统 window canvas、macOS 13 兼容表面、语义色与内容卡片。
-- `Apps/MopeliumMac/Sources/MopeliumMacRootView.swift`：系统 split-view sidebar 材质、title/竖向 icon mode/history/Settings 内部结构与 detail canvas。
-- `Packages/MopeliumSharedUI/Sources/ThreadSurfaces.swift`：用户消息原生 regular glass helper、结构化内容 Material、30×30 sidebar New 圆形 glass control、原生圆形 icon controls、40pt composer/selection-menu 几何合同、两排 composer、首排 usage strip 与可选 accessories。
-- `Packages/MopeliumSharedUI/Sources/Views.swift`：共享 Chat 消息和 composer；仅用户消息使用 glass 气泡，其余对话角色继承系统 canvas。
-- `Packages/MopeliumSharedUI/Sources/CodeViews.swift`、`CoworkViews.swift`、`ArtifactViews.swift`：各产品面的内容层 / 功能层映射。
-- `Apps/MopeliumMac/Sources/MopeliumChatScreen.swift`、`MopeliumMacApp.swift`：macOS Chat、设置与 home CTA。
+- Light detail 是近白暖灰渐变，Dark detail 是近中性炭灰渐变；两者都没有纯白 / 纯黑页面底。
+- sidebar 保留系统 `NavigationSplitView` 材质，窗口 active / inactive 时仍由系统响应。
+- titlebar/toolbar 右侧与 detail 使用同一暖色 window canvas，不得出现系统白色横条；左侧继续显示
+  sidebar 自有系统材质。
+- canvas、品牌和选中 affordance 呈可辨认的淡香槟暖度；Glass chrome 本身无色，不得出现棕黄。
+- 所有非破坏性 Glass button 使用同一 `.glass`，没有 `.glassProminent` 或祖先品牌 tint；Stop red 是唯一状态例外。
+- 只有用户普通消息有外层气泡，且能确认其为无 tint 的 native `Glass.regular`。
+- Cowork rail 各 card 是独立、无 tint 的 native `Glass.clear`；没有整栏自绘表面。
+- composer、model menu、New、voice、Send/Stop 的既有几何、focus、keyboard 与 accessibility
+  identifier 不因颜色改动而变化。
+- 搜索 active source 时，不存在历史自绘玻璃 modifier、shader、高光或阴影实现。
+- `MopeliumSharedUI` focused build/tests 与 `MopeliumMac` unsigned Debug build 通过。
+- 运行态至少核对 macOS Light 与 Dark；未检查的辅助功能或硬件环境必须标为 `UNKNOWN`。
 
-Apple 官方设计与 API 依据：
-
-- [Liquid Glass overview](https://developer.apple.com/documentation/TechnologyOverviews/liquid-glass)
-- [Adopting Liquid Glass](https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass)
-- [Applying Liquid Glass to custom views](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views)
-- [SwiftUI `glassEffect`](https://developer.apple.com/documentation/swiftui/view/glasseffect%28_%3Ain%3A%29)
-- [SwiftUI `windowBackground`](https://developer.apple.com/documentation/swiftui/shapestyle/windowbackground)
-
-## 6. 验收清单
-
-- 浅色界面是系统当前解析出的 window / sidebar / Material 外观，而非固定纯白。
-- 深色界面是系统当前解析出的 window / sidebar / Material 外观，而非固定纯黑。
-- 侧栏保留系统材质，前台 / 后台窗口状态切换时能够跟随系统。
-- Liquid Glass 主要出现在导航和交互功能层；内容层例外只包括用户消息气泡与用户明确指定的 Cowork 紧凑 trailing status rail。仅用户消息有外层对话气泡且不得叠加 accent 蓝色描边；assistant / agent / system（包括失败 / 中断回复）直接位于系统 canvas。专用结构化卡片继续使用 Material，页面与长 transcript 不整片玻璃化。
-- 支持的系统上使用真实 `glassEffect` / glass button；旧系统 fallback 仍由系统语义 Material / control 渲染。
-- macOS Chat / Code / Cowork 与 iOS Chat 的 Light / Dark 运行态都经过视觉核对；不能只用源码搜索或固定像素值推断。
-- thread header 显示 session display name；Code / Cowork header 使用紧凑顶部留白且 Cowork 不常驻 permission-reviewer 横幅；消息无 agent 头像与通用 Agent badge；正常 agent 回复无外层卡片；agent 名称旁有本地化三级时间元数据；macOS sidebar 模式为带图标的竖向三行且仅选中行使用玻璃，Recent New `+` 为 30×30 原生圆形 glass；macOS composer 第一排保持 40pt、关闭态仅模型名的 model/profile glass 菜单左、usage 右，第二排保持已有 action 左、输入居中、voice 紧邻唯一 Send/Stop 左侧。iOS 顶部固定 sidebar/session/new，抽屉为 serif `Mopelium`、选中 Chat、Recent/New 和底部 Settings，空页无 onboarding/建议卡；底部同样为 model/usage 第一排和 paperclip/input/voice/Send-or-Stop 第二排。两平台标题使用系统 serif、正文与控件使用系统 sans；两平台第二排 action/voice/stop/Send 与单行输入均为 40pt，输入变为多行时按钮底边不漂移；Cowork 宽屏 rail 第一位为权限审查、其后为 Agents/Goal/Tasks 且无 Git，pending 时 rail 固定；无法容纳 rail 时只显示一个权限兜底卡且不复制 Goal/Tasks。
-- macOS 与 iOS touched targets 均可编译，全量 SwiftPM 测试通过。
-
-静态复核重点：
+建议静态复核：
 
 ```sh
-rg -n 'MopeliumTheme\.canvas|scheme == \.dark \? \.black : \.white|Color\.(white|black)|LinearGradient' Apps Packages
-rg -n 'glassEffect|GlassEffectContainer|buttonStyle\(\.glass|regularMaterial|windowBackground' Apps Packages
+rg -n 'intatisGlass|mopeliumGlassCard|visualEffectBlur|shadow.*glass' Apps Packages
+rg -n 'Glass\.(regular|clear)\.tint|buttonStyle\(\.glassProminent|mopeliumNativeGlassTint' \
+  Apps/MopeliumMac Packages/MopeliumSharedUI
+rg -n 'Glass\.(regular|clear)|glassEffect|buttonStyle\(\.glass|LinearGradient' \
+  Apps/MopeliumMac Packages/MopeliumSharedUI
+rg -n 'Color\.(white|black)|Color\(\.sRGB|#[0-9A-Fa-f]{6}' Apps Packages
 ```
 
-第一组命中需要人工确认是否属于图标、图片或测试语境；任何页面 / 组件固定表面色都不符合本规范。第二组用于确认系统语义表面和玻璃入口仍存在。
+第三条命中必须人工确认：当前允许的固定品牌 token 只能集中在 `MopeliumTheme`；图像、PDF、
+测试 fixture 或系统状态色不属于 UI theme token。
 
-## 7. 2026-07-15 实施验证
+## 9. 历史边界
 
-- SwiftPM build 通过。
-- MopeliumMac macOS Debug 与 MopeliumiOS Simulator Debug 构建通过。
-- 使用 Computer Use 检查本轮构建的 Chat、Code、Cowork：Light 使用系统浅色 window / sidebar / Material，Dark 使用系统动态深灰层级而非纯黑；composer、CTA、模式切换和相关操作呈现原生控件 / Liquid Glass。
-- Light / Dark 验收使用 DEBUG-only 启动参数 `-MopeliumAppearanceLight` / `-MopeliumAppearanceDark` 隔离测试，不修改用户的全局系统 Appearance；生产启动不设置偏好，始终跟随系统。
-- 完整 SwiftPM 测试通过：605 tests，14 skipped，0 failures。
+- 2026-08-18 之前的 `CURRENT_UI_COLOR_SYSTEM.md` 版本记录了完全动态的 system window / accent 方案；
+  它已被本规范取代，只能从 Git 历史读取。
+- `UI_COLOR_SYSTEM.md` 的颜色和视觉方向重新成为当前来源，但其中 Intatis 文件路径、旧 iOS
+  映射、`intatisGlassCard` / `intatisGlassCapsule` 与自定义玻璃透明度算法仍是历史事实。
+- 本次视觉切换不修改字体、布局、EventLog、provider、权限、Agent 编排、session runtime 或分发边界。
+- 未引入第三方源码、图片、字体、Logo、shader 或其他视觉资产；App 图标直接使用
+  用户提供的 PNG 原始字节，仅由 Icon Composer 以 scale 0.95 接线，因此 `NOTICE.md` 无需更新。
 
-## 8. 未固定的部分
+## 10. 本次验证记录
 
-- 系统表面、Material、Liquid Glass、`.primary`、`.secondary`、separator、accent 和状态色的最终像素值不固定。
-- 不为不同墙纸、显示器 profile、Display P3 / HDR、Reduce Transparency、Increase Contrast 或 window focus 状态建立硬编码色表。
-- 本文规范视觉表面与颜色语义，不替代布局、动态字体、焦点、键盘操作和完整无障碍规范。
-
-## 9. 2026-07-21 OS26 UI shell 复验（历史）
-
-- 该次截图与 Computer Use 只验证当时的自定义纵向 mode/session 表面，以及“usage 独占上方一行、model/profile/attachment 位于输入容器”的旧布局。控制位置已被 2026-07-23 方案取代，不能继续作为当前像素、键盘或焦点行为的 Passed 证据。
-- 当时的 session-name header、无消息 agent 头像/通用 Agent badge和 Code/Cowork 原生 inspector 结论仍是历史事实。
-- `swift build`、MopeliumMac macOS Debug、MopeliumiOS Simulator Debug 与 `CoworkInferencePresentationTests` 4/4 通过。
-- Computer Use 在最新 Debug app 中只读检查了 Chat、Cowork 与宽屏 inspector；参考图和实现截图在同一比较输入中核对，结果见根目录 `design-qa.md`。
-- 本轮没有改字体 token、用户字体选择、EventLog/projection schema、权限链路、iOS chat-only target 边界或开源依赖。
-
-## 10. 2026-07-22 conversation surface 收口
-
-- Cowork 对话页删除常驻 permission-reviewer 顶部横幅；Code / Cowork session header 的顶部留白统一从 26pt 收紧为 12pt。真正待处理的 `PermissionCard`、permission FIFO 与权限引擎没有删除；横幅原有的 workspace reauthorization / automatic-review retry 只在异常时进入 Cowork Project Settings 的 Recovery 区。
-- macOS Chat、Code、Cowork 与共享 iOS Chat 的正常 assistant / agent 回复取消外层 Material、圆角和描边，正文、Markdown 与公式直接继承系统 canvas；用户消息、失败 / 中断回复、tool、error、permission、task 等结构化内容继续保留容器。
-- macOS Chat/Code/Cowork 与共享 iOS Chat 的 assistant/agent 名称右侧复用同一时间表现：首次 message envelope 定时，24 小时 / 7 天滚动分层，遵循当前 locale、时区和 12/24 小时偏好；流式完成不刷新为“完成时间”。
-- 没有硬编码白色背景，也没有修改字体。`MessageRenderingTests` 22/22、`swift build --disable-sandbox`、MopeliumMac macOS Debug 与 MopeliumiOS Simulator Debug build 通过；运行态 Light / Dark 和真实长回复视觉复核仍待用户检查。
-- 名称旁时间追加后的组合过滤实际执行 161 tests / 0 failures，SwiftPM 与 macOS/iOS Debug app target 再次构建通过；遵守 renderer NO-GO，没有启动 App/fixture，因此不同 locale、Light/Dark 和跨阈值长期停留仍未做运行态视觉结论。
-
-## 11. 2026-07-23 原生 List sidebar 与两排 composer（已撤销）
-
-- 该轮曾把 macOS 根侧栏收敛为单个 `List(selection:)`，以 `Section` 组织 mode、当前 mode 的 sessions 与 Settings，并采用 `.listStyle(.sidebar)`；此排布已被同日后续视觉修订撤销，不再代表当前实现。
-- composer 第一排为 model/profile 左、usage 右；第二排为当前已有附件/图像 action 左、`TextField` 居中、可选 Cowork stop 与 Send 右。`+`、附件、图像 action、stop 和 Send 使用统一 regular/circle 原生 glass/bordered control，Send 保持 prominent。Cowork selector 仍可在 busy 时选择且只冻结下一次 `@main` Send；没有新增 Chat/Code 附件能力，字体未改。
-- Swift parse、`swift build --target MopeliumSharedUI`、`MopeliumSharedUITests` 50/50、`PerAgentInferenceProfileTests` 20/20、`SubmittedIntentStoreTests` 11/11、`SubmissionProjectionTests` 4/4、XcodeGen、MopeliumMac macOS Debug 与 MopeliumiOS generic Simulator Debug build 均通过。
-- 本轮没有启动 App 或 renderer fixture；当前像素、sidebar 键盘/焦点、Light/Dark、Reduce Transparency 和真实窄宽布局仍为 `UNKNOWN`。
-
-## 12. 2026-07-23 sidebar 竖向导航恢复与 composer 几何修正
-
-- sidebar 当前为系统 `NavigationSplitView` 材质内的 `Mopelium` 标题、带 SF Symbol 的 Chat/Code/Cowork 竖向三行导航、mode-specific `Recent` history/New 与底部 Settings；仅当前模式行使用 interactive Liquid Glass。该状态取代同日较早的单一 `List(selection:)` 和横向 segmented control 修订；session Rename/Delete、busy delete gate 与 durable selection 逻辑保持不变。
-- `Recent` 旁 New `+` 使用 24pt label、`.controlSize(.small)`、圆形 button border shape 与原生 glass，fitting-size probe 为 30×30。composer 仍为两排；第一排 Chat/Code/Cowork 模型或 profile `Menu` 共用 40pt 高 interactive Liquid Glass 胶囊，关闭态只显示模型名，右侧 usage 保持只读且不伪装成按钮。
-- 第二排附件/图像 action/stop/Send 的 icon label 统一为 32×32，经原生 `.glass` / `.glassProminent` 或 bordered fallback 后得到 40×40 外观；输入容器单行最小高度为 40、间距为 8、圆角为 20。外层使用 bottom alignment，多行输入时按钮保持贴底。
-- 原生控件 fitting-size probe 确认 Recent `+` 为 30×30，plain native `Menu` 加共享 interactive glass label 后为 40pt 高；第二排 glass/glassProminent/bordered 按钮与单行输入均为 40pt。Swift parse、SharedUI build、`MopeliumSharedUITests` 50/50、`PerAgentInferenceProfileTests` 20/20、XcodeGen、macOS Debug 与 iOS generic Simulator Debug build 均通过。
-- 遵守 renderer NO-GO，本轮未启动 App 或 fixture；实际像素、sidebar 交互、Light/Dark、Reduce Transparency 和真实窄宽布局仍为 `UNKNOWN`。
-
-## 13. 2026-07-31 权限审查与消息标识收口
-
-- 待处理权限使用紧凑、左对齐的低对比 Material 卡片，不再用风险色描整张卡。风险色只用于小图标与 risk chip；tool、reason 与当前状态保持可扫读，结构化 scope 和 patch diff 默认收进 `Details`，避免长参数抢占对话主视觉。
-- `Details` 只展示 host 生成的结构化 action preview / intent / resource / touched path；raw JSON arguments 不进入通用详情列表。patch diff 仍可在用户主动展开后查看和选择，权限 action、RequestID/FIFO 与审批语义不变。
-- automatic reviewer 状态只显示进度，不暴露 Approve / Decline / Cancel；人工模式继续区分 `Approve Call`、`Decline Call` 与 `Cancel Turn`。resolved notice 收窄为同一低对比表面的紧凑状态行。
-- Chat、Code、Cowork 和共享 iOS Chat 的用户气泡继续靠右并保留既有 Material/宽度合同，但不再重复显示 `You`；assistant、agent、system 的 structured identity header 与 agent timestamp 保留。macOS sidebar 品牌块只显示 `Mopelium`。active Chat/Code/Cowork session header 和 sidebar Recent row 都只显示 session name，不在其下显示灰色 model/provider/host、workspace/state、agent/running、event/date/path/runtime metadata；空态首页与 Settings 的说明性 subtitle 不属于 session metadata，继续保留。
-- Computer Use 使用独立 bundle 的离线 Phase C fixture 验证了 Light/Dark、默认折叠、详情展开、automatic non-actionable 与 approved notice；另以本轮构建打开真实历史 Chat，只读确认侧栏品牌副标题、active session subtitle、Recent session detail 和用户气泡 `You` 均消失，并在 Cowork history 再核对单行 session row；未发送 provider 请求。当前截图与逐项对比记录见根目录 `design-qa.md`。
-
-## 14. 2026-08-02 iOS 与 macOS 设计语言统一（取代同日全局 serif 记录）
-
-- iOS 不再在 App 根视图设置全局 `.fontDesign(.serif)`。与 macOS 相同，serif 只用于
-  品牌 `Mopelium`、当前 session 和 Settings 页面标题；正文、composer、按钮、菜单、
-  表单与状态使用 Apple 系统 sans + Dynamic Type。Markdown/plain fallback、代码块、
-  公式和第三方声明继续与 macOS 共用 renderer 的语义字体，不增加字体文件。
-- 顶部中央从 model picker 改为 serif session title；model 选择移入 composer 第一排，
-  使用 13pt semibold sans、向下 chevron 与原生 interactive Liquid Glass capsule。
-  有 turn stats 时同排右侧显示共享 usage strip；第二排继续是
-  paperclip/input/voice/Send-or-Stop，voice 紧邻唯一主操作左侧。
-- 左抽屉采用 macOS 的同一信息层级：serif `Mopelium`、选中 Chat 玻璃模式行、`Recent`
-  session history/New 与底部 Settings；删除旧顶部 gear、假 search 占位和底部大 Chat CTA。
-  Settings 使用 serif 页面标题，原生 toolbar、section、说明和字段保持 sans。
-- iPhone 17e Simulator 已检查 Light/Dark 主界面、Light 抽屉、Settings 与主屏幕安装态；
-  根 `Mopelium.icon` 的 2026-08-02 22:26:51 版本正确显示为新版指针图标。对比图与详细
-  severity review 见根目录 `design-qa.md`。
-
-## 15. 2026-08-02 Cowork permission-first Liquid Glass rail（历史）
-
-- 用户提供的宽屏 Light 截图作为改造前基线；最新 Light 与 Dark 运行态截图和该基线
-  已放入同一比较输入。新 rail 第一位为待处理权限或最近权限结果，其后为 Agents、
-  可选 Goal、可选 Tasks；旧 `Git Status`、workspace path 和 Git 说明完全消失。
-- 当时版本由系统 `.bar` 提供区域分层，section 使用原生 `GlassEffectContainer` /
-  `glassEffect(.regular, in: .rect(cornerRadius: 18))`；该整栏 `.bar` 已由第 17 节的同画布
-  overlay 取代。两版都没有固定灰底、采样 RGB、自绘高光、假阴影或手写玻璃资产。
-- 权限卡允许宿主关闭其默认 Material，由 rail 的单层 glass 承担表面，避免双层卡片。
-  按钮仍使用原生 glass/bordered action style，并通过 `ViewThatFits` 在紧凑 rail 中换行；
-  permission action、keyboard shortcut 与 accessibility identifier 不变。
-- 980pt 及以上出现 live pending 时，rail 临时固定可见，权限卡只在 rail 中出现；
-  窄到无法安全容纳 rail 时，rail 和占位都移除，仅保留一个 composer 上方默认
-  Material pending 兜底。当前只读 session 没有 live pending，因此运行态实际截图覆盖
-  resolved notice，而 pending pin/fallback 由相同生产路径和 focused tests 验证。
-- 最新截图：
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/cowork-permission-rail-light.png`
-  与
-  `/Users/vita/.codex/visualizations/2026/08/01/019fbc6f-219c-7340-a461-92dc6f2794b7/cowork-permission-rail-dark.png`。
-  完整成对比较、severity review 与最终结论见根目录 `design-qa.md`。
-
-## 16. 2026-08-02 Settings 渐进披露与低噪声层级
-
-- Settings 默认只呈现完成日常 provider 配置所需的字段与 Test/Save。Base URL、Chat
-  endpoint、key source 和模型增删改使用原生 disclosure 渐进披露；切换 provider 时收起
-  低频分组，避免旧 provider 的展开状态形成视觉误导。
-- 页面只保留一个主要 provider 内容卡。`Advanced settings` 与 `Diagnostics` 使用 divider
-  和轻量行建立层级，不再以多个同权重大卡片堆叠；Advanced 展开后复用既有 MCP 表面，
-  避免 Material 套 Material。
-- 低频解释优先放入原生 help，而不是常驻正文。Diagnostics 默认文案限制为一行，明确本地
-  ZIP 且不上传；导出成功、失败和采集 warning 仍使用既有状态反馈，不隐藏行动结果。
-- 继续使用系统字体、语义色、Divider、DisclosureGroup 和原生 button style，没有新增固定
-  色、手绘玻璃或自定义资产。深色运行态已用改前/改后同窗截图和 AX 树检查；浅色、Reduce
-  Transparency 与 Increase Contrast 本轮未运行，不能仅凭语义 API 宣称已完成视觉验收。
-
-## 17. 2026-08-04 Cowork Agent rail 视觉收口
-
-- Cowork session header 再次收口为 durable session name 单行，不显示当前正在查看的 Agent；
-  当前选择仍由 Agents 行的选中背景表达，不保留不可见 subtitle 占位。
-- 宽屏 rail 仍是 conversation detail 同一 canvas 上的 trailing overlay，没有 divider、整栏
-  Material 或 `.bar` 背景。rail 使用更宽的稳定几何和更小的 leading inset，让原生 Liquid Glass
-  section 明确浮在画布上而不是形成独立侧栏；最右透明命中边界与主滚动条合同不变。
-- Agents section 使用更大的原生标题、18pt 内容 inset、52pt 最小行高和系统 semantic text/status
-  color。选中 ordinary agent 只显示 accent 蓝色圆角背景，不再叠加 checkmark；detached 和控制面
-  identity 继续由既有状态图标及是否可点击表达，颜色不是唯一状态通道。
-- Agents 按 identity 第一次 durable admission 的创建顺序稳定显示。实时消息、运行状态、detach
-  或 reattach 不会重排列表，从而避免用户点击目标移动，也避免为 last-message 排序扫描长会话。
-- rail 的“割裂”按光学层级处理，而不是再增加背景板：各 passive section 使用系统原生
-  `Glass.clear`（旧系统为 `.ultraThinMaterial` 语义 fallback），且 glass 位于与动态文字/选中背景
-  分离的稳定 backdrop。彼此独立的 status cards 不再放入 `GlassEffectContainer`，避免 selection、
-  focus 或邻卡内容变化触发整组 glass shape 的光学重组；不自绘渐变、投影或高光。
-- 宽屏几何由未压缩 outer width 唯一决定：rail 固定 348pt、glass card 固定 318pt，并单独保留
-  10pt 原生滚动条命中净空。选中 Agent、消息数量、文本长度、空态、rich/raw 状态或滚动条出现
-  都不得参与宽度计算。transcript 始终复用一个 `ScrollViewReader` / `ScrollView` 根，并先固定
-  `contentWidth` 与 thread raw width，再让 overlay 覆盖其上。
-- Agents 标题、名称、模型与 Goal/Tasks 的次级文字各提高一个系统文本层级。rail 顶部权限结果
-  只保留状态图标与“tool + decision”；pending 权限只保留 tool、安全摘要和必要 actions，risk chip、
-  raw arguments 与默认展开详情不进入 compact rail。人工 Approve/Decline/Cancel、automatic
-  non-actionable、RequestID/FIFO 与权限引擎语义不变。
-
-## 18. 2026-08-04 Cowork rail 窗口移动与切换稳定性（已被第 19 节取代）
-
-- rail 从参与父级布局的 trailing `ZStack` child 收口为 thread 上真正的
-  `.overlay(alignment: .trailing)`；348pt rail、318pt card 与 10pt scroller clearance 不变。
-- 本节记录的是被用户再次复现问题的第一版尝试：曾按 global origin 做 backing-pixel 补偿，并保留
-  一个收窄 interaction spacing 的 `GlassEffectContainer`。后续真实 Test session 证明该方案仍有
-  viewport preference 同帧重复更新，且 screen-global 补偿不是正确的窗口内布局依据，因此二者已删除。
-- 每个 passive glass 外叠系统动态 separator 的单物理像素 `strokeBorder`，固定的是结构轮廓而非
-  玻璃光线；没有固定 RGB、整栏 separator/Material 背板、自绘渐变、投影或高光。
-- 1372×768 Light 原生 fixture 中，Main/Research 的 Agents card 外轮廓均为 x=1076…1366；
-  切到 Finder 再返回的 rail crop 逐像素一致。该结果不替代 Dark、Reduce Transparency、
-  Increase Contrast、VoiceOver 或不同显示器 scale 的完整矩阵。
-
-## 19. 2026-08-04 Cowork rail 稳定 surface 与无坐标回写
-
-- rail 继续由 outer detail width 固定为 348pt、card 固定 318pt，并作为 trailing overlay；不做任何
-  screen-global origin 或 backing-pixel translation。
-- rail 使用仅含 Agents/permission/Goal/Tasks/selection/appearance 的 Equatable render snapshot；
-  transcript 的 empty/loading/page/rich 更新不会重新物化 rail subtree。
-- 每个 `Glass.clear` 位于独立稳定 backdrop；蓝色 selected-row 内容更新与原生 glass surface 分层。
-  independent cards 不共享 `GlassEffectContainer`，从根源上取消邻卡光学融合/重组。
-- Code/Cowork 删除 `MopeliumThreadViewportFramesPreferenceKey`、GeometryReader frame probe 和
-  `.global`/named coordinate comparison；raw bottom-anchor 改由系统 `onScrollVisibilityChange`
-  观察，窗口移动、focus 与全屏变化不再因 origin 改变触发布局 preference。
-- 85 个 MessageRendering/ThreadLayout/ThreadScrollCoordinator focused tests 通过；其中 AppKit host
-  交错完成 360 次 agent selection、mode、inspector 和 window size 变化。真实 Test 长历史完成
-  main/code-reader/doc-reader 连续切换、Xcode 失焦/回焦和全屏变化；同 viewport strip 中 card 外边界
-  保持一致，回焦 AX tree 无结构变化，且系统日志中旧 viewport preference warning 为 0。原生
-  全屏过渡仍出现一次 AppKit/ThemeWidget 的系统 negative-geometry warning；该 warning 未在 agent
-  或 focus 操作中复发，不作为 rail 通过证据，也不得误记成已消除全部 AppKit runtime warning。
-
-## 20. 2026-08-05 输入栏语音按钮
-
-- macOS Chat/Code/Cowork 与 iOS Chat 的 composer 第二排在唯一 Send/Stop 左侧新增同一个 40×40
-  原生圆形 voice control；它不改变第一排 model/usage，也不复制或挪动 Send↔Stop 主操作槽位。
-- idle 显示 `mic.fill`；第一次点击开始录音，recording 显示 `stop.fill`，第二次点击停止并转写；
-  requesting permission 与 transcribing 使用同一位置的 progress 状态。转写结果只追加到当前可编辑
-  草稿，不自动 Send，错误显示在 composer 本地状态区。
-- 该功能只复用顶层 `transcription_model` 与既有 provider 配置/importer，没有新增 Settings 字段、
-  页面、固定颜色、自绘图标或第三方视觉资产。English/简体中文按钮、状态、错误与麦克风 usage
-  description 已接入两端 bundle。后续把底层替换为 Flotis-derived WAV recorded-file runtime、
-  disk-backed upload 与 OpenRouter JSON adapter，没有改变上述 control 尺寸、位置或视觉状态，也没有
-  迁入 Flotis 的 panel、设置 UI、快捷键或输入法外观。
-- draft/config focused tests、完整 SwiftPM tests、XcodeGen、macOS Debug 与 iOS Simulator Debug build
-  已通过；本轮未启动 App、未请求真实麦克风权限，也未做 Light/Dark、窄宽、Dynamic Type、
-  VoiceOver 或真实录音的运行态视觉检查，因此这些像素与交互结果仍为 `UNKNOWN`。
-
-## 21. 2026-08-13 用户消息原生 Liquid Glass 气泡
-
-- macOS Chat、共享 iOS Chat 与 Code/Cowork 共用消息行都收敛为同一角色规则：只有用户消息
-  带外层气泡，继续保持 trailing 对齐、原 `messageMaxWidth` 与 gutter；其他对话角色直接位于
-  conversation canvas。
-- 用户气泡复用 `ThreadSurfaces.swift` 已有的 `mopeliumLiquidGlass`，在当前 macOS 26 / iOS 26
-  产品面使用原生 `Glass.regular`。旧 `.regularMaterial` 用户表面及 accent 蓝色细线描边已删除，
-  没有新增颜色 token、自绘高光、渐变、阴影或玻璃组件。
-- assistant/agent/system 的普通、失败与中断回复不再因 failure/recovery 状态获得外层容器。
-  Chat recovery advice 仍跟随原消息正文；Code/Cowork recovery advice 与错误事实统一迁入右栏，
-  正常 tool、permission、artifact、Goal/Task 等专用结构化卡片保持不变。
-- `ThreadLayoutTests` 18/18、`swift build --disable-automatic-resolution`、MopeliumMac macOS Debug
-  unsigned build 与 MopeliumiOS generic Simulator Debug unsigned build 均通过。未启动 App 或 fixture；
-  实际折射强度、长用户消息、Light/Dark、Reduce Transparency 与 Increase Contrast 仍需运行态观察。
-
-## 22. 2026-08-13 Code/Cowork 会话错误统一右置
-
-- `ThreadSurfaces.swift` 只在 presentation 层收集当前 page 的 `.error`、失败 tool/patch/note、
-  `recoveryAdvice`、失败 submission，以及宿主传入的所有页面级错误字符串；规范化后相同文案
-  合并为一项。Code/Cowork 不再用 `??` 丢弃同时存在的后续错误。
-- Code inspector 与 Cowork Liquid Glass rail 都只在列表非空时于最底部生成一张“错误信息”卡片；
-  卡片内部可列出多项错误。Cowork 的 retryable submission 保留 exact `SubmissionID` 与 Retry，
-  不另造自动重试。
-- thread 使用错误清理后的 presentation copy：完整移除 error/失败 trace 行和 recovery 文案，
-  清除用户行的 `Needs attention`/timeout 状态，同时保留用户消息、正常消息及已产生的 partial agent
-  正文。EventLog、`CodeProjection`、submission failure 和 runtime error 的 durable 数据均未改动。
-- `ThreadLayoutTests` 21/21、`swift build --disable-automatic-resolution`、MopeliumMac macOS Debug
-  unsigned build 与 MopeliumiOS generic Simulator Debug unsigned build 均通过。测试直接复现同一 timeout
-  同时来自失败 submission 与 `.error` 的截图场景，确认右栏去重为一项并保留 Retry；未启动 App 或
-  fixture，长错误滚动、Light/Dark 与窄宽实际像素仍需手动观察。
+- `swift build --target MopeliumSharedUI --disable-automatic-resolution`：通过；仅有既有
+  `onChange(of:perform:)` deprecation warning。
+- 原生 Glass surface 接线完成后，`swift test --filter MopeliumSharedUITests
+  --disable-automatic-resolution` 曾完整通过 153 tests、0 failures。淡香槟低色度校准后再次运行该
+  target 时，runner 在编译完成后长期无输出，约 4.5 分钟后人工中断，不将其计作通过或源码失败；
+  统一无色 Glass 与 window-toolbar 修复后运行直接覆盖 user-only native glass、composer、rail、
+  geometry、chrome 一致性与窗口背景接线的
+  `swift test --filter ThreadLayoutTests --disable-automatic-resolution`：23 tests、0 failures；
+  `testCurrentGlassChromeIsColorlessAndUnified` 明确禁止 Glass tint、`.glassProminent` 与祖先品牌 tint，
+  `testWindowToolbarUsesTheWarmWindowCanvas` 固定 `.window` container background 和透明 toolbar backing。
+- `swift build --disable-automatic-resolution`：通过。
+- `xcodegen generate`：通过；生成 `Mopelium.xcodeproj`。
+- `xcodebuild -quiet -jobs 4 -project Mopelium.xcodeproj -scheme MopeliumMac
+  -configuration Debug -destination 'platform=macOS' COMPILER_INDEX_STORE_ENABLE=NO
+  CODE_SIGNING_ALLOWED=NO build`：通过（exit 0）；只有仓库既有 warning，以及 Xcode 在若干成功
+  SwiftCompile 后打印的“command failed with exit code 0”噪音。
+- App/CLI 已改为 canonical-only Application Support：在本机 canonical 与 legacy 根同时存在的
+  默认环境中，`MCPCLIProcessOwnerTests.testShippingCodeStartupWithoutMCPAddsNoMCPStdout`
+  直接通过（1 test、0 failures），无需 `CFFIXED_USER_HOME`。排除 `TESTING.md` 已记录的两项
+  provider retry 基线冲突后，同一默认环境完整 SwiftPM command 最终 exit 0；真实
+  provider/browser/document-runtime 等 opt-in tests 按设计 skipped。未删除、合并或修改任一
+  Application Support 根。
+- active source 静态扫描确认 `Glass.regular.tint`、`Glass.clear.tint`、
+  `mopeliumNativeGlassTint` 与 `.glassProminent` 均为零命中；允许的当前实现只有
+  `Glass.regular` / `Glass.clear`、`glassEffect`、统一 `.glass` button style 与 canvas
+  `LinearGradient`，且没有历史自绘玻璃 modifier 命中。
+- 使用 `computer-use` Skill 检查本轮 Debug App：Light 模式 Settings 与用户截图中的
+  “确认空白 HTML 画布”会话均显示暖色 titlebar/detail 连续，右侧系统白条已消失，sidebar 材质、
+  traffic lights 与 toolbar control 保持原生。Dark、Reduce Transparency、Increase Contrast、
+  VoiceOver 与窗口 active/inactive 切换仍为 `UNKNOWN`。

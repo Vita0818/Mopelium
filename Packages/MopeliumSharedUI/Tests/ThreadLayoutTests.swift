@@ -266,6 +266,62 @@ final class ThreadLayoutTests: XCTestCase {
         XCTAssertFalse(codeSource.contains("private func bubbleStroke(isUser:"))
     }
 
+    func testCurrentGlassChromeIsColorlessAndUnified() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let packageRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let repositoryRoot = packageRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let surfaceSource = try String(
+            contentsOf: packageRoot
+                .appendingPathComponent("Sources/ThreadSurfaces.swift"),
+            encoding: .utf8)
+        let buttonStart = try XCTUnwrap(surfaceSource.range(
+            of: "private struct MopeliumGlassButtonModifier"))
+        let buttonEnd = try XCTUnwrap(surfaceSource.range(
+            of: "public extension View",
+            range: buttonStart.upperBound..<surfaceSource.endIndex))
+        let buttonModifier = surfaceSource[
+            buttonStart.lowerBound..<buttonEnd.lowerBound]
+
+        XCTAssertTrue(buttonModifier.contains("content.buttonStyle(.glass)"))
+        XCTAssertFalse(buttonModifier.contains(".glassProminent"))
+        XCTAssertFalse(surfaceSource.contains("Glass.regular.tint"))
+        XCTAssertFalse(surfaceSource.contains("Glass.clear.tint"))
+        XCTAssertFalse(surfaceSource.contains("mopeliumNativeGlassTint"))
+        XCTAssertTrue(surfaceSource.contains(".tint(.red)"))
+
+        let rootSource = try String(
+            contentsOf: repositoryRoot
+                .appendingPathComponent(
+                    "Apps/MopeliumMac/Sources/MopeliumMacRootView.swift"),
+            encoding: .utf8)
+        XCTAssertFalse(rootSource.contains(".tint(MopeliumTheme."))
+    }
+
+    func testWindowToolbarUsesTheWarmWindowCanvas() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let repositoryRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let rootSource = try String(
+            contentsOf: repositoryRoot
+                .appendingPathComponent(
+                    "Apps/MopeliumMac/Sources/MopeliumMacRootView.swift"),
+            encoding: .utf8)
+
+        XCTAssertTrue(rootSource.contains(
+            ".containerBackground(for: .window)"))
+        XCTAssertTrue(rootSource.contains(
+            ".toolbarBackgroundVisibility(.hidden, for: .windowToolbar)"))
+        XCTAssertFalse(rootSource.contains("toolbarBackground(Color.white"))
+    }
+
     func testThreadErrorsCollectEveryConversationSourceAndLeaveTranscriptClean() throws {
         let submissionID = SubmissionID(rawValue: "submission-timeout")
         let timeout = "Task timed out after 600 seconds."

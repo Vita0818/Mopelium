@@ -1,28 +1,34 @@
-# UI_COLOR_SYSTEM — 上一版配色方案
+# UI_COLOR_SYSTEM — 香槟金配色来源与历史实现记录
 
-文档状态：历史视觉方案；冻结于 v0.21 之前
+文档状态：当前配色来源；旧实现细节仍按历史语境保留
+重新启用：2026-08-18
 历史语境核对：2026-08-03
 
-> **本文已被 `CURRENT_UI_COLOR_SYSTEM.md` 完全取代。**
+> **本文中的暖中性色与香槟方向继续作为来源，但旧金色数值不再是当前 token。**
 >
-> 本文中的暖中性色、香槟金和自定义玻璃体系只记录 Intatis 之前的配色，不代表当前
-> 源码或下一版方向，也不得作为新增 UI 的默认要求。
+> 当前实现以 `CURRENT_UI_COLOR_SYSTEM.md` 为精确规范：原方案已按用户运行反馈校准为
+> 非玻璃层可辨认的淡香槟暖度，以及统一无色的 Glass chrome；同时不恢复
+> `intatisGlassCard` / `intatisGlassCapsule` 等自定义玻璃实现。所有玻璃继续使用
+> SwiftUI 原生 `Glass.regular` / `Glass.clear`、`glassEffect` 与 glass button style，
+> 但不再调用 `Glass.tint`、注入祖先 button tint 或使用 `.glassProminent` 制造有色分支。
 
-本文正文中“当前源码”“迁移前”等措辞均以 2026-07-14 的历史快照为语境。当前实现已改用
-Apple 动态语义表面、Material 和原生 Liquid Glass；当前事实与验收清单只看
-`CURRENT_UI_COLOR_SYSTEM.md` 和源码。
+本文正文中“上一版”“当前源码”“迁移前”等措辞仍以 2026-07-14 的历史快照为语境，
+用于保存原方案的 provenance 与旧组件映射；它们不表示旧的自绘玻璃代码重新成为事实。
+当前 token 用法、无色原生 Glass、组件边界与验收清单只看 `CURRENT_UI_COLOR_SYSTEM.md`
+和源码。
 
-本文保留旧值仅用于视觉对照和 provenance；不要据此恢复已删除的固定 RGB/Hex、渐变、
-品牌金或自绘玻璃。
+本文保留的固定 RGB/Hex、页面渐变与品牌金只作为历史 provenance；当前实际数值以
+`CURRENT_UI_COLOR_SYSTEM.md` 为准。旧自绘玻璃、旧 target/类型名和历史 iOS 映射仍只用于对照，
+不得据此恢复。
 
-## 1. 上一版视觉方向
+## 1. 重新启用的视觉方向
 
-macOS 的上一版视觉语言是：**暖中性底色 + 克制的香槟金强调 + 半透明玻璃层次**。
+macOS 当前沿用的视觉语言是：**淡香槟暖色底 + 非玻璃强调 + 无色系统原生 Liquid Glass 层次**。
 
 - 大面积背景保持暖黑、暖白和低饱和中性色，不用金色铺满界面。
-- 香槟金主要表示品牌、选中、主操作、运行中和强调信息。
+- 淡香槟主要表示 canvas、品牌、选中和非玻璃强调，不染 Glass chrome，也不替代状态色。
 - 正文使用暖墨色而非纯黑/纯白，次级文字降低明度和对比度。
-- 卡片、输入区、助手气泡和侧栏通过暖色玻璃底、细描边及系统 Material 建立层次。
+- 卡片、输入区、用户气泡和 rail 通过无色原生 Glass、暖色环境 canvas、细描边及系统 Material 建立层次。
 - 成功、等待和失败仍使用系统语义色，避免用品牌金承担所有状态含义。
 
 上一版暗色界面的总体观感是暖黑棕背景、石墨色玻璃侧栏、象牙白文字、低饱和沙金用户气泡和深色玻璃助手气泡；亮色模式对应为暖白、奶油色描边与深暖墨文字。
@@ -161,20 +167,22 @@ Code 中的低/中/高风险也分别使用系统 `.green` / `.orange` / `.red`�
 
 共享 iOS Chat 的 `MessageRow` 在迁移前源码中仍直接使用：用户 `.accentColor` 12%，其他角色 `.gray` 10%，tag 使用 `.accentColor` 及其 14% 背景。这是旧实现当前事实，不应误写成 macOS 香槟金主题已经覆盖 iOS，也不表示下一版必须保留系统强调色。
 
-## 9. 新配色迁移约束
+## 9. 当前重新启用边界
 
 - SwiftUI Material、透明度、窗口后方内容、系统 vibrancy、显示器色彩管理都会影响最终像素；本文 Hex 是源令牌，不是截图像素保证。
-- `.primary`、`.secondary`、`.accentColor`、`.green`、`.orange`、`.red`、`.yellow` 和系统黑/白均可能自适应，除非源码另有固定 RGB，否则不得编造固定 Hex。
-- 本文不是下一版配色 brief；新方案未明确前，不得从上一版令牌自行推断“只换一个强调色”或默认保留香槟金、暖黑、沙色与玻璃材质。
-- 新方案应先明确基础令牌、语义令牌、明暗模式、状态色、组件映射、macOS/iOS 一致性和迁移边界，再修改业务 View。
-- 迁移期间应区分上一版令牌与新令牌，避免同名 token 在不同界面表达不同语义；完成迁移后删除无引用旧令牌，而不是长期叠加两套隐式主题。
+- 当前固定品牌 RGB 只能集中在 `MopeliumTheme`；业务 View 不得散落新 Hex、截图采样值或用 `.white` / `.black` 绕过主题语义。
+- 本文提供 palette 来源，不单独决定当前组件实现。准确的无色 native Glass、Material、消息、composer、rail 和 sidebar 映射以 `CURRENT_UI_COLOR_SYSTEM.md` 与源码为准。
+- 重新启用香槟方向不等于恢复旧自绘玻璃。`intatisGlassCard` / `intatisGlassCapsule` 的 fill/stroke/shadow 算法仍是历史记录；当前 Glass 只允许系统未着色的 `Glass.regular` / `Glass.clear` 与 `.glass` button style。
+- macOS titlebar/toolbar 使用 SwiftUI 官方 `.window` container background 与透明 toolbar backing
+  露出同一暖色 canvas；不得恢复系统白条、另画 titlebar 表面或用 AppKit 私有窗口接线复制该能力。
 - 跨平台组件仍应接收语义样式并由平台注入，不得让 SharedUI 反向依赖 macOS target。
-- 新方案至少检查暗色、亮色、提高对比度和降低透明度场景；关键信息不能只通过色相区分。
-- 开始和完成迁移时，应同步更新本文、`CURRENT_STATE.md`、`PROJECT_MAP.md`、`NEXT_TARGET.md` 与相关视觉验证记录；在源码尚未迁移完成前必须明确标注混合状态。
+- 当前唯一 App 是 macOS；历史 iOS 表格不构成产品面或验收矩阵。
+- 至少检查暗色、亮色、提高对比度和降低透明度场景；关键信息不能只通过色相区分。
+- 配色变化必须同步更新本文、`CURRENT_UI_COLOR_SYSTEM.md`、`CURRENT_STATE.md`、`PROJECT_MAP.md` 与相关视觉验证记录。
 
-## 10. 上一版未固定的部分
+## 10. 仍未固定的部分
 
-- 系统 Material 在不同 macOS/iOS 版本和设备上的最终混色值未固定。
-- iOS `accentColor` 的实际值取决于 App/系统配置，上一版源码没有声明一个可作为产品规范的固定 Hex。
+- 系统 Material 与原生 Liquid Glass 在不同 macOS 版本、设备、窗口状态和辅助功能设置下的最终混色值未固定。
+- 当前 Glass 固定为无 tint；系统如何从下方暖色 canvas 产生高光、折射、模糊和交互反馈仍不是 Mopelium 的像素合同。
 - Display P3、HDR、特定显示器 profile 下的像素差异未建立独立基准。
-- 本文只记录上一版配色体系，不替代下一版设计 brief，也不替代布局、交互、动态字体和完整无障碍规范。
+- 本文不替代布局、交互、动态字体和完整无障碍规范；精确当前实施合同仍以 `CURRENT_UI_COLOR_SYSTEM.md` 为准。

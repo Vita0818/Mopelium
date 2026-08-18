@@ -1,8 +1,18 @@
 # TESTING
 
+## 外部依赖与禁止兜底验证（Vitemis 强制规则）
+
+本项目继承 `/Users/vita/Vitemis/docs/DEPENDENCY_POLICY.md`。涉及外部能力的变更必须验证：
+
+- exact 外部依赖可用时只调用其官方 API/扩展点，不调用第一方重复实现。
+- 依赖缺失、版本不兼容或构建/签名/许可证/平台/安全条件不成立时，产生明确、可诊断失败并停止该能力。
+- 失败路径不会切换到 legacy、另一 provider/backend、adapter/shim、cache、mock、简化实现或不完整路径。
+- 测试 double 只存在于测试 target，不进入 production selection 或 runtime fallback。
+- Review 检查新增 wrapper/adapter/facade 是否仅为官方 API 必需的最薄接线；发现核心能力复制、第二实现或静默降级即判定失败。
+
 文档状态：当前验证矩阵
-最近核对：2026-08-17
-产品基线：v0.10（build 49）
+最近核对：2026-08-18
+产品基线：v0.12（build 50）
 
 历史测试数字和 pre-migration Intatis target 结果保留在 Git 历史与 dated reports，不替代当前 Mopelium working tree 验证。
 
@@ -24,11 +34,11 @@ scripts/check-version-consistency.sh
 
 必须同时满足：
 
-- `project.yml`：`MARKETING_VERSION=0.10`、`CURRENT_PROJECT_VERSION=49`；
-- `Apps/MopeliumMac/Info.plist`：`0.10 (49)`；
+- `project.yml`：`MARKETING_VERSION=0.12`、`CURRENT_PROJECT_VERSION=50`；
+- `Apps/MopeliumMac/Info.plist`：`0.12 (50)`；
 - `Mopelium.xcodeproj`：相同版本且只有 `MopeliumMac` App scheme；
 - README、文档入口、CURRENT_STATE、PROJECT_MAP：相同基线；
-- 最终 App：版本 `0.10 (49)`、Bundle ID `com.Vita0818.Mopelium`、executable `MopeliumMac`。
+- 最终 App：版本 `0.12 (50)`、Bundle ID `com.Vita0818.Mopelium`、executable `MopeliumMac`。
 
 ## SwiftPM 基线
 
@@ -60,7 +70,7 @@ swift test --filter MopeliumCLITests
 至少运行：
 
 ```sh
-swift test --filter ProductIdentityMigrationTests
+swift test --filter MCPCLIProcessOwnerTests/testShippingCodeStartupWithoutMCPAddsNoMCPStdout
 swift test --filter CLIConfigRuntimeBudgetTests
 swift test --filter MopeliumProvidersTests/testLegacyProductAdapterNamesCanonicalizeToMopelium
 swift test --filter WorkspaceLeaseTests
@@ -71,8 +81,8 @@ swift test --filter ToolRegistryLeaseTests
 
 必须证明：
 
-- Application Support 只有 canonical 缺失且 legacy 安全时才在稳定锁内原子 rename；device/inode 保真；dual roots 与 symlink fail closed；EventLog bytes 不变；
-- Bundle ID 变更后的 UserDefaults 只按 allowlist 导入且不覆盖 canonical key；
+- App/CLI shipping composition 不调用 `ApplicationSupportIdentityMigrator`，只使用 canonical Mopelium root；旧 Intatis 根与 canonical 根同时存在时仍可正常启动；
+- macOS App 启动不读取旧 bundle domain，也不导入旧 UserDefaults key；
 - `MOPELIUM_*`/Mopelium config 优先，旧 `INTATIS_*`/Intatis paths 仅在 canonical 缺失时读取；
 - legacy secret/config paths 继续进入 SecretScanner 与 terminal deny floor；
 - old adapter IDs 规范化并只重新编码 Mopelium，unknown adapter byte-exact；
@@ -197,7 +207,24 @@ plutil -extract CFBundleIdentifier raw -o - <App>/Contents/Info.plist
 lipo -archs <App>/Contents/MacOS/MopeliumMac
 ```
 
-必须为 `0.10`、`49`、`com.Vita0818.Mopelium` 和 `arm64 x86_64`。工程 inventory 必须证明没有 iOS/App Store target 和 App Sandbox entitlement。
+必须为 `0.12`、`50`、`com.Vita0818.Mopelium` 和 `arm64 x86_64`。工程 inventory 必须证明没有 iOS/App Store target 和 App Sandbox entitlement。
+
+App 图标变更还必须验证：
+
+```sh
+test -f <App>/Contents/Resources/Mopelium.icns
+xcrun assetutil --info <App>/Contents/Resources/Assets.car | rg 'Mopelium|Mopelium.iconstack'
+```
+
+当前 Icon Composer 源必须是 `Mopelium.icon/Assets/Mopelium.png` 的单层 scale-0.95 图，
+该 PNG 必须是 1254×1254 RGB、无 alpha，SHA-256 为
+`4199874c81c488c23579d4b8e431941fceb488690b05ce3b53ab778d62542ca1`；
+`Info.plist` 的 `CFBundleIconFile` / `CFBundleIconName` 必须同时为 `Mopelium`。
+
+人工检查图标变更时，先正常退出 App，再对最终 bundle 执行 touch、LaunchServices `-u` / `-f`，
+重启 `iconservicesagent`、`sharedfilelistd`、Dock 与 Finder，随后用 `open -na <App>` 启动新进程。
+最终应通过 `NSWorkspace.shared.icon(forFile:)` 或 Finder/Dock 实际显示复核系统缓存图标；不得因缓存
+仍旧就反复改源码，也不得删除不属于 Mopelium 的全局缓存目录。
 
 ## Developer ID 直接分发
 
@@ -222,7 +249,16 @@ MOPELIUM_NOTARY_PROFILE=<profile> \
 
 ## 当前直接结果
 
-2026-08-17 内部 identity migration 当前直接结果：
+2026-08-18 v0.12 / App 图标变更直接结果：
+
+- `xcodegen generate` 与 `scripts/check-version-consistency.sh`：通过，工程版本为 `0.12 (50)`；
+- `MopeliumMac` unsigned Debug 与 unsigned universal Release：通过；Release executable 为 `x86_64 arm64`；
+- Debug/Release bundle 读回版本 `0.12 (50)`、Bundle ID `com.Vita0818.Mopelium`、图标名 `Mopelium`；
+- `Mopelium.icns` 存在，`Assets.car` 包含 `Mopelium` 多尺寸 rendition 和 `Mopelium.iconstack`；
+- 编译后 ICNS 转为 PNG 的视觉检查通过；未重启 LaunchServices/IconServices/Dock/Finder 验证已安装 App 的系统缓存；
+- 本次未运行 SwiftPM test suite；未运行真实 provider、Developer ID 签名、公证、staple、Gatekeeper、安装、上传或发布。
+
+2026-08-17 内部 identity migration 历史直接结果：
 
 - `swift package dump-package`：通过，Mopelium package、15 libraries、3 internal targets、CLI、15 tests、macOS-only platform；
 - `swift build --disable-automatic-resolution`：四次通过；只有既有 warning；

@@ -1,7 +1,7 @@
 # Mopelium
 
-当前版本：**v0.10**（build 49）
-状态：pre-1.0；源码与构建可验证，v0.10 Developer ID 发行候选尚待完成最终公证验收。
+当前版本：**v0.12**（build 50）
+状态：pre-1.0；源码与构建可验证，v0.12 Developer ID 发行候选尚待完成最终公证验收。
 
 Mopelium 是 Apple-first、Swift-native 优先的本地 AI 工作区。唯一 App 产品是 macOS
 Developer ID/direct-distribution `MopeliumMac`；CLI 提供 headless Chat/Code/Cowork 和外部 MCP

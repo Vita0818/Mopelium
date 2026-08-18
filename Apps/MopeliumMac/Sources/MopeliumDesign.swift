@@ -2,74 +2,78 @@
 //  MopeliumDesign.swift
 //  MopeliumMac
 //
-//  Mopelium delegates its palette to macOS. The window canvas, content material,
-//  separators, accent, and Liquid Glass all remain dynamic system resources;
-//  no sampled or fixed light/dark background values live here.
+//  Mopelium's warm-neutral/champagne palette. Glass optics remain owned by
+//  SwiftUI's native Liquid Glass APIs; these tokens only provide color.
 //
 
 #if canImport(SwiftUI)
 import SwiftUI
 import MopeliumSharedUI
-#if canImport(AppKit)
-import AppKit
-#endif
 
 // MARK: - Color tokens
 
 enum MopeliumTheme {
-    static func deepText(_: ColorScheme) -> Color { .primary }
-    static func softText(_: ColorScheme) -> Color { .secondary }
-    static func tertiaryText(_: ColorScheme) -> Color { .secondary.opacity(0.72) }
-    static func accent(_: ColorScheme) -> Color { .accentColor }
+    static let champagne = sRGB(0xECD8BB)
+    static let champagneAccent = sRGB(0xBCA17F)
 
-    static func separator(_: ColorScheme) -> Color {
-        #if canImport(AppKit)
-        return Color(nsColor: .separatorColor)
-        #else
-        return .secondary.opacity(0.28)
-        #endif
+    static func deepText(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? sRGB(0xF3EEE7) : sRGB(0x302A23)
     }
 
-    static func selectedStroke(_: ColorScheme) -> Color {
-        .accentColor.opacity(0.72)
+    static func softText(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? sRGB(0xBFB4A6) : sRGB(0x736758)
+    }
+
+    static func tertiaryText(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? sRGB(0x8E8171) : sRGB(0x948676)
+    }
+
+    static func accent(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? champagne : champagneAccent
+    }
+
+    static func pageGradient(_ scheme: ColorScheme) -> [Color] {
+        scheme == .dark
+            ? [sRGB(0x1A1815), sRGB(0x211E19), sRGB(0x1C1A17)]
+            : [sRGB(0xFCFAF6), sRGB(0xF7EFE3), sRGB(0xFBF7F0)]
+    }
+
+    static func separator(_ scheme: ColorScheme) -> Color {
+        let base = scheme == .dark ? sRGB(0xCBBBA5) : sRGB(0xDED0BE)
+        return base.opacity(scheme == .dark ? 0.22 : 0.52)
+    }
+
+    static func cardStroke(_ scheme: ColorScheme) -> Color {
+        let base = scheme == .dark ? sRGB(0xCBBBA5) : sRGB(0xDED0BE)
+        return base.opacity(scheme == .dark ? 0.16 : 0.36)
+    }
+
+    static func selectedStroke(_ scheme: ColorScheme) -> Color {
+        champagneAccent.opacity(scheme == .dark ? 0.46 : 0.38)
+    }
+
+    private static func sRGB(_ value: UInt32) -> Color {
+        Color(
+            .sRGB,
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255,
+            opacity: 1)
     }
 }
 
-/// The native window surface. On current systems SwiftUI resolves
-/// `windowBackground` from the active appearance, wallpaper tint, contrast,
-/// transparency, and window state rather than from a fixed RGB value.
+/// The warm canvas sits behind system Material and native Liquid Glass.
 struct MopeliumSystemCanvas: View {
-    @ViewBuilder var body: some View {
-        if #available(macOS 14.0, *) {
-            Rectangle().fill(.windowBackground)
-        } else {
-            legacyWindowBackground
-        }
-    }
+    @Environment(\.colorScheme) private var scheme
 
-    @ViewBuilder private var legacyWindowBackground: some View {
-        #if canImport(AppKit)
-        MopeliumLegacyWindowBackground()
-        #else
-        Rectangle().fill(.background)
-        #endif
+    var body: some View {
+        Rectangle().fill(
+            LinearGradient(
+                colors: MopeliumTheme.pageGradient(scheme),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing))
     }
 }
-
-#if canImport(AppKit)
-/// macOS 13 fallback for the same semantic window material.
-private struct MopeliumLegacyWindowBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .windowBackground
-        view.blendingMode = .behindWindow
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-#endif
 
 // MARK: - Typography
 
@@ -86,7 +90,7 @@ extension MopeliumThreadStyle {
             tertiaryText: MopeliumTheme.tertiaryText(scheme),
             accent: MopeliumTheme.accent(scheme),
             stroke: MopeliumTheme.separator(scheme),
-            cardStroke: MopeliumTheme.separator(scheme),
+            cardStroke: MopeliumTheme.cardStroke(scheme),
             error: .red)
     }
 }
@@ -102,7 +106,7 @@ private struct MopeliumCardModifier: ViewModifier {
         content
             .background(.regularMaterial, in: shape)
             .overlay {
-                shape.stroke(MopeliumTheme.separator(scheme), lineWidth: 1)
+                shape.stroke(MopeliumTheme.cardStroke(scheme), lineWidth: 1)
             }
     }
 }

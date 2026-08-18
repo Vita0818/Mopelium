@@ -1,7 +1,7 @@
 # Mopelium 文档索引
 
-当前产品基线：**v0.10**（build 49）
-最近核对：2026-08-17
+当前产品基线：**v0.12**（build 50）
+最近核对：2026-08-18
 
 这个索引区分“当前规范”和“历史证据”。版本、产品状态或下一步判断只允许从当前规范
 读取；带旧版本号的历史文件保留用于解释迁移和兼容性，不能覆盖当前源码。
@@ -37,7 +37,8 @@
 | `OPEN_SOURCE_REUSE.md` | 第三方源码、prompt、依赖和 NOTICE 准入 |
 | `COWORK_PRINCIPLES.md` | 当前 Cowork/AgentKernel 编排原则 |
 | `PER_AGENT_INFERENCE_PROFILES.md` | per-agent exact inference binding 契约 |
-| `CURRENT_UI_COLOR_SYSTEM.md` | 当前 Apple 原生表面与 Liquid Glass 规范 |
+| `CURRENT_UI_COLOR_SYSTEM.md` | 当前暖中性 / 香槟金与 Apple 原生 Liquid Glass 规范 |
+| `UI_COLOR_SYSTEM.md` | 当前配色来源与旧实现 provenance；精确现行规则以前一项为准 |
 | `NEXT_TARGET.md` | 来源快照携带的 Mopelium 上游发行目标；当前明确不是 Mopelium 活跃目标 |
 
 根 `README.md` 是产品入口；根 `ARCHITECTURE.md` 仅为兼容链接，架构正文只维护在
@@ -66,7 +67,6 @@
 - `COWORK_TASK_CONTEXT_MODEL.md`
 - `COWORK_V0_10_SMOKE.md`
 - `COWORK_V0_10_STATUS.md`
-- `UI_COLOR_SYSTEM.md`
 - 根 `design-qa.md`
 - `codex-report/`、`claude-report/`、`gemini-report/` 中的 dated reports
 

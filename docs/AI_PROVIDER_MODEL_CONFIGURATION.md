@@ -2,7 +2,7 @@
 
 文档状态：当前 AI 配置操作合同
 最后核对：2026-08-17
-产品代码基线：Mopelium v0.10（build 49；Intatis 来源 commit 标题 v0.54）
+产品代码基线：Mopelium v0.12（build 50；Intatis 来源 commit 标题 v0.54）
 
 ## 1. 适用范围
 

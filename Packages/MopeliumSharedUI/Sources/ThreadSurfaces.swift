@@ -1739,20 +1739,19 @@ private var mopeliumPlatformSeparator: Color {
     #endif
 }
 
-private struct MopeliumContentSurfaceModifier: ViewModifier {
-    let cornerRadius: CGFloat
+private struct MopeliumSurfaceStrokeKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
 
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        content
-            .background(.regularMaterial, in: shape)
-            .overlay {
-                shape.stroke(mopeliumPlatformSeparator, lineWidth: 1)
-            }
+private extension EnvironmentValues {
+    var mopeliumSurfaceStroke: Color? {
+        get { self[MopeliumSurfaceStrokeKey.self] }
+        set { self[MopeliumSurfaceStrokeKey.self] = newValue }
     }
 }
 
-private struct MopeliumSubtleContentSurfaceModifier: ViewModifier {
+private struct MopeliumContentSurfaceModifier: ViewModifier {
+    @Environment(\.mopeliumSurfaceStroke) private var surfaceStroke
     let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
@@ -1761,7 +1760,24 @@ private struct MopeliumSubtleContentSurfaceModifier: ViewModifier {
             .background(.regularMaterial, in: shape)
             .overlay {
                 shape.stroke(
-                    mopeliumPlatformSeparator.opacity(0.55),
+                    surfaceStroke ?? mopeliumPlatformSeparator,
+                    lineWidth: 1)
+            }
+    }
+}
+
+private struct MopeliumSubtleContentSurfaceModifier: ViewModifier {
+    @Environment(\.mopeliumSurfaceStroke) private var surfaceStroke
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(.regularMaterial, in: shape)
+            .overlay {
+                shape.stroke(
+                    (surfaceStroke ?? mopeliumPlatformSeparator)
+                        .opacity(0.55),
                     lineWidth: 0.5)
             }
     }
@@ -1771,6 +1787,7 @@ private struct MopeliumSubtleContentSurfaceModifier: ViewModifier {
 /// view gives passive cards a stable optical identity while labels, counters
 /// and selection affordances above it update independently.
 private struct MopeliumClearLiquidGlassBackdrop: View, Equatable {
+    @Environment(\.mopeliumSurfaceStroke) private var surfaceStroke
     let cornerRadius: CGFloat
     let isInteractive: Bool
     let displayScale: CGFloat
@@ -1811,7 +1828,7 @@ private struct MopeliumClearLiquidGlassBackdrop: View, Equatable {
     private var stableOutline: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .strokeBorder(
-                mopeliumPlatformSeparator.opacity(0.42),
+                (surfaceStroke ?? mopeliumPlatformSeparator).opacity(0.42),
                 lineWidth: max(1 / max(displayScale, 1), 0.5))
             .allowsHitTesting(false)
     }
@@ -1824,7 +1841,8 @@ private struct MopeliumClearLiquidGlassBackdrop: View, Equatable {
             .background(.ultraThinMaterial, in: shape)
             .overlay {
                 shape.stroke(
-                    mopeliumPlatformSeparator.opacity(0.55),
+                    (surfaceStroke ?? mopeliumPlatformSeparator)
+                        .opacity(0.55),
                     lineWidth: 0.5)
             }
     }
@@ -1833,6 +1851,7 @@ private struct MopeliumClearLiquidGlassBackdrop: View, Equatable {
 private struct MopeliumLiquidGlassModifier: ViewModifier {
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.mopeliumSurfaceStroke) private var surfaceStroke
 
     let cornerRadius: CGFloat
     let isInteractive: Bool
@@ -1877,7 +1896,9 @@ private struct MopeliumLiquidGlassModifier: ViewModifier {
         return content
             .background(.regularMaterial, in: shape)
             .overlay {
-                shape.stroke(mopeliumPlatformSeparator, lineWidth: 1)
+                shape.stroke(
+                    surfaceStroke ?? mopeliumPlatformSeparator,
+                    lineWidth: 1)
             }
     }
 }
@@ -1888,11 +1909,10 @@ private struct MopeliumGlassButtonModifier: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         #if compiler(>=6.2)
         if #available(macOS 26.0, iOS 26.0, *) {
-            if isProminent {
-                content.buttonStyle(.glassProminent)
-            } else {
-                content.buttonStyle(.glass)
-            }
+            // Current Mopelium glass buttons share one colorless system style.
+            // Primary hierarchy comes from label weight, placement and keyboard
+            // semantics instead of a differently tinted glass material.
+            content.buttonStyle(.glass)
         } else {
             fallback(content)
         }
@@ -1911,6 +1931,12 @@ private struct MopeliumGlassButtonModifier: ViewModifier {
 }
 
 public extension View {
+    /// Supplies a semantic outline to Material and Glass-backed surfaces.
+    /// The surface itself remains a system Material or native Glass node.
+    func mopeliumSurfaceStroke(_ color: Color?) -> some View {
+        environment(\.mopeliumSurfaceStroke, color)
+    }
+
     /// Standard Material for content-layer cards and read-only information.
     func mopeliumContentSurface(cornerRadius: CGFloat = 16) -> some View {
         modifier(MopeliumContentSurfaceModifier(cornerRadius: cornerRadius))

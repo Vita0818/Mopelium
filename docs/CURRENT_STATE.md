@@ -1,8 +1,8 @@
 # CURRENT_STATE
 
 文档状态：当前源码摘要
-最近核对：2026-08-17
-产品基线：v0.10（build 49）
+最近核对：2026-08-18
+产品基线：v0.12（build 50）
 
 ## 当前产品与内部身份
 
@@ -14,6 +14,17 @@
 - 当前没有 iOS App target、scheme、资源树或发行矩阵。
 - Swift-native CLI target/product：`MopeliumCLI` / `mopelium`。
 - 用户可见 App 入口只有 Cowork；Chat 与 Code 源码、数据兼容、共享 runtime 和测试仍保留。
+
+## 当前视觉主题
+
+- macOS 当前使用暖色 / 淡香槟配色：暗色为轻暖深灰渐变，亮色为暖白奶油渐变；上一轮过灰的文字、canvas 与非玻璃 affordance 已恢复适度暖度，但不使用棕黄或高饱和金色。
+- `MopeliumTheme` 是固定品牌 token、明暗渐变、文字和描边的单一 App 来源。淡香槟只进入 canvas、文字、选中与结构描边，不进入 Glass tint。
+- 所有非破坏性 Glass button 在当前系统统一为无 tint 的 `.glass`；不再使用 `.glassProminent`。用户气泡、composer、选择控件和 Cowork rail 直接使用无 tint 的 SwiftUI 原生 `Glass.regular` / `Glass.clear` 与 `glassEffect`。Stop 继续是同形态的系统 destructive red 例外。
+- 根视图通过 SwiftUI 官方 `.window` container background 让同一暖色 canvas 覆盖 window titlebar，并隐藏 `.windowToolbar` backing；右侧不再出现系统白条，sidebar 仍保留独立系统材质。
+- App 图标由根 `Mopelium.icon` 的单层 `Assets/Mopelium.png` 提供：当前使用用户提供的 1254×1254 RGB、无 alpha PNG 原始字节，不再做调色或其他像素处理；以 scale `0.95`、零位移进入 Apple Icon Composer，不叠加旧指针图、额外阴影或 translucency。当前 PNG SHA-256 为 `4199874c81c488c23579d4b8e431941fceb488690b05ce3b53ab778d62542ca1`。
+- 当前图标的 unsigned Debug 与 universal Release build、`Mopelium.icns`、`Assets.car` 结构/多尺寸 rendition 和编译图标视觉读回均已通过。本次替换未重启 LaunchServices、IconServices、Dock 或 Finder，因此已安装 App 的系统缓存显示仍为 `UNKNOWN`，不以缓存状态反向修改源图。
+- 当前精确规范见 `CURRENT_UI_COLOR_SYSTEM.md`；`UI_COLOR_SYSTEM.md` 保存重新启用的 palette 来源和旧实现 provenance。
+- 原生 Glass 接线阶段完整 SharedUI 153 tests / 0 failures；本轮统一无色 Glass 与 window-toolbar 修复后的 `ThreadLayoutTests` 为 23 tests / 0 failures，SharedUI focused build、XcodeGen 与 `MopeliumMac` unsigned Debug build 通过。Light 模式 Settings 和用户对应 Cowork 会话已用本机界面控制确认 titlebar/detail 暖色连续、白条消失；Dark、Reduce Transparency、Increase Contrast、VoiceOver 与 active/inactive window 仍为 `UNKNOWN`。默认真实双根环境完整 SwiftPM command 在排除 `TESTING.md` 已记录的两项 provider 基线冲突后仍有此前 exit-0 证据。
 
 ## 当前构建图
 
@@ -58,8 +69,8 @@ Canonical state：
 
 有界 legacy compatibility：
 
-- App/CLI 启动前通过 stable owner-only lock 检查 Application Support；仅当 canonical 根不存在且旧 `Intatis` 根安全时，原子 rename 整棵目录并核对 device/inode，保留 EventLog/config/runtime bytes；两根同时存在 fail closed，不静默 merge；
-- macOS UserDefaults 从旧 bundle domain 按 allowlist 导入 provider selection/catalog、workspace、Cowork settings 与 renderer mode，新 key 已存在时不覆盖；不导入明文 secret；
+- App/CLI 只解析 `~/Library/Application Support/Mopelium`，不会探测、读取、迁移、合并或删除旧 `Intatis` 根；双根存在不影响启动；
+- macOS App 不再从旧 bundle domain 导入 UserDefaults；当前 Mopelium domain 只消费 canonical key，session 内另有明确合同的 legacy settings/bookmark migration 不由 App 启动隐式触发；
 - config/env/auth 优先 Mopelium；canonical 候选存在但非法时不回退；只有 canonical 缺失才读 `INTATIS_*`、`~/.config/intatis` 或旧文件名；新写只落 Mopelium；
 - 旧 adapter raw values 解码时规范化到 Mopelium，重新编码只写 Mopelium；unknown adapter 保持 byte-exact 并在不支持时 fail closed；
 - legacy `.intatis` config/Knowledge paths 继续进入 SecretScanner、WorkspaceLease 和 terminal deny floor；已有 `.intatis/git-worktrees` 可安全识别，新建 worktree 只用 `.mopelium`；
@@ -105,13 +116,13 @@ browser profile、Knowledge publication 与 linked Git worktree 不能裸移动�
 
 - `swift package dump-package` 已确认 Mopelium package、15 libraries、3 internal targets、CLI、15 tests 与 macOS-only platform graph；
 - `swift build --disable-automatic-resolution` 已通过四次，只有仓库既有 warning；
-- identity/config/adapter/deny-floor/sidecar/registry/target-inventory/Cowork focused command共执行 60 tests、0 failures；其中 `ProductIdentityMigrationTests` 4/4；
+- identity/config/adapter/deny-floor/sidecar/registry/target-inventory/Cowork focused command共执行 60 tests、0 failures；旧 direct migration primitive 的历史测试不再构成 shipping startup 验收；
 - 原始完整 `swift test --disable-automatic-resolution` 执行到终点但退出 1，只有两个已独立复现且与 namespace 无关的 retry-boundary 冲突：
   `testOpenAIStreamingDoesNotRetryAfterResponseBytes` 与
   `testOfficialProviderRetryBoundaryStaysInsideOneLogicalGeneration`；
 - 显式 `--skip` 上述两个已单列冲突后，完整 SwiftPM command 退出 0；真实 provider/browser/Git/document-runtime 等 opt-in tests 按设计 skipped；
 - `xcodegen generate`、版本一致性门、active identity 门通过；Xcode project 只有一个 App target `MopeliumMac`；
-- `MopeliumMac` unsigned Debug 与 universal Release 均构建通过；Release bundle 为 `0.10 (49)`、
+- `MopeliumMac` unsigned Debug 与 universal Release 均构建通过；Release bundle 为 `0.12 (50)`、
   `com.Vita0818.Mopelium`、display name Mopelium、executable `MopeliumMac`、`x86_64 arm64`；
 - release/validator/version/identity/Linux/scheme shell syntax、release-spec plist parse、EPUBCheck wrapper hash一致性均通过；
 - `mopelium-skill-creator` quick validation 与 Python compile 通过；rbook helper fmt、7 unit + 2 integration tests 通过；

@@ -125,6 +125,15 @@ struct MopeliumMacRootView: View {
                 detail
             }
         }
+        // The window toolbar is owned above NavigationSplitView's detail safe
+        // area. Give that container the same canvas and keep the system toolbar
+        // backing transparent so the right side cannot fall back to white.
+        .containerBackground(for: .window) {
+            MopeliumSystemCanvas()
+        }
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .mopeliumSurfaceStroke(MopeliumTheme.cardStroke(scheme))
+        .foregroundStyle(MopeliumTheme.deepText(scheme))
         .navigationTitle("")
         .mcpInteractionHost(env.mcp.interactionCenter)
         .task {

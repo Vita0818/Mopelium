@@ -1,8 +1,8 @@
 # PROJECT_MAP
 
 文档状态：当前仓库地图
-最近核对：2026-08-17
-产品基线：v0.10（build 49）
+最近核对：2026-08-18
+产品基线：v0.12（build 50）
 
 本文描述内部身份迁移后的当前构建图。事实源是 `Package.swift`、`project.yml`、源码、测试与脚本；`SNAPSHOT.md` 单独保留 Intatis 来源树的历史身份。
 
@@ -15,7 +15,7 @@ Mopelium/
 │   ├── MopeliumMac/             唯一 App target
 │   ├── SharedResources/         macOS 本地化 String Catalog
 │   └── mopelium-cli/            Swift-native CLI 与测试
-├── Mopelium.icon/               Apple Icon Composer 源
+├── Mopelium.icon/               Apple Icon Composer 源；单层 Assets/Mopelium.png
 ├── Packages/
 │   ├── MopeliumCore/
 │   ├── MopeliumProtocol/
@@ -127,6 +127,14 @@ MopeliumSharedUITests
 - 当前用户可见 App 根：`MopeliumMacRootView`，只展示 Cowork；
 - Chat/Code ViewModel 与 runtime 仍在同一 App 源码和共享 packages 中保留兼容。
 
+## UI 主题入口
+
+- `Apps/MopeliumMac/Sources/MopeliumDesign.swift`：暖色 / 淡香槟固定 token、Light/Dark 页面渐变、macOS thread style 与 Material / Glass 结构描边；
+- `Packages/MopeliumSharedUI/Sources/ThreadSurfaces.swift`：无 tint 的系统原生 `Glass.regular` / `Glass.clear`、统一 `.glass` button style 与暖色结构描边环境输入；
+- `Apps/MopeliumMac/Sources/MopeliumMacRootView.swift`：不注入 Glass/button 品牌 tint 的 system sidebar、detail canvas、`.window` container background 与透明 window-toolbar backing；
+- `Mopelium.icon/icon.json` + `Mopelium.icon/Assets/Mopelium.png`：用户提供的 1254×1254 RGB、无 alpha 文档 App 图标原始字节，不做调色或其他像素处理，以单层、scale `0.95`、零位移交给 Apple Icon Composer；
+- `docs/CURRENT_UI_COLOR_SYSTEM.md`：当前组件映射和验收；`docs/UI_COLOR_SYSTEM.md`：重新启用的 palette 来源及旧实现 provenance。
+
 ## 主要链路
 
 - Chat：`ChatViewModel → GoalInputParser → ChatLoop → EventLog → ConversationProjection`；
@@ -144,7 +152,7 @@ MopeliumSharedUITests
 - canonical registry：`mopelium.standard.v8` / `mopelium.cowork.v8`；
 - canonical sidecar：`__mopelium_authorization_context`。
 
-旧 Intatis Application Support、config/env/UserDefaults、adapter ID、registry/event raw values和 `.intatis*` 仅由显式 legacy migrator/decoder/deny floor 处理。新值存在但非法时不回退，历史 JSONL 不重写。
+旧顶层 Intatis Application Support 和 macOS bundle domain 被 App/CLI 完全忽略；它们不再进入生产 migrator。config/env、session 内 legacy settings、adapter ID、registry/event raw values 和 `.intatis*` 只由各自显式 decoder/deny floor 处理。新值存在但非法时不回退，历史 JSONL 不重写。
 
 ## 关键脚本
 

@@ -1,8 +1,8 @@
 # MOPELIUM_INTERNAL_IDENTITY_MIGRATION
 
-文档状态：执行清单与迁移合同
-生效日期：2026-08-17
-产品基线：v0.10（build 49）
+文档状态：已完成身份映射与当前 canonical-only 启动合同
+生效日期：2026-08-18
+产品基线：v0.12（build 50）
 
 ## 1. 已确认决策
 
@@ -15,9 +15,13 @@
 - AgentKernel、EventLog、scheduler、permission、session runtime、MessageBus、Mediator 与工具链只做原位改名，绝不复制出平行 Mopelium 后端。
 - 三层权限门、WorkspaceLease、CapabilityLease、PathConfinement、SecretScanner、Mediator、managed-terminal Seatbelt/default-network-deny、Hardened Runtime 和 durable tool execution 不得因迁移而弱化。
 
-## 2. 兼容策略
+## 2. 剩余兼容策略
 
-采用“一次迁移期双读、只写新名”：
+顶层 Application Support 与旧 macOS bundle domain 已退出兼容面：App/CLI 只使用
+Mopelium canonical root/domain，完全忽略旧 `Intatis` 根/domain，不读取、不迁移、不合并、
+不删除，也不因双根存在而 fail closed。
+
+其余明确保留的历史 protocol/config decoder 采用“有界旧值读取、只写新名”：
 
 1. 新版本只创建、生成和写入 Mopelium canonical identity。
 2. 新 canonical 配置、状态或路径不存在时，才允许读取受控的旧 Intatis identity。
@@ -100,9 +104,9 @@
 
 环境变量：所有 project-owned `INTATIS_*` canonical 名改为 `MOPELIUM_*`。旧变量只通过集中式 legacy lookup 读取；新旧同时存在时新变量优先，且新值非法时不得回退旧值。代码、日志和测试不得读取或输出 secret 值。
 
-UserDefaults：所有 project-owned `intatis.*` key 改为 `mopelium.*`。Bundle ID 切换后从旧 suite/domain 做一次性、字段级、secret-free 导入；新 domain 只写新 key，旧 key 保留只读兼容。
+UserDefaults：所有 project-owned canonical key 使用 `mopelium.*`。macOS App 启动不读取旧 suite/domain，也不做旧 bundle key 导入；session 内另有明确合同的 legacy settings/bookmark migration 保持独立边界。
 
-Application Support：迁移器必须执行 current-UID、regular/no-follow、single-link、mode、schema 与目标冲突检查；按 session 原子迁移并读回 EventLog/projection。禁止盲目覆盖或双写。
+Application Support：App/CLI 只使用 `~/Library/Application Support/Mopelium`。旧 `Intatis` 根是产品外数据，存在时必须忽略；不得接回迁移器、自动 merge、覆盖或删除。
 
 Workspace state：
 
@@ -157,7 +161,7 @@ Sidecar 迁移必须遵守 strict schema：同一 provider generation 只允许�
 ### C. 数据、配置与 workspace
 
 - [x] 新增集中式 Mopelium canonical config/path/defaults identity。
-- [x] 新增有界 legacy Intatis config/env/defaults/Application Support 读取和一次性迁移。
+- [x] App/CLI 收口为 canonical-only Application Support 与 macOS bundle domain；旧顶层 Intatis 根/domain 完全忽略。
 - [x] 新写入只落 Mopelium；新 canonical 值非法时 fail closed。
 - [x] `.mopelium` browser/worktree/Knowledge 路径接线，并继续保护 legacy config/Knowledge deny floor。
 - [ ] 旧 browser profile 与 Knowledge publication 的自动迁移需各自 owner/lock/drain 方案；现阶段明确不做裸目录移动。已有 `.intatis/git-worktrees` 可按 Git metadata 安全识别，新建只用 `.mopelium`。
@@ -196,7 +200,7 @@ Sidecar 迁移必须遵守 strict schema：同一 provider generation 只允许�
 1. 当前构建图、源码路径、project-owned 类型、命令和新 runtime 写入均以 Mopelium 为 canonical identity；
 2. 唯一 Xcode App target 是 `MopeliumMac`，Bundle ID 为 `com.Vita0818.Mopelium`；
 3. iOS App 和遗留 Mac App Store target 已删除；
-4. 旧 Intatis session/config/protocol 可由有界兼容路径读取，且不会触发双写、权限扩大或历史重写；旧 browser/Knowledge/worktree state 不裸移动并有明确安全处置；
+4. 旧顶层 Intatis Application Support 与 macOS bundle domain 不被生产读取；仍明确保留的历史 config/protocol decoder 不触发双写、权限扩大或历史重写，旧 browser/Knowledge/worktree state 不裸移动并有明确安全处置；
 5. EventLog、permission、lease、workspace、sandbox、secret 与 lifecycle 不变量通过回归；
 6. active-identity 审计中的每个残留旧名都属于显式 legacy/history/provenance allowlist；
 7. 文档与当前源码事实一致，验证结果和未完成外部门如实记录。

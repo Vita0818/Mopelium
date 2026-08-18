@@ -1,6 +1,6 @@
 # Mopelium Architecture
 
-当前产品基线：v0.10（build 49）
+当前产品基线：v0.12（build 50）
 
 此根文件只保留兼容入口。早期 draft-0 架构在 v0.1–v0.3 阶段编写，已经不能描述当前
 AgentKernel、durable permission、MCP、Skills、managed terminal、per-agent inference、

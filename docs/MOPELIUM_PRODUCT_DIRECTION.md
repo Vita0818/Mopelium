@@ -2,8 +2,8 @@
 
 文档状态：当前产品方向与内部身份合同
 生效日期：2026-08-17
-最近核对：2026-08-17
-产品基线：v0.10（build 49）
+最近核对：2026-08-18
+产品基线：v0.12（build 50）
 
 ## 1. 一句话定义
 
@@ -45,16 +45,21 @@ Mopelium 是唯一当前产品身份，也是当前仓库、Swift package、targ
 旧 Intatis identity 不是当前 canonical namespace，但可出现在以下有界位置：
 
 - `SNAPSHOT.md`、历史报告、旧发布/公证事实和第三方 provenance；
-- legacy config/env/UserDefaults/Application Support 迁移器；
+- legacy config/env/UserDefaults decoder 或有界 session migration；
 - legacy adapter、registry、EventLog 或 schema decoder/fixture；
 - legacy `.intatis` workspace/Knowledge 安全 deny floor；
 - 兼容测试中用于证明旧值不会扩大权限或覆盖新值的输入。
 
+旧顶层 `~/Library/Application Support/Intatis` 与旧 macOS bundle UserDefaults domain
+不再是兼容输入：App/CLI 只使用 Mopelium canonical root/domain，完全忽略旧根/domain；
+不读取、不迁移、不合并，也不因其存在而阻止启动。旧目录由用户自行保留或处置，Mopelium
+不会删除它。
+
 兼容原则是“新名优先、旧名只读、新写只用 Mopelium”：
 
 1. 新 canonical 值存在但非法时 fail closed，不得回退旧值。
-2. 旧 Application Support 只允许经锁定、no-follow、owner/identity 校验后原子迁移。
-3. 旧 UserDefaults 只按 allowlist 字段导入，不导入明文 secret。
+2. App/CLI 不得探测或迁移旧顶层 Application Support 根；双根存在是合法外部状态，旧根必须被忽略。
+3. macOS App 启动不得从旧 bundle domain 导入 UserDefaults；仍保留的 session 内 legacy decoder/migration 必须有独立明确合同。
 4. 历史 EventLog 和已签名/已提交 artifact 不做字符串原地重写。
 5. 新旧状态不得双写或静默合并。
 

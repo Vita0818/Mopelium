@@ -372,10 +372,6 @@ enum AppConfig {
     private static let configEnvKey = "MOPELIUM_CONFIG"
     private static let legacyConfigEnvKey =
         MopeliumProductIdentity.Legacy.configurationEnvironmentKey
-    private static let userDefaultsMigrationMarker =
-        "mopelium.productIdentity.userDefaults.v1"
-    private static let legacyBundleIdentifier =
-        "com.Vita0818.IntatisMac"
     private static let defaultProviderID = "default"
     static let defaultBaseURL = "https://api.openai.com/v1"
     static let defaultChatEndpoint = "https://api.openai.com/v1/chat/completions"
@@ -554,62 +550,6 @@ enum AppConfig {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("Mopelium", isDirectory: true)
-    }
-
-    static func prepareProductIdentityMigration() throws {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true)
-        _ = try ApplicationSupportIdentityMigrator.prepare(in: base)
-        migrateLegacyUserDefaultsIfNeeded()
-    }
-
-    private static func migrateLegacyUserDefaultsIfNeeded() {
-        let destination = UserDefaults.standard
-        guard destination.bool(forKey: userDefaultsMigrationMarker) == false else {
-            return
-        }
-        let legacySuite = UserDefaults(suiteName: legacyBundleIdentifier)
-        let sources = [destination, legacySuite].compactMap { $0 }
-        for source in sources {
-            for (legacyKey, value) in source.dictionaryRepresentation() {
-                guard let canonicalKey = canonicalUserDefaultsKey(
-                    forLegacyKey: legacyKey),
-                      destination.object(forKey: canonicalKey) == nil else {
-                    continue
-                }
-                destination.set(value, forKey: canonicalKey)
-            }
-        }
-        destination.set(true, forKey: userDefaultsMigrationMarker)
-    }
-
-    private static func canonicalUserDefaultsKey(
-        forLegacyKey key: String
-    ) -> String? {
-        let exact: [String: String] = [
-            "intatis.baseURL": baseURLKey,
-            "intatis.model": modelKey,
-            "intatis.providerCatalog.v1": providerCatalogKey,
-            "intatis.providerSelection.v1": providerSelectionKey,
-            "intatis.workspace.bookmarks": "mopelium.workspace.bookmarks",
-            "intatis.messageRendering.mode.v1":
-                "mopelium.messageRendering.mode.v1",
-        ]
-        if let mapped = exact[key] { return mapped }
-        for (legacyPrefix, canonicalPrefix) in [
-            ("intatis.workspace.sessionBookmark.",
-             "mopelium.workspace.sessionBookmark."),
-            ("intatis.workspace.sessionPath.",
-             "mopelium.workspace.sessionPath."),
-            ("intatis.cowork.projectSettings.",
-             "mopelium.cowork.projectSettings."),
-        ] where key.hasPrefix(legacyPrefix) {
-            return canonicalPrefix + key.dropFirst(legacyPrefix.count)
-        }
-        return nil
     }
 
     static func sessionFile(_ session: SessionID) -> URL {

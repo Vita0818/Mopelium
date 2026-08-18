@@ -37,12 +37,8 @@ final class AppEnvironment: ObservableObject {
     private var inferenceCatalogSnapshot: InferenceCatalogSnapshot?
 
     init(runtimeManager: AppSessionRuntimeManager) {
-        do {
-            try AppConfig.prepareProductIdentityMigration()
-        } catch {
-            fatalError(
-                "Failed to migrate Mopelium application-support identity: \(error.localizedDescription)")
-        }
+        // Mopelium is canonical-only. Any predecessor application-support
+        // root is ignored and must never gate App startup.
         PlatformProfile.current = AppConfig.platformProfile
 
         self.runtimeManager = runtimeManager

@@ -1,8 +1,19 @@
 # DO_NOT_BREAK
 
+## 外部依赖优先与禁止功能兜底（Vitemis 强制规则）
+
+本项目继承 `/Users/vita/Vitemis/docs/DEPENDENCY_POLICY.md`。本节是强制约束，不是建议。
+
+- 当用户指定、仓库已经采用，或经许可证、provenance、安全与平台审查可采用的外部依赖提供同等能力时，必须直接集成该依赖的官方 API 或官方扩展点。
+- 不得自行重写同等能力，不得新增替代 adapter、shim、compatibility layer、wrapper、proxy、facade、协议翻译层、parallel backend、preview backend、shadow implementation 或“先兜底、以后再换”的实现。
+- 本地代码只允许保留官方 API 必需的最薄生命周期、类型、权限、配置和 bundle 接线；不得重新实现、解释、扩展或替代依赖的核心能力。
+- exact 依赖因版本、构建、签名、许可证、平台、安全或官方 API 限制无法接入时，必须停止该能力、明确失败、报告 blocker 并请求用户决定；不得静默降级、切换 legacy/另一 provider/backend、使用 cache/mock/简化路径或继续交付不完整替代实现。
+- 现有 fallback、adapter 或重复实现不构成先例，后续不得扩展。安全 fail-closed 与明确要求的旧数据解码/迁移不是功能兜底，但必须保持最窄范围，不能演化成备用产品实现。
+- 只有用户针对 exact 依赖、exact 范围和退出条件作出的新明文决定才能例外。
+
 文档状态：当前回归禁区
-最近核对：2026-08-17
-产品基线：v0.10（build 49）
+最近核对：2026-08-18
+产品基线：v0.12（build 50）
 
 ## macOS 分发不变量
 
@@ -27,8 +38,8 @@
 ## Mopelium identity migration 不变量
 
 - 当前 package/target/module/App/CLI/config/path/新协议输出只以 Mopelium 为 canonical identity；不得新增 Intatis 写入端或平行 runtime。
-- Application Support 迁移只允许在 canonical 根缺失、legacy 根安全且跨进程锁稳定时执行同父目录原子 rename；必须复核 owner/no-follow/device/inode 和目录 durability。两根同时存在必须 fail closed，不做 merge。
-- UserDefaults 只从旧 bundle domain 按 allowlist 导入，不覆盖 canonical key，不导入明文 secret，并写 canonical migration marker。
+- App/CLI 只能使用 canonical `~/Library/Application Support/Mopelium`，不得探测、读取、迁移、合并或删除旧顶层 `Intatis` 根；双根存在不得阻止启动。不得重新把 `ApplicationSupportIdentityMigrator` 接回 shipping composition root。
+- macOS App 启动不得从旧 bundle domain 导入 UserDefaults；canonical domain 只使用 Mopelium key。session 内另有明确合同的 legacy settings/bookmark decoder 不得扩张成顶层旧 domain fallback。
 - `MOPELIUM_*`、Mopelium config/auth 路径始终优先；canonical 值存在但非法时不回退。旧 `INTATIS_*` 与 Intatis-owned path 只读兼容，新模板/保存只写 Mopelium。
 - legacy adapter 可规范化到相同实现，但 unknown adapter 必须保持 byte-exact 并 fail closed；旧 registry/EventLog raw strings 可解码/审计，不得通过 alias 获得 live authorization。
 - fresh registry 固定为 `mopelium.standard.v8` / `mopelium.cowork.v8`；automatic sidecar 固定为 `__mopelium_authorization_context`，同一 strict schema 不得同时要求新旧字段。
@@ -426,7 +437,7 @@
 - 未经用户明文要求具体 Git 操作，不 add、不 commit、不 push、不创建 PR；编辑、整理、修复、验证或准备工作都不等于提交请求。
 - 若用户要求提交，只提交当前 Git root 中与本任务相关的文件；不得递归进入、暂存、提交或推送子仓库、submodule、nested Git repo 或依赖 checkout。
 - 不引入或升级第三方依赖，不改构建脚本，不改测试源码，除非任务明确要求。当前对话渲染依赖/资源已按精确版本与 hash 锁定；任何变更均须重做许可证、传递依赖、资源范围、安全与 NOTICE 审查。计划中的 SwiftGit2/libgit2 仍须先过许可证审查。
-- 系统原生表面与 Liquid Glass 是当前视觉基线：不得把浅色 / 深色写死为 `.white` / `.black`、固定 RGB、Hex 或取色器采样值。macOS detail 使用动态 window surface，sidebar 交给 `NavigationSplitView`；assistant/agent/system 对话正文（包括失败/中断时已产生的正文与媒介化 Agent 通信）直接继承系统 canvas。用户消息是唯一对话气泡，必须使用原生 `Glass.regular`，不得叠加自定义 accent 蓝色描边；正常 tool、permission、task 等专用结构化内容卡片继续使用系统 Material。Code/Cowork 的 error、失败 trace、recovery 与失败 submission 状态不得回到 thread 中央，而应只进入右栏唯一的条件式错误卡。Liquid Glass 主要用于导航与交互功能层，内容层例外只包括用户消息气泡和用户明确指定的 Cowork 紧凑 trailing status rail，并且都必须使用原生 `glassEffect`。`GlassEffectContainer` 只用于确实需要融合/形变的交互 cluster，不得包裹彼此独立且位置必须稳定的 status cards。Apple deployment target 已是 macOS 26，旧系统 fallback 不属于当前验收面。不得自行模拟玻璃，也不得把 glass 铺成页面或整段 transcript。修改配色语义、材质、明暗模式或跨平台映射时必须同步更新 `docs/CURRENT_UI_COLOR_SYSTEM.md` 并复验 macOS；`docs/UI_COLOR_SYSTEM.md` 是上一版配色的历史底稿，不得被当前方案覆盖。
+- 淡香槟暖色与系统原生无色 Liquid Glass 是当前视觉基线：固定品牌 token、文字 token、描边 token 和页面渐变只能集中定义在 `MopeliumTheme`，不得在业务 View 散落新的 RGB/Hex、用 `.white` / `.black` 代替主题语义，或把截图取色当成规范。macOS detail 使用轻暖深灰/暖白奶油渐变，sidebar 继续交给 `NavigationSplitView` 的系统材质；根视图必须以 SwiftUI 官方 `.window` container background 把同一 canvas 延伸到 titlebar，并隐藏 `.windowToolbar` backing，不得让右侧恢复系统白条、覆盖左侧 sidebar 材质，或用 NSWindow 私有接线/自绘标题栏替代。品牌色只可进入 canvas、文字、选中和结构描边，不得进入 `Glass.tint`、Glass button 祖先 `.tint` 或其它 chrome 着色入口。当前系统所有非破坏性 Glass button 必须统一使用无 tint 的 `.glass`，不得使用 `.glassProminent` 形成金黄/无色分叉；Stop 保持相同 Glass 形态与系统 destructive red，是唯一彩色 button 语义例外。assistant/agent/system 对话正文（包括失败/中断时已产生的正文与媒介化 Agent 通信）直接继承暖色 canvas。用户消息是唯一对话气泡，必须直接使用无 tint 的原生 `Glass.regular`，不得叠加自定义描边；正常 tool、permission、task 等专用结构化内容卡片继续使用系统 Material。Code/Cowork 的 error、失败 trace、recovery 与失败 submission 状态不得回到 thread 中央，而应只进入右栏唯一的条件式错误卡。Liquid Glass 主要用于导航与交互功能层，内容层例外只包括用户消息气泡和用户明确指定的 Cowork 紧凑 trailing status rail；后者必须使用无 tint 的原生 `Glass.clear`。不得用自绘 blur、高光、折射、阴影或静态渐变冒充玻璃；`GlassEffectContainer` 只用于确实需要融合/形变的交互 cluster，不得包裹彼此独立且位置必须稳定的 status cards。Apple deployment target 已是 macOS 26，旧系统 fallback 不属于当前验收面。不得把 glass 铺成页面或整段 transcript。修改配色语义、材质、明暗模式或映射时必须同步更新 `docs/CURRENT_UI_COLOR_SYSTEM.md` 与配色来源 `docs/UI_COLOR_SYSTEM.md`，并复验 macOS Light/Dark。
 - 不绕过 3 层权限门、`PathConfinement`、`SecretScanner`、`Mediator` 秘密拦截或配置文件凭据隔离。
 - 不把 CapabilityLease/WorkspaceLease 当成某次调用的 effect，也不再用 `SideEffect.write/readOnly` 代替结构化 `PermissionIntent`。agent/task/message/workspace admission 属于控制面动作；实际文件、网络、exec、destructive effect 由具体工具调用决定。`spawn_agent` 默认 read-only，显式 `requestedAccess=read_write` 与 `canCoordinate` 必须独立授权且不能超过 issuer lease；一个外部 spawn ToolCall 只能有一次审批，内部 atomic admission 不得二次进入 PermissionEngine，child 后续数据面调用仍须逐次审批。
 
@@ -707,7 +718,8 @@
 - 唯一 App target 必须是 MopeliumMac，Bundle ID 必须是 com.Vita0818.Mopelium；工程不得重新出现 iOS 或 Mac App Store target、scheme、entitlements。
 - Chat、Code 与 Cowork runtime、EventLog 兼容和测试继续保留；当前 macOS 可见入口只有 Cowork。
 - MopeliumMac 必须使用 Developer ID entitlements、Hardened Runtime 和最小 audio-input entitlement，不启用 App Sandbox。
-- macOS UI 必须保持系统 NavigationSplitView、bounded 16-row thread pages、structured permission/task/error projection、Liquid Glass 语义表面和系统可访问性；不得从 assistant transcript 反推 rail/permission 状态。
+- macOS UI 必须保持系统 NavigationSplitView、bounded 16-row thread pages、structured permission/task/error projection、近中性暖色/淡香槟主题、原生 Liquid Glass 表面和系统可访问性；不得从 assistant transcript 反推 rail/permission 状态。
+- `MopeliumMac` App 图标必须继续由根 `Mopelium.icon` 编译，当前唯一 raster layer 是 `Assets/Mopelium.png`（1254×1254、scale 0.95、零位移）；不得恢复旧 pointer asset、在 Icon Composer 再叠加阴影/translucency，或让 `project.yml` 的 `ASSETCATALOG_COMPILER_APPICON_NAME` 偏离 `Mopelium`。
 - 用户消息是唯一普通对话气泡；assistant/agent/system 正文继承 canvas，正常 tool/permission/task 继续使用专用结构化容器。
 - composer 必须保留 exact model/profile selection、usage、attachment、voice 和唯一 Send/Stop；后台状态不得制造第二发送入口。
 - English 与简体中文本地化是 App presentation concern；identity、路径、用户/模型正文、代码、EventLog/schema/tool payload 和 model-facing prompt 不翻译。

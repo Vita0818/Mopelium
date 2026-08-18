@@ -21,7 +21,8 @@ struct MopeliumCLI {
         let args = Array(CommandLine.arguments.dropFirst())
         let command = args.first ?? ""
         do {
-            try prepareProductIdentityMigration()
+            // The CLI uses only Mopelium-owned state. Predecessor
+            // application-support data is intentionally ignored.
             switch command {
             case "", "chat", "code", "cowork":
                 let config = try CLIConfig.load()
@@ -68,12 +69,4 @@ struct MopeliumCLI {
         }
     }
 
-    private static func prepareProductIdentityMigration() throws {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true)
-        _ = try ApplicationSupportIdentityMigrator.prepare(in: base)
-    }
 }
